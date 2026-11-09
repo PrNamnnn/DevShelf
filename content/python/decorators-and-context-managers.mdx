@@ -1,0 +1,213 @@
+---
+title: "Decorators and Context Managers"
+summary: "Wrapping functions without losing their identity, caching results, and guaranteeing cleanup with the with statement."
+level: intermediate
+section: functions
+order: 40
+tags: [decorators, wraps, lru_cache, context-managers, with, contextlib, functools]
+related: [python/functions-and-scope, python/generators, python/errors-logging-and-typing]
+versions: "functools.cache needs Python 3.9+."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python library: functools"
+    url: "https://docs.python.org/3/library/functools.html"
+  - label: "Python library: contextlib"
+    url: "https://docs.python.org/3/library/contextlib.html"
+  - label: "Python reference: The with statement"
+    url: "https://docs.python.org/3/reference/compound_stmts.html#the-with-statement"
+---
+
+## What it is
+
+A **decorator** is a callable that takes a function and returns a replacement. A **context manager** is an object with `__enter__` and `__exit__` that runs setup and guaranteed cleanup around a `with` block.
+
+## Why it exists
+
+Retries, caching, timing, locks and file handling are the same logic wrapped around many different operations. Decorators reuse the "around a function" part, and context managers reuse the "around a block" part.
+
+## How it works
+
+`@decorator` above `def f` is shorthand for `f = decorator(f)`, and it runs once, at definition time.
+
+<StepFlow
+  title="What happens when a decorated function is called"
+  code={["def log(fn):", "    def wrapper(*a, **k):", "        print('before')", "        result = fn(*a, **k)", "        print('after')", "        return result", "    return wrapper", "", "@log", "def add(x): return x + 1", "", "add(1)"]}
+  nodes={["definition: add = log(add)", "name add → wrapper", "wrapper runs", "original add runs", "result returned"]}
+  steps={[
+    { line: 8, active: [0], note: "The decorator runs once when the module loads, receiving the original function." },
+    { line: 6, active: [1], note: "It returns wrapper. From now on, the name add refers to wrapper." },
+    { line: 2, active: [2], note: "Calling add(1) actually runs wrapper, starting with the code before the original." },
+    { line: 3, active: [3], note: "wrapper calls the original through the closure variable fn.", state: { result: "2" } },
+    { line: 5, active: [4], note: "The code after the call runs and the original's result is passed back.", state: { result: "2" } },
+  ]}
+/>
+
+For `with`, Python calls `__enter__`, runs the block, and always calls `__exit__`, passing exception details if one occurred. If `__exit__` returns true, the exception is suppressed.
+
+## Syntax and key APIs
+
+| Tool | Purpose |
+| --- | --- |
+| `functools.wraps` | Copies the original's name, docstring and more onto the wrapper |
+| `functools.lru_cache(maxsize=128)` | Memoizes results with a size limit |
+| `functools.cache` | Unbounded memoization |
+| `functools.singledispatch` | Choose an implementation by first argument's type |
+| `contextlib.contextmanager` | Build a context manager from a generator |
+| `contextlib.suppress` | Ignore named exceptions |
+
+## Simple example
+
+```python
+from functools import wraps
+
+def uppercase(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs).upper()
+    return wrapper
+
+@uppercase
+def hello():
+    """Say hello."""
+    return "hello"
+
+assert hello() == "HELLO"
+assert hello.__name__ == "hello"
+assert hello.__doc__ == "Say hello."
+```
+
+## Industry examples
+
+### A decorator with arguments
+
+This needs three levels: configuration, decoration and the call.
+
+```python
+from functools import wraps
+
+def retry(times, on=(Exception,)):
+    def decorate(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            for attempt in range(times):
+                try:
+                    return fn(*args, **kwargs)
+                except on:
+                    if attempt == times - 1:
+                        raise
+        return wrapper
+    return decorate
+
+calls = []
+
+@retry(3, on=(ValueError,))
+def flaky():
+    calls.append(1)
+    if len(calls) < 3:
+        raise ValueError
+    return "ok"
+
+assert flaky() == "ok"
+assert len(calls) == 3
+```
+
+### Cache a pure function
+
+Arguments must be hashable, and `cache_info` shows whether the cache is effective.
+
+```python
+from functools import lru_cache
+
+@lru_cache(maxsize=128)
+def fib(n):
+    return n if n < 2 else fib(n - 1) + fib(n - 2)
+
+assert fib(30) == 832040
+assert fib.cache_info().misses == 31
+```
+
+### Manage a resource with a generator
+
+The generator must yield exactly once. Put cleanup in `finally` so that it runs when the block raises.
+
+```python
+from contextlib import contextmanager
+
+log = []
+
+@contextmanager
+def transaction():
+    log.append("begin")
+    try:
+        yield "conn"
+        log.append("commit")
+    except Exception:
+        log.append("rollback")
+        raise
+
+try:
+    with transaction():
+        raise ValueError
+except ValueError:
+    pass
+
+assert log == ["begin", "rollback"]
+```
+
+## Patterns and best practices
+
+- Always apply `functools.wraps`.
+- Accept and forward `*args, **kwargs` so the wrapper fits any signature.
+- Re-raise in a `@contextmanager` unless you mean to suppress the exception.
+- Bound long-lived caches with `maxsize`.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| One-off wrapping | Call a helper directly | Repeats at each call site |
+| Shared cross-cutting logic | Decorator | Hides behaviour from the reader |
+| Stateful setup and cleanup | `__enter__` and `__exit__` class | More code than a generator |
+| Multiple dynamic cleanups | `contextlib.ExitStack` | Less familiar |
+
+## Common mistakes
+
+**Forgetting `wraps`.** Stack traces and tools then show `wrapper` everywhere.
+
+**Caching on instance methods.** `lru_cache` keeps a reference to `self`, which can keep objects alive for the cache's lifetime.
+
+**Swallowing errors in a context manager.** If `@contextmanager` code catches an exception only to log it and doesn't re-raise, the exception is treated as handled.
+
+```python
+from contextlib import contextmanager
+
+@contextmanager
+def swallow():
+    try:
+        yield
+    except ValueError:
+        pass
+
+with swallow():
+    raise ValueError
+
+ran_after = True
+assert ran_after
+```
+
+**Doing slow work at decoration time.** The outer function runs on import.
+
+## Interview questions
+
+<Question q="When does decorator code run?">
+The decorator itself runs at definition time, usually on import. The wrapper's body runs on each call.
+</Question>
+
+<Question q="Why use functools.wraps?">
+It copies metadata such as `__name__` and `__doc__` to the wrapper and sets `__wrapped__`, keeping introspection and debugging accurate.
+</Question>
+
+<Question q="How do you suppress an exception in __exit__?">
+Return a true value from `__exit__`. Returning false or `None` lets the exception continue.
+</Question>

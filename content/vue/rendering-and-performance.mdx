@@ -1,0 +1,141 @@
+---
+title: "The Rendering Mechanism and Performance"
+summary: "How Vue's compiler-informed Virtual DOM skips work, and practical tools for large lists and expensive updates."
+level: advanced
+section: internals
+order: 10
+tags: [virtual-dom, compiler, patch-flags, tree-flattening, v-memo, v-once, performance, shallowRef]
+related: [vue/reactivity-in-depth, react/reconciliation-and-keys]
+versions: "v-memo needs Vue 3.2+. Computed stability needs 3.4+."
+tested: "Not executed. Behaviour is from the Vue docs."
+verified: "2026-11-09"
+docs:
+  - label: "Vue: Rendering mechanism"
+    url: "https://vuejs.org/guide/extras/rendering-mechanism.html"
+  - label: "Vue: Performance"
+    url: "https://vuejs.org/guide/best-practices/performance.html"
+  - label: "Vue API: Built-in directives"
+    url: "https://vuejs.org/api/built-in-directives.html"
+---
+
+## What it is
+
+Vue renders through a Virtual DOM, but its compiler analyzes templates ahead of time, so the runtime compares only what can change.
+
+## Why it exists
+
+A pure Virtual DOM must walk the whole tree on each update because it can't know what's static. Templates are analyzable, so Vue moves that knowledge to build time.
+
+## How it works
+
+Rendering has three stages: **compile** templates to render functions, **mount** by running them inside a reactive effect, and **patch** when a dependency changes.
+
+<StepFlow
+  title="What the compiler removes from an update"
+  code={["<div>", "  <h1>Static title</h1>", "  <p :class=\"cls\">{{ text }}</p>", "  <footer>Static</footer>", "</div>"]}
+  codeLabel="Template"
+  nodes={["compile", "cache static vnodes", "add patch flags", "flatten block", "patch dynamic nodes only"]}
+  steps={[
+    { active: [0], note: "The compiler reads the template and identifies static and dynamic parts." },
+    { line: 1, active: [1], note: "Static content is cached and reused. Consecutive static elements can be condensed into one static vnode." },
+    { line: 2, active: [2], note: "The dynamic p gets patch flags that encode exactly what can change, here its class and text." },
+    { active: [3], note: "The root block tracks all dynamic descendants in one flat array, however deeply they're nested." },
+    { line: 2, active: [4], note: "On update, Vue visits only that flat list and uses the flags to check only class and text.", state: { "nodes compared": "1" } },
+  ]}
+/>
+
+`v-if` and `v-for` create new block nodes, because they can change structure.
+
+## Syntax and key APIs
+
+| Tool | Effect |
+| --- | --- |
+| `v-once` | Render once, then treat as static |
+| `v-memo="[a, b]"` | Skip a subtree unless listed values change |
+| `shallowRef` | Avoid deep reactive proxies |
+| `defineAsyncComponent` | Split a component's code |
+| `<KeepAlive>` | Cache component instances |
+
+## Simple example
+
+```vue
+<template>
+  <header v-once>
+    <h1>{{ appName }}</h1>
+  </header>
+</template>
+```
+
+## Industry examples
+
+### Selection in a very large list
+
+Only the rows whose selected state changes need to update. `v-memo` must be on the same element as `v-for`, and the docs describe this for lists over 1000 items.
+
+```vue
+<template>
+  <div v-for="item in list" :key="item.id" v-memo="[item.id === selected]">
+    {{ item.label }} {{ item.id === selected ? "selected" : "" }}
+  </div>
+</template>
+```
+
+### Lazy route and component loading
+
+```javascript
+const Chart = defineAsyncComponent(() => import("./Chart.vue"));
+```
+
+### Keep props stable
+
+A child updates when any of its props changes, so passing a value that changes for every row updates every row.
+
+```vue
+<!-- Every row updates when activeId changes -->
+<Row v-for="r in rows" :key="r.id" :id="r.id" :active-id="activeId" />
+
+<!-- Only two rows change -->
+<Row v-for="r in rows" :key="r.id" :id="r.id" :active="r.id === activeId" />
+```
+
+## Patterns and best practices
+
+- Prefer templates, which get full compiler optimization.
+- Virtualize long lists rather than rendering every row.
+- Use `shallowRef` for big immutable data.
+- Lazy-load routes.
+- A build-step template compiler saves about 14 kB min+gzip of runtime.
+
+## Alternatives and trade-offs
+
+| Technique | Use when | Trade-off |
+| --- | --- | --- |
+| `v-show` | Frequent toggles | Initial render cost |
+| `v-if` | Rare toggles | Mount cost on each change |
+| `v-memo` | Proven hot lists | Stale output if a value is omitted |
+| Virtual list | Very long lists | Library and measurement constraints |
+| Render function | Highly dynamic structure | Fewer optimizations |
+
+## Common mistakes
+
+**Using `v-memo` inside `v-for`.** It doesn't work there. Put it on the same element.
+
+**Omitting a dependency from `v-memo`.** The subtree won't update when it should.
+
+**Deep reactive wrappers on huge API responses.** Deep proxies add a cost on each access.
+
+**Blaming the framework first.** Profile with Vue DevTools and the browser's performance panel.
+
+## Interview questions
+
+<Question q="What are patch flags?">
+Numbers the compiler adds to vnodes describing what can change, so the runtime checks only those aspects.
+</Question>
+
+<Question q="What is tree flattening?">
+A block keeps a flat list of its dynamic descendants, so updates skip static structure.
+</Question>
+
+<Question q="When would you use v-memo?">
+Rarely: mainly in very large `v-for` lists where a measurable update cost can be tied to a few values.
+</Question>

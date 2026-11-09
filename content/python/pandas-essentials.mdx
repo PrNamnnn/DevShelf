@@ -1,0 +1,101 @@
+---
+title: "pandas Essentials for Analysis"
+summary: "DataFrames, selection, groupby, merges, reshaping and time series, the working vocabulary of Python data analysis."
+level: intermediate
+section: analysis
+order: 1
+tags: ["pandas","DataFrame","groupby","merge","EDA"]
+requires: ["python/collections-and-comprehensions"]
+related: ["statistics/exploratory-data-analysis","statistics/missing-data","postgresql/aggregates-windows-and-ctes"]
+versions: "Python 3.14, pandas 3.1"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "pandas: User guide"
+    url: "https://pandas.pydata.org/docs/user_guide/index.html"
+  - label: "pandas: Group by"
+    url: "https://pandas.pydata.org/docs/user_guide/groupby.html"
+  - label: "pandas: Merging"
+    url: "https://pandas.pydata.org/docs/user_guide/merging.html"
+  - label: "pandas: Copy on Write"
+    url: "https://pandas.pydata.org/docs/user_guide/copy_on_write.html"
+---
+
+## What it is
+
+pandas is Python's primary library for tabular data. A **Series** is a labeled column and a **DataFrame** is a table of Series.
+
+## Why it exists
+
+It offers fast column-based operations, alignment on labels, missing-data handling and tools for reshaping, which would take far longer to write with plain Python loops.
+
+## How it works
+
+Operations run column-wise on NumPy or Arrow-backed arrays. `groupby` follows split-apply-combine. `merge` performs SQL-style joins. `loc` selects by label and `iloc` by position. Since pandas 3.0, Copy-on-Write is the only mode, so a derived object never silently alters its parent, and chained assignment doesn't update the original.
+
+## Syntax and key APIs
+
+| Task | Code |
+| --- | --- |
+| Filter | `df[df["x"] > 0]` or `df.query("x > 0")` |
+| New column | `df.assign(y=lambda d: d.x * 2)` |
+| Group | `df.groupby("g").agg(total=("x", "sum"))` |
+| Join | `a.merge(b, on="id", how="left", validate="m:1")` |
+| Reshape | `melt`, `pivot_table` |
+| Time | `resample("MS")`, `rolling(7)` |
+
+## Simple example
+
+```python
+import pandas as pd
+
+orders = pd.DataFrame({
+    "order_id": [1, 2, 3, 4],
+    "customer": ["a", "a", "b", "c"],
+    "amount": [100.0, 50.0, 80.0, 20.0],
+    "day": pd.to_datetime(["2026-01-01", "2026-01-20", "2026-02-02", "2026-02-10"]),
+})
+customers = pd.DataFrame({"customer": ["a", "b"], "plan": ["pro", "basic"]})
+
+joined = orders.merge(customers, on="customer", how="left", validate="m:1")
+assert joined["plan"].isna().sum() == 1
+
+summary = joined.groupby("plan", dropna=False).agg(
+    revenue=("amount", "sum"), orders=("order_id", "nunique")
+)
+assert summary.loc["pro", "revenue"] == 150
+
+monthly = orders.set_index("day")["amount"].resample("MS").sum()
+assert monthly.tolist() == [150.0, 100.0]
+
+share = orders.assign(pct=lambda d: d["amount"] / d.groupby("customer")["amount"].transform("sum"))
+assert round(share.loc[0, "pct"], 3) == 0.667
+```
+
+## Industry examples
+
+Analysts clean exports and run exploratory analysis in notebooks, and data scientists prepare features. Larger workloads move to Spark or a warehouse.
+
+## Patterns and best practices
+
+- Use `validate=` on merges to catch duplicate keys.
+- Chain with `assign` and named aggregation.
+- Vectorize instead of using `iterrows`.
+- Set dtypes on load.
+
+## Alternatives and trade-offs
+
+Polars is a fast alternative with a lazy engine. DuckDB runs SQL on files in-process. Spark handles data larger than a single machine.
+
+## Common mistakes
+
+- Merges that unexpectedly multiply rows.
+- Chained assignment, such as `df[df.x > 0]["y"] = 1`.
+- Assuming `groupby` keeps missing keys by default.
+- Using `apply` row by row on large data.
+
+## Interview questions
+
+<Question q="loc vs iloc?">loc selects by labels and iloc by integer position.</Question>
+
+<Question q="What does validate do in merge?">It checks the expected key relationship and raises an error if violated.</Question>

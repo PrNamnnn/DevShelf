@@ -1,0 +1,91 @@
+---
+title: "Experiment Design, Hypotheses and Metrics"
+summary: "Write a falsifiable hypothesis, select primary, secondary and guardrail metrics, and define the decision rule before launch."
+level: intermediate
+section: experimentation
+order: 2
+tags: ["experiment design","primary metric","guardrail metric","OEC"]
+requires: ["statistics/ab-testing-foundations"]
+related: ["statistics/kpis-and-north-star","statistics/sample-size-and-duration","statistics/interpreting-experiments"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "NIST: Experimental design"
+    url: "https://www.itl.nist.gov/div898/handbook/pri/section1/pri11.htm"
+---
+
+## What it is
+
+An experiment design is a written commitment to what will change, for whom, how it'll be measured, and what result triggers each action.
+
+## Why it exists
+
+Without a pre-specified plan, flexibility in the analysis lets almost any test look like a success. A plan also prompts discussion of tradeoffs before the numbers get political.
+
+## How it works
+
+Write the hypothesis in this form: *Because [evidence], changing [X] for [population] will change [metric] by at least [amount].*
+
+| Metric type | Role | Example |
+| --- | --- | --- |
+| Primary | Decides the test, ideally one | Checkout conversion |
+| Secondary | Explains why it moved | Add-to-cart rate |
+| Guardrail | Must not be harmed | Refund rate, page latency, support contacts |
+| Validity | Tests the test itself | Sample ratio, event loss |
+
+Good primary metrics are sensitive within the test window, attributable to the change and connected to long-term value. A composite called an overall evaluation criterion can combine several goals with explicit weights.
+
+## Worked example
+
+| Field | Value |
+| --- | --- |
+| Hypothesis | Showing delivery dates earlier reduces uncertainty, lifting conversion by 3% or more |
+| Population | Logged-in mobile users reaching a product page |
+| Randomization | User, hashed by experiment |
+| Primary | Purchase within 7 days of exposure |
+| Guardrails | Delivery complaints, page load P95 |
+| Decision | Ship if primary is significant and positive, with no guardrail harm beyond its margin |
+
+## Python
+
+```python
+PLAN = {
+    "primary": {"name": "purchase_7d", "mde_relative": 0.03},
+    "guardrails": {"complaint_rate": 0.002, "p95_latency_ms": 50},
+}
+
+def decide(primary_lift_low: float, guardrail_increase: dict[str, float]) -> str:
+    breached = [k for k, v in guardrail_increase.items() if v > PLAN["guardrails"][k]]
+    if breached:
+        return "hold: " + ", ".join(breached)
+    return "ship" if primary_lift_low > 0 else "do not ship"
+
+assert decide(0.01, {"complaint_rate": 0.001, "p95_latency_ms": 10}) == "ship"
+assert decide(0.01, {"complaint_rate": 0.004, "p95_latency_ms": 10}).startswith("hold")
+```
+
+## In industry
+
+Experiment review forums check designs before launch. Mature teams store plans in the experimentation system so they can't be quietly edited.
+
+## Assumptions and limitations
+
+Short-term metrics may not reflect long-term outcomes, particularly when a change induces a temporary burst of clicks. Sensitive metrics can be gamed.
+
+## Common mistakes
+
+- Having five primary metrics.
+- Choosing guardrails after the result.
+- Using clicks on the changed element as the goal.
+- Using a metric that takes longer to mature than the test will run.
+
+## Alternatives
+
+Surrogate metrics predict long-term outcomes, and long-running holdout groups measure cumulative impact. Qualitative research is the right tool before you know what to test.
+
+## Interview questions
+
+<Question q="What makes a good primary metric?">It's sensitive to the change within the test window, directly attributable, hard to manipulate and predictive of long-term value.</Question>
+
+<Question q="What are guardrail metrics?">Measures that shouldn't get worse, used to detect harm that a success metric would miss.</Question>

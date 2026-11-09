@@ -1,0 +1,161 @@
+---
+title: "Request Bodies, Static Files and Uploads"
+summary: "Parsing JSON and forms, serving static assets, handling file uploads safely, and streaming large responses."
+level: fundamental
+section: http
+order: 20
+tags: [body-parsing, express-json, urlencoded, static, uploads, multipart, streaming]
+requires: [express/routing-requests-and-responses]
+related: [express/validation-and-security, express/production-operations]
+versions: "Express 5."
+tested: "Parsers and static files run with Express 5.3.0. The multipart example wasn't run."
+verified: "2026-11-09"
+docs:
+  - label: "Express API: express.json and static"
+    url: "https://expressjs.com/en/5x/api/express/"
+  - label: "Express: Serving static files"
+    url: "https://expressjs.com/en/starter/static-files.html"
+  - label: "Express: multer middleware"
+    url: "https://expressjs.com/en/resources/middleware/multer.html"
+  - label: "OWASP: File upload cheat sheet"
+    url: "https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html"
+---
+
+## What it is
+
+Body parsers turn the incoming byte stream into `req.body`. `express.static` serves files from a folder. Multipart middleware handles uploads.
+
+## Why it exists
+
+HTTP bodies arrive as bytes. Each format needs parsing with limits, because an unbounded body is a denial-of-service risk.
+
+## How it works
+
+A parser only runs when the `Content-Type` matches. If it doesn't, `req.body` stays `undefined` in Express 5.
+
+| Format | Middleware | Result |
+| --- | --- | --- |
+| JSON | `express.json()` | Object |
+| HTML form | `express.urlencoded()` | Object |
+| Text | `express.text()` | String |
+| Raw bytes | `express.raw()` | Buffer |
+| File upload | `multer` or similar | Files |
+
+## Syntax and key APIs
+
+```javascript
+app.use(express.json({ limit: "100kb" }));
+app.use(express.urlencoded({ extended: false }));
+app.use("/assets", express.static("public", { maxAge: "1d" }));
+```
+
+## Simple example
+
+```js
+import assert from "node:assert";
+import express from "express";
+import request from "supertest";
+
+const app = express();
+app.use(express.urlencoded());
+app.post("/form", (req, res) => res.json(req.body));
+
+const response = await request(app).post("/form").type("form").send({ name: "Ada" });
+assert.deepEqual(response.body, { name: "Ada" });
+
+const none = await request(app).post("/form").set("Content-Type", "text/plain").send("x");
+assert.equal(none.status, 200);
+```
+
+## Industry examples
+
+### Verify a webhook with the raw body
+
+Signatures cover the exact bytes, so parse `raw` on that route only.
+
+```js
+import assert from "node:assert";
+import { createHmac } from "node:crypto";
+import express from "express";
+import request from "supertest";
+
+const secret = "s3cret";
+const app = express();
+
+app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
+  const expected = createHmac("sha256", secret).update(req.body).digest("hex");
+  res.sendStatus(req.get("x-signature") === expected ? 204 : 401);
+});
+
+const body = '{"event":"paid"}';
+const signature = createHmac("sha256", secret).update(body).digest("hex");
+
+const ok = await request(app).post("/webhook").set("Content-Type", "application/json").set("x-signature", signature).send(body);
+assert.equal(ok.status, 204);
+```
+
+### Accept uploads with limits
+
+```javascript
+import multer from "multer";
+
+const upload = multer({
+  dest: "/var/uploads",
+  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, done) => done(null, file.mimetype === "image/png"),
+});
+
+app.post("/avatar", upload.single("avatar"), (req, res) => res.sendStatus(201));
+```
+
+### Fall through to a 404
+
+`express.static` calls `next()` when a file is missing.
+
+```js
+import assert from "node:assert";
+import express from "express";
+import request from "supertest";
+
+const app = express();
+app.use("/assets", express.static("no-such-folder"));
+app.use("/assets", (req, res) => res.status(404).send("asset missing"));
+
+const response = await request(app).get("/assets/a.png");
+assert.equal(response.text, "asset missing");
+```
+
+## Patterns and best practices
+
+- Set size limits per route type.
+- Treat client-supplied filenames and MIME types as untrusted.
+- Store uploads outside the web root, under generated names.
+- Serve static files from a CDN or reverse proxy at scale.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Small uploads | Through the app | Ties up the server |
+| Large uploads | Presigned object storage URLs | More moving parts |
+| Static assets | CDN | Separate deployment |
+
+## Common mistakes
+
+**Mounting a JSON parser before a raw webhook route.** The bytes are consumed.
+
+**Trusting the uploaded file's extension.** Check the content.
+
+**No size limit.** A single request can exhaust memory.
+
+**Serving a user-uploaded HTML file from your origin.** That enables stored XSS.
+
+## Interview questions
+
+<Question q="Why is req.body undefined?">
+No parser matched, usually because the parser is missing or the `Content-Type` doesn't match.
+</Question>
+
+<Question q="How would you handle large file uploads?">
+Stream to storage directly, typically with presigned URLs, instead of buffering through the app.
+</Question>

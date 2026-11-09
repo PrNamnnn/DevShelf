@@ -1,0 +1,137 @@
+---
+title: "Transitions and Animation"
+summary: "Smooth state changes, custom keyframes, entry animations with starting styles, and motion that performs and respects users."
+level: intermediate
+section: interaction
+order: 20
+tags: [transition, animation, keyframes, motion-reduce, starting-style, transform]
+requires: [tailwind/responsive-design-and-states]
+related: [tailwind/theme-and-dark-mode, vue/transitions-and-built-ins]
+versions: "Tailwind CSS v4.3. The starting variant relies on @starting-style browser support."
+tested: "Generated output compiled with Tailwind 4.3.5."
+verified: "2026-11-09"
+docs:
+  - label: "Tailwind: transition-property"
+    url: "https://tailwindcss.com/docs/transition-property"
+  - label: "Tailwind: animation"
+    url: "https://tailwindcss.com/docs/animation"
+  - label: "Tailwind: Hover, focus and other states"
+    url: "https://tailwindcss.com/docs/hover-focus-and-other-states"
+---
+
+## What it is
+
+Transition utilities animate changes between states. Animation utilities run keyframes.
+
+## Why it exists
+
+Motion explains change, such as where a panel came from. Bad motion makes pages janky or uncomfortable.
+
+## How it works
+
+Browsers can animate `transform` and `opacity` on the compositor, with no layout work. Animating `width` or `top` forces layout on every frame.
+
+<StepFlow
+  title="Why transform is cheaper"
+  nodes={["style", "layout", "paint", "composite"]}
+  steps={[
+    { active: [0, 1, 2, 3], note: "Animating width runs every stage on each frame, for this element and its neighbours.", state: { cost: "high" } },
+    { active: [0, 2, 3], note: "Animating color skips layout but still repaints.", state: { cost: "medium" } },
+    { active: [3], note: "Animating transform or opacity usually needs only compositing.", state: { cost: "low" } },
+  ]}
+/>
+
+## Syntax and key APIs
+
+| Class | Effect |
+| --- | --- |
+| `transition`, `transition-colors` | Which properties animate |
+| `duration-200` | Length |
+| `ease-out` | Curve |
+| `animate-spin`, `animate-pulse` | Built-in keyframes |
+| `motion-safe:*`, `motion-reduce:*` | Respect user preference |
+| `starting:opacity-0` | Style for the first frame |
+
+## Simple example
+
+```html
+<button class="transition-transform duration-150 hover:-translate-y-0.5 active:scale-95">
+  Save
+</button>
+```
+
+## Industry examples
+
+### Add a custom animation
+
+```css
+@import "tailwindcss";
+
+@theme {
+  --animate-rise: rise 240ms ease-out both;
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+```
+
+### Animate on first render
+
+```html
+<div class="transition duration-300 starting:translate-y-2 starting:opacity-0">
+  Appears smoothly
+</div>
+```
+
+### Animate height to auto
+
+Animating `grid-template-rows` gives a smooth expand, which is how DevShelf's learning tree opens.
+
+```html
+<div class="grid grid-rows-[0fr] transition-[grid-template-rows] duration-300 data-open:grid-rows-[1fr]">
+  <div class="overflow-hidden">Content</div>
+</div>
+```
+
+### Respect reduced motion
+
+```html
+<svg class="motion-safe:animate-spin"></svg>
+```
+
+## Patterns and best practices
+
+- Keep interface transitions between 120 and 300 milliseconds.
+- Animate `transform` and `opacity` whenever possible.
+- Avoid continuous animation for non-essential elements.
+- Provide a reduced-motion path.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| State changes | CSS transitions | Two states only |
+| Sequences | Keyframes | Fixed timing |
+| Physics and gestures | Animation library | JavaScript cost |
+
+## Common mistakes
+
+**`transition-all` everywhere.** It can animate unintended properties.
+
+**Animating layout properties.** It causes jank.
+
+**Ignoring `prefers-reduced-motion`.** Motion can cause discomfort.
+
+**Permanent `will-change`.** Keep it for elements about to animate.
+
+## Interview questions
+
+<Question q="Why prefer transform over top?">
+Transforms can be handled on the compositor without recalculating layout on each frame.
+</Question>
+
+<Question q="How do you animate to height auto?">
+A common technique animates `grid-template-rows` from `0fr` to `1fr`.
+</Question>

@@ -1,0 +1,161 @@
+---
+title: "How Joins and Indexes Execute"
+summary: "Walking a B-tree, and what nested loop, hash and merge joins actually do with your rows."
+level: advanced
+section: performance
+order: 15
+tags: [btree, index-lookup, nested-loop, hash-join, merge-join, planner, internals]
+requires: [postgresql/queries-and-joins]
+related: [postgresql/indexing-strategies, postgresql/explain-analyze]
+versions: "All supported PostgreSQL versions."
+tested: "Plan shapes confirmed on PostgreSQL 18.6 through PGlite."
+verified: "2026-11-09"
+docs:
+  - label: "PostgreSQL: B-tree indexes"
+    url: "https://www.postgresql.org/docs/current/btree.html"
+  - label: "PostgreSQL: Planner/optimizer"
+    url: "https://www.postgresql.org/docs/current/planner-optimizer.html"
+  - label: "PostgreSQL: Using EXPLAIN"
+    url: "https://www.postgresql.org/docs/current/using-explain.html"
+---
+
+## What it is
+
+A **B-tree** lets the database find a key in a few page reads. The planner picks one of three **join algorithms** by comparing estimated costs.
+
+## Why it exists
+
+No join strategy is best for every input. Understanding them explains why a plan changes as data grows.
+
+## How it works
+
+<TreeViz
+  title="Finding key 42 in a B-tree"
+  nodes={[{ id: "root", label: "root: 30 | 60" }, { id: "l", label: "10 | 20", parent: "root" }, { id: "m", label: "40 | 50", parent: "root" }, { id: "r", label: "70 | 80", parent: "root" }, { id: "a", label: "leaf 40, 41", parent: "m" }, { id: "b", label: "leaf 42, 45", parent: "m" }, { id: "c", label: "leaf 50, 55", parent: "m" }]}
+  steps={[
+    { active: ["root"], note: "Start at the root page. 42 is between 30 and 60.", state: { pages: "1" } },
+    { active: ["m"], visited: ["root"], faded: ["l", "r"], note: "Follow the middle pointer. The other subtrees are never read.", state: { pages: "2" } },
+    { active: ["b"], visited: ["root", "m"], faded: ["l", "r", "a", "c"], note: "42 falls in the first range, so go to its leaf.", state: { pages: "3" } },
+    { active: ["b"], visited: ["root", "m"], faded: ["l", "r", "a", "c"], note: "The leaf holds the key and a pointer to the table row. Leaves are linked, so ranges simply walk sideways.", state: { result: "row location" } },
+  ]}
+/>
+
+<TableViz
+  title="A hash join, step by step"
+  code={["-- build on the smaller input", "-- probe with each row of the other"]}
+  tables={[{ name: "customers", columns: ["id", "name"], rows: [[1, "Ada"], [2, "Bo"]] }, { name: "orders", columns: ["id", "cust"], rows: [[10, 1], [11, 3], [12, 2]] }]}
+  outputColumns={["order", "name"]}
+  steps={[
+    { line: 0, highlight: { customers: [0, 1] }, note: "Build: every customer goes into an in-memory hash table keyed by id.", output: [] },
+    { line: 1, highlight: { orders: [0] }, note: "Probe: order 10 looks up customer 1 and finds a match.", output: [[10, "Ada"]] },
+    { line: 1, highlight: { orders: [1] }, note: "Order 11 looks up customer 3 and finds nothing, so an inner join drops it.", output: [[10, "Ada"]] },
+    { line: 1, highlight: { orders: [2] }, note: "Order 12 matches customer 2. Each probe costs about the same, however large the table.", output: [[10, "Ada"], [12, "Bo"]] },
+  ]}
+/>
+
+| Algorithm | Works by | Best when |
+| --- | --- | --- |
+| Nested Loop | For each outer row, search inner | Few outer rows, indexed inner |
+| Hash Join | Build a hash table, then probe | Large, unsorted, equality joins |
+| Merge Join | Walk two sorted inputs | Inputs already sorted |
+
+## Syntax and key APIs
+
+```sql
+CREATE TABLE a (id int PRIMARY KEY, v int);
+CREATE TABLE b (id int PRIMARY KEY, a_id int);
+INSERT INTO a SELECT g, g FROM generate_series(1, 20000) g;
+INSERT INTO b SELECT g, 1 + g % 20000 FROM generate_series(1, 20000) g;
+CREATE INDEX b_a_id ON b (a_id);
+ANALYZE a; ANALYZE b;
+```
+
+```plsql
+SET enable_hashjoin = off;   -- for experiments only
+```
+
+## Simple example
+
+Fetching one row, the plan chooses a nested loop.
+
+```sql
+DO $$
+DECLARE line text; plan text := '';
+BEGIN
+  FOR line IN EXPLAIN SELECT * FROM a JOIN b ON b.a_id = a.id WHERE a.id = 5 LOOP
+    plan := plan || line;
+  END LOOP;
+  ASSERT plan LIKE '%Nested Loop%', plan;
+END $$;
+```
+
+## Industry examples
+
+### Scale changes the plan
+
+Joining everything, the planner switches strategy.
+
+```sql
+DO $$
+DECLARE line text; plan text := '';
+BEGIN
+  FOR line IN EXPLAIN SELECT count(*) FROM a JOIN b ON b.a_id = a.id LOOP
+    plan := plan || line;
+  END LOOP;
+  ASSERT plan LIKE '%Hash Join%' OR plan LIKE '%Merge Join%', plan;
+END $$;
+```
+
+### Sorted inputs enable merge
+
+```sql
+SET enable_hashjoin = off;
+SET enable_nestloop = off;
+
+DO $$
+DECLARE line text; plan text := '';
+BEGIN
+  FOR line IN EXPLAIN SELECT * FROM a JOIN b ON b.a_id = a.id LOOP
+    plan := plan || line;
+  END LOOP;
+  ASSERT plan LIKE '%Merge Join%', plan;
+END $$;
+
+RESET enable_hashjoin;
+RESET enable_nestloop;
+```
+
+## Patterns and best practices
+
+- Index foreign keys used in nested loops.
+- Keep statistics fresh, because join choice depends on row estimates.
+- Raise `work_mem` carefully for large sorts and hashes.
+- Use `enable_*` settings for diagnosis, not as a production fix.
+
+## Alternatives and trade-offs
+
+| Situation | Likely choice | Watch for |
+| --- | --- | --- |
+| Few rows | Nested Loop | Bad if outer rows are underestimated |
+| Reports | Hash Join | Memory, batches to disk |
+| Both sorted | Merge Join | Sort cost if not already sorted |
+
+## Common mistakes
+
+**A nested loop with huge `loops`.** The outer estimate is usually wrong.
+
+**Assuming indexes always help joins.** A hash join can ignore them.
+
+**Disabling a planner method in production.** It hides the real problem.
+
+**Too little `work_mem`.** Hashes and sorts spill to disk.
+
+## Interview questions
+
+<Question q="Why are B-trees shallow?">
+Each page holds many keys, so fan-out is high and even huge tables need only a few levels.
+</Question>
+
+<Question q="When is a hash join a poor choice?">
+For small outer inputs with an indexed inner table, or when memory is tight and it spills to disk.
+</Question>

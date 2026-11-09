@@ -1,0 +1,203 @@
+---
+title: "Data Fetching and Cache Components"
+summary: "How data is dynamic by default in Next.js 16, how use cache and cacheLife opt in, and how to invalidate correctly."
+level: advanced
+section: data
+order: 10
+tags: [caching, use-cache, cacheLife, cacheTag, revalidateTag, updateTag, fetch, partial-prerendering]
+related: [nextjs/server-and-client-components, nextjs/server-actions, nextjs/request-lifecycle-and-streaming]
+versions: "use cache is stable in Next.js 16 and needs cacheComponents. revalidateTag requires a second argument in 16."
+tested: "Built on Next.js 16.4.5 with cacheComponents enabled. Runtime cache timing wasn't measured."
+verified: "2026-11-09"
+docs:
+  - label: "Next.js: Caching"
+    url: "https://nextjs.org/docs/app/getting-started/caching"
+  - label: "Next.js: Revalidating"
+    url: "https://nextjs.org/docs/app/getting-started/revalidating"
+  - label: "Next.js: use cache"
+    url: "https://nextjs.org/docs/app/api-reference/directives/use-cache"
+  - label: "Next.js: cacheLife"
+    url: "https://nextjs.org/docs/app/api-reference/functions/cacheLife"
+  - label: "Next.js: revalidateTag"
+    url: "https://nextjs.org/docs/app/api-reference/functions/revalidateTag"
+  - label: "Next.js: updateTag"
+    url: "https://nextjs.org/docs/app/api-reference/functions/updateTag"
+---
+
+## What it is
+
+Server Components can `await` data directly. With **Cache Components**, data is dynamic by default and you opt specific functions or components into caching with the `use cache` directive.
+
+## Why it exists
+
+Caching makes pages fast, but implicit caching caused stale-data surprises. Explicit caching makes it clear what's cached, for how long and how it's invalidated.
+
+## How it works
+
+At build time, the route is prerendered into a **static shell**. Cached results can be part of that shell. Runtime data streams in through `<Suspense>`.
+
+A `use cache` entry's key comes from the build ID, function ID, serializable arguments and captured closure variables.
+
+| Profile | Stale | Revalidate | Expire |
+| --- | --- | --- | --- |
+| `default` | 5m | 15m | never |
+| `seconds` | 30s | 1s | 1m |
+| `minutes` | 5m | 1m | 1h |
+| `hours` | 5m | 1h | 1d |
+| `days` | 5m | 1d | 1w |
+| `weeks` | 5m | 1w | 30d |
+| `max` | 5m | 30d | 1y |
+
+## Syntax and key APIs
+
+```ts
+// next.config.ts
+import type { NextConfig } from "next";
+
+const config: NextConfig = {
+  cacheComponents: true,
+  partialPrefetching: true,
+};
+
+export default config;
+```
+
+```tsx
+import { cacheLife, cacheTag } from "next/cache";
+
+async function getProducts() {
+  "use cache";
+  cacheLife("hours");
+  cacheTag("products");
+  return [{ id: 1, name: "Book" }];
+}
+```
+
+| Function | Where | Effect |
+| --- | --- | --- |
+| `updateTag(tag)` | Server Actions only | Expires now, next read is fresh |
+| `revalidateTag(tag, "max")` | Server Actions, Route Handlers | Stale-while-revalidate |
+| `revalidatePath(path)` | Server Actions, Route Handlers | Invalidates a route |
+| `refresh()` | Server Actions | Refreshes the current route's client view |
+
+<Callout type="deprecated">
+The single-argument `revalidateTag(tag)` is deprecated in Next.js 16. Pass a profile such as `"max"`. `experimental.dynamicIO` and `experimental.ppr` are removed in favour of `cacheComponents`.
+</Callout>
+
+## Simple example
+
+```tsx
+import { Suspense } from "react";
+
+async function Products() {
+  "use cache";
+  const products = await fetch("https://example.com/products").then((r) => r.json());
+  return <pre>{JSON.stringify(products)}</pre>;
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<p>Loading…</p>}>
+      <Products />
+    </Suspense>
+  );
+}
+```
+
+## Industry examples
+
+### Fetch in parallel
+
+Starting promises together avoids a sequential waterfall.
+
+```tsx
+export default async function Dashboard() {
+  const [user, orders] = await Promise.all([getUser(), getOrders()]);
+  return <p>{user.name}: {orders.length}</p>;
+}
+```
+
+### Separate personal data from cached data
+
+Cached scopes can't call `cookies()` or `headers()`. Read them outside and pass a value as an argument, so it becomes part of the key.
+
+```tsx
+import { cookies } from "next/headers";
+import { Suspense } from "react";
+
+async function getPrices(currency: string) {
+  "use cache";
+  return { currency, total: 10 };
+}
+
+async function Prices() {
+  const currency = (await cookies()).get("currency")?.value ?? "USD";
+  const prices = await getPrices(currency);
+  return <p>{prices.total} {prices.currency}</p>;
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<p>Loading…</p>}>
+      <Prices />
+    </Suspense>
+  );
+}
+```
+
+### Read your own write
+
+After a form save, the user should see the change immediately. `updateTag` does that.
+
+```tsx
+"use server";
+
+import { updateTag } from "next/cache";
+
+export async function renameProduct(id: string, name: string) {
+  await saveName(id, name);
+  updateTag("products");
+}
+```
+
+## Patterns and best practices
+
+- Pair each `use cache` with an explicit `cacheLife`.
+- Prefer tags over paths for invalidation.
+- Wrap runtime data in `Suspense`, or a layout accessing it fails at build.
+- Set `partialPrefetching` explicitly alongside `cacheComponents`, because leaving it unset logs a warning.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Always fresh | No cache | Slower and blocks without Suspense |
+| Shared and slow-changing | `use cache` | Invalidation design |
+| Immediate after a user write | `updateTag` | Next request waits |
+| Background freshness | `revalidateTag(tag, "max")` | Briefly stale |
+
+Without `cacheComponents`, the previous model applies, using `fetch` options such as `next: { revalidate }` and route segment config.
+
+## Common mistakes
+
+**Assuming the in-memory cache persists on serverless.** The default runtime cache is an in-memory LRU, which doesn't persist there.
+
+**Passing non-serializable arguments.** Class instances and symbols aren't supported in cached functions.
+
+**Calling `updateTag` from a Route Handler.** It throws, as it's for Server Actions only.
+
+**Using `Date.now()` in a prerender without a boundary.** Use `await connection()` with Suspense, or cache it.
+
+## Interview questions
+
+<Question q="Is fetch cached by default in Next.js 16?">
+No. Requests aren't cached unless you opt in. Identical fetches during one render are still memoized.
+</Question>
+
+<Question q="updateTag or revalidateTag?">
+`updateTag` is for Server Actions where users must see their own write right away. `revalidateTag` with a profile serves stale data while refreshing in the background.
+</Question>
+
+<Question q="What is a static shell?">
+Prerendered HTML and payload for the parts of a route that don't depend on request-time data. It's served immediately while dynamic parts stream.
+</Question>

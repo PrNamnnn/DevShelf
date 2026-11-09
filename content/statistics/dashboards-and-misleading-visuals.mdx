@@ -1,0 +1,93 @@
+---
+title: "Dashboards and Misleading Visualizations"
+summary: "Build decision-oriented dashboards, and recognize truncated axes, cherry-picked windows and other distortions."
+level: intermediate
+section: communication
+order: 3
+tags: ["dashboard design","misleading charts","data integrity"]
+requires: ["statistics/choosing-the-right-chart"]
+related: ["powerbi/visuals-and-report-design","excel/dashboards-and-business-analysis","statistics/kpis-and-north-star"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "Microsoft: Dashboard design tips"
+    url: "https://learn.microsoft.com/en-us/power-bi/create-reports/service-dashboards-design-tips"
+  - label: "Excel: Create a PivotChart"
+    url: "https://support.microsoft.com/en-us/office/create-a-pivotchart-c1b1e057-6990-4c38-b52b-8255538e7b1c"
+---
+
+## What it is
+
+A **dashboard** is a monitoring tool for a recurring decision. A **misleading visualization** gives an impression that the underlying data doesn't support.
+
+## Why it exists
+
+Dashboards shape attention. A cluttered view gets ignored, and a distorted view drives wrong decisions, deliberately or not.
+
+## How it works
+
+Structure from top to bottom: headline KPIs with comparison, then trends, then breakdowns. Use one page per audience, consistent filters, and show freshness.
+
+Common distortions:
+
+| Distortion | Effect |
+| --- | --- |
+| Truncated bar axis | Exaggerates small differences |
+| Cherry-picked period | Hides the longer trend |
+| Dual y-axes | Manufactures correlation |
+| Area or bubble by radius | Squares the visual difference |
+| Cumulative charts | Can only rise |
+| Unnormalized totals | Reflects size, not rate |
+
+## Intuition and formula
+
+For a truncated baseline b, bar values a and c appear to differ by:
+
+<Formula>visual ratio = (c − b) / (a − b)</Formula>
+
+## Worked example
+
+Two values of 96 and 100 on an axis starting at 95 appear to differ by 5×, even though the real difference is about 4%. A corrected view uses a zero baseline, or switches to a dot plot of change.
+
+## Python
+
+```python
+def visual_ratio(a: float, c: float, baseline: float) -> float:
+    return (c - baseline) / (a - baseline)
+
+assert visual_ratio(96, 100, 95) == 5
+assert round(visual_ratio(96, 100, 0), 2) == 1.04
+
+radius_ratio = 2
+assert radius_ratio**2 == 4
+```
+
+## Excel or Power BI
+
+In Excel, set the axis minimum explicitly. In Power BI, set the axis start, use bookmarks sparingly, and reuse a theme file for consistent styling.
+
+## In industry
+
+Executive dashboards focus on a few metrics, with operational dashboards updating faster and in more detail.
+
+## Assumptions and limitations
+
+Every chart makes choices. There's no neutral view, so document the time range, filters and definitions.
+
+## Common mistakes
+
+- Putting everything on one page.
+- Omitting comparisons or targets.
+- No data freshness indicator.
+- Inconsistent colours for the same category across pages.
+
+## Alternatives
+
+A scheduled written memo explains context better than a dashboard, and alerts replace dashboards for simple threshold monitoring.
+
+## Interview questions
+
+<Question q="How do you make a dashboard people actually use?">Start with decisions and users, keep it focused, show comparisons, and iterate based on usage.</Question>
+
+<Question q="Why are dual axes risky?">The apparent relationship depends on two arbitrary scales.</Question>

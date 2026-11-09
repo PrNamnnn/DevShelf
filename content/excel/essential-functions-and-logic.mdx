@@ -1,0 +1,77 @@
+---
+title: "Essential Formulas and Logical Functions"
+summary: "SUM and friends, IF, IFS, AND, OR and IFERROR, and how to keep conditions readable."
+level: fundamental
+section: functions
+order: 1
+tags: ["IF","IFS","AND","OR","IFERROR"]
+requires: ["excel/workbooks-cells-and-references"]
+related: ["excel/conditional-aggregation","excel/lookups"]
+versions: "IFS needs Excel 2019, 2021, 2024 or Microsoft 365"
+tested: "IF, AND, OR, IFERROR evaluated in Excel build 20527. IFS isn't available in that build and was checked against Microsoft documentation"
+verified: "2026-11-09"
+docs:
+  - label: "Excel: IFS function"
+    url: "https://support.microsoft.com/en-us/office/ifs-function-36329a26-37b2-467c-972b-4a39bd951d45"
+  - label: "Excel: IF function"
+    url: "https://support.microsoft.com/en-us/office/if-function-69aed7c9-4e8a-4755-a9bc-aa8bbff73be2"
+  - label: "Excel: IFERROR function"
+    url: "https://support.microsoft.com/en-us/office/iferror-function-c526fd07-caeb-47b8-8bb6-63f3e417f611"
+---
+
+## What it is
+
+Essential functions summarize (`SUM`, `AVERAGE`, `COUNT`, `COUNTA`, `MIN`, `MAX`) and make decisions (`IF`, `IFS`, `AND`, `OR`, `IFERROR`).
+
+## Why it exists
+
+Business rules are conditions. Commission tiers, status flags and data-quality checks can all be expressed directly in a cell.
+
+## How it works
+
+`IF` evaluates a test and returns one of two values. `IFS` tests a series of conditions and returns the first match, and it has no built-in default, so a final `TRUE` acts as "otherwise". Without a match, it returns `#N/A`.
+
+`AND` and `OR` return `TRUE` or `FALSE`. `IFERROR` replaces any error with a fallback.
+
+## Syntax and key APIs
+
+```text
+=IF(C2>=10,"Bulk","Small")
+=IFS(C3>=10,"Bulk",C3>=5,"Medium",TRUE,"Small")
+=IF(AND(C2>=10,B2="Pen"),"Yes","No")
+=IF(OR(C3>=10,B3="Pen"),"Yes","No")
+=IFERROR(1/0,"n/a")
+```
+
+`COUNT` counts numbers, `COUNTA` counts non-empty cells, and `COUNTBLANK` counts empty ones.
+
+## Simple example
+
+With the sample table, row 3 has 5 units of Book, so `=IFS(C3>=10,"Bulk",C3>=5,"Medium",TRUE,"Small")` returns `Medium`. Conditions run in order, so put the most restrictive first.
+
+## Industry examples
+
+Sales operations use tiered `IFS` for commission bands. Reconciliation sheets use `IF(ABS(a-b)<0.01,"OK","Check")` so rounding doesn't raise a false alarm.
+
+## Patterns and best practices
+
+- For many tiers, use a lookup table instead of nested `IF`.
+- Compare money with a tolerance, not exact equality.
+- Scope `IFERROR` narrowly, and prefer `IFNA` for lookups, so unexpected errors stay visible.
+
+## Alternatives and trade-offs
+
+`SWITCH` matches one expression against values. A threshold table with an approximate lookup is the most maintainable approach for ranges.
+
+## Common mistakes
+
+- Putting a broad condition first in `IFS`.
+- Wrapping an entire model in `IFERROR`, which hides real bugs.
+- Comparing text with stray spaces.
+- Writing `=IF(A1=TRUE,...)` when `=IF(A1,...)` is enough.
+
+## Interview questions
+
+<Question q="What happens in IFS when no condition matches?">It returns #N/A, so add a final TRUE condition as a default.</Question>
+
+<Question q="Why can IFERROR be dangerous?">It suppresses every error type, so genuine problems get replaced with a plausible value.</Question>

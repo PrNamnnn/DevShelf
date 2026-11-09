@@ -1,0 +1,76 @@
+---
+title: "Row-Level Security"
+summary: "Restrict data by user with static and dynamic rules, and understand the workspace roles it doesn't apply to."
+level: advanced
+section: production
+order: 1
+tags: ["RLS","security","USERPRINCIPALNAME","roles"]
+requires: ["powerbi/star-schema-and-relationships"]
+related: ["powerbi/performance-and-deployment","postgresql/security-backup-and-replication"]
+versions: "Power BI service as documented in November 2026"
+tested: "Not executable here. Checked against Microsoft documentation"
+verified: "2026-11-09"
+docs:
+  - label: "Row-level security with Power BI"
+    url: "https://learn.microsoft.com/en-us/fabric/security/service-admin-row-level-security"
+  - label: "USERPRINCIPALNAME"
+    url: "https://learn.microsoft.com/en-us/dax/userprincipalname-function-dax"
+---
+
+## What it is
+
+**Row-level security (RLS)** restricts which rows a user can see, using DAX rules attached to roles.
+
+## Why it exists
+
+One shared model can then serve many regions or teams, with each person seeing only their own data.
+
+## How it works
+
+A rule is a DAX expression, evaluated per table, that returns true or false. Rules filter a dimension, and filters flow to facts through relationships. Roles combine additively, so a user in several roles sees the union.
+
+RLS applies to users with the **Viewer** role only. Workspace Admins, Members and Contributors have edit rights, and they can see all data. Service principals can't be added to an RLS role.
+
+## Syntax and key APIs
+
+```text
+Static role "North":
+DimRegion[Region] = "North"
+
+Dynamic role, using a security table:
+SecurityMap[UserEmail] = USERPRINCIPALNAME ()
+```
+
+A `SecurityMap` table relates to `DimRegion`, which filters the fact table. Users or groups are assigned to roles in the service, and Test as role is available within Desktop and the service.
+
+## Simple example
+
+Asha's email maps to North in `SecurityMap`. When Asha opens the report as a Viewer, the rule keeps Asha's row, so `DimRegion` narrows to North and every measure reflects that.
+
+## Industry examples
+
+Dealer networks, multi-branch banks and multi-tenant reporting all use dynamic RLS backed by a security table, usually fed from an HR or CRM system.
+
+## Patterns and best practices
+
+- Use dynamic rules backed by a table.
+- Assign Entra security groups rather than individuals.
+- Test each role.
+- Combine with object-level security when columns are also sensitive.
+
+## Alternatives and trade-offs
+
+Separate reports per audience are simple but don't scale. Object-level security hides tables and columns, and source-level security is an option with DirectQuery.
+
+## Common mistakes
+
+- Giving end users a Contributor role, which bypasses RLS.
+- Expecting RLS to hide the existence of measures or fields.
+- Using bidirectional filtering without considering security effects.
+- Using `USERNAME()` where `USERPRINCIPALNAME()` is intended.
+
+## Interview questions
+
+<Question q="Who is not restricted by RLS?">Workspace Admins, Members and Contributors, who have edit access.</Question>
+
+<Question q="How does dynamic RLS work?">A rule compares a mapping column with USERPRINCIPALNAME and relationships carry the restriction to the facts.</Question>

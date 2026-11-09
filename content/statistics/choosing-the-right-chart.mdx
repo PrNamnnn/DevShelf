@@ -1,0 +1,99 @@
+---
+title: "Choosing the Right Chart"
+summary: "Match chart form to the analytical job, including comparison, trend, distribution, composition and relationship."
+level: fundamental
+section: communication
+order: 1
+tags: ["chart choice","data visualization","bar chart","line chart"]
+requires: ["statistics/univariate-analysis"]
+related: ["statistics/distribution-and-relationship-charts","statistics/dashboards-and-misleading-visuals","powerbi/visuals-and-report-design"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "Microsoft: Power BI visualization types"
+    url: "https://learn.microsoft.com/en-us/power-bi/visuals/power-bi-visualizations-overview"
+  - label: "Matplotlib: Plot types"
+    url: "https://matplotlib.org/stable/plot_types/index.html"
+---
+
+## What it is
+
+Chart selection maps the question you're answering to the visual form that makes it easiest to answer accurately.
+
+## Why it exists
+
+Humans judge position on a shared axis accurately, length well, and angle and area poorly. An unsuitable chart can make a correct number hard to interpret.
+
+## How it works
+
+| Job | Chart |
+| --- | --- |
+| Compare categories | Sorted horizontal bars |
+| Change over time | Line |
+| Distribution | Histogram, density, box |
+| Relationship | Scatter |
+| Composition (few parts) | Stacked bar |
+| Many categories × many values | Heatmap |
+| Exact lookup | Table |
+| One headline number | Big-number tile |
+
+Bars should start at zero because length encodes value. Lines may have a non-zero baseline when change is the focus. Prefer direct labels over legends, and small multiples over one crowded chart.
+
+## Worked example
+
+"Which regions missed target?" A pie chart makes this nearly impossible. A sorted bar chart of variance from target, with zero as a reference line, answers it instantly.
+
+## Python
+
+```python
+import io
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+regions = {"West": 12, "South": 4, "North": -3, "East": -8}
+names = list(regions)[::-1]
+values = [regions[n] for n in names]
+
+fig, ax = plt.subplots(figsize=(6, 3))
+bars = ax.barh(names, values, color="#2f5fc9")
+ax.axvline(0, color="#555", linewidth=1)
+ax.set_xlabel("Variance from target (%)")
+ax.spines[["top", "right"]].set_visible(False)
+
+buffer = io.BytesIO()
+fig.savefig(buffer, format="png")
+plt.close(fig)
+assert len(bars) == 4 and buffer.tell() > 1_000
+```
+
+## Excel or Power BI
+
+Excel's Recommended Charts is a starting point. In Power BI, select visuals based on the same job table, and limit the number of different chart types per page.
+
+## In industry
+
+Analytics teams have style guides specifying chart standards so reports are consistent and quick to read.
+
+## Assumptions and limitations
+
+Conventions vary by audience, and a clear chart doesn't guarantee a truthful one.
+
+## Common mistakes
+
+- Pie charts with many slices.
+- 3D effects.
+- Dual-axis charts implying relationships.
+- A line chart for unordered categories.
+
+## Alternatives
+
+A sentence or a small table is often better than a chart for one or two numbers.
+
+## Interview questions
+
+<Question q="When is a pie chart acceptable?">Showing a part-to-whole split with two or three clearly different parts.</Question>
+
+<Question q="Why must bar charts usually start at zero?">The bar length encodes the value, so truncating it distorts the proportion.</Question>

@@ -1,0 +1,173 @@
+---
+title: "Effects and Refs"
+summary: "Synchronizing with outside systems, writing cleanup that survives Strict Mode, and knowing when you don't need an Effect at all."
+level: intermediate
+section: hooks
+order: 10
+tags: [useEffect, useRef, cleanup, strict-mode, dependencies, useEffectEvent, side-effects]
+related: [react/state-and-rendering, react/performance-and-memoization]
+versions: "React 19.2+ for useEffectEvent on the stable channel, as shown in current docs."
+tested: "Effect cleanup order run on React 19.3.1 with jsdom. Not every snippet was executed."
+verified: "2026-11-09"
+docs:
+  - label: "React: Synchronizing with Effects"
+    url: "https://react.dev/learn/synchronizing-with-effects"
+  - label: "React: You might not need an Effect"
+    url: "https://react.dev/learn/you-might-not-need-an-effect"
+  - label: "React: Referencing values with refs"
+    url: "https://react.dev/learn/referencing-values-with-refs"
+  - label: "React: useEffectEvent"
+    url: "https://react.dev/reference/react/useEffectEvent"
+---
+
+## What it is
+
+An **Effect** synchronizes a component with something outside React, such as a socket or timer. A **ref** stores a value across renders without triggering one, and it can hold a DOM node.
+
+## Why it exists
+
+Rendering must stay pure, so connections and subscriptions need another place. Effects run after the commit, when the screen has updated. Refs cover data that the UI doesn't display, such as timer IDs.
+
+## How it works
+
+After each commit, React compares the dependency array using `Object.is`. If something changed, it runs the previous cleanup and then the new Effect. It runs a final cleanup on unmount.
+
+<StepFlow
+  title="An Effect's life with roomId"
+  code={["useEffect(() => {", "  const c = connect(roomId);", "  return () => c.disconnect();", "}, [roomId]);"]}
+  nodes={["commit", "cleanup previous", "run Effect", "unmount cleanup"]}
+  steps={[
+    { line: 1, active: [0, 2], note: "Mount: after the first commit the Effect connects.", state: { connected: "general" } },
+    { line: 2, active: [1], note: "Strict Mode, development only: React runs cleanup once right after mounting, to expose missing cleanups.", state: { connected: "none" } },
+    { line: 1, active: [2], note: "It runs the Effect again. Production doesn't do this remount.", state: { connected: "general" } },
+    { line: 2, active: [0, 1], note: "roomId changes to music. After commit, the old Effect's cleanup runs with the old roomId.", state: { connected: "none" } },
+    { line: 1, active: [2], note: "The new Effect connects using the new value.", state: { connected: "music" } },
+    { line: 2, active: [3], note: "On unmount, React runs the last cleanup.", state: { connected: "none" } },
+  ]}
+/>
+
+The dependency array isn't a choice of when to run. It lists every reactive value the Effect uses.
+
+## Syntax and key APIs
+
+```jsx
+useEffect(() => { /* every commit */ });
+useEffect(() => { /* after mount only */ }, []);
+useEffect(() => { /* when a or b change */ }, [a, b]);
+
+const ref = useRef(null);
+ref.current;
+```
+
+Don't read or write `ref.current` during rendering, apart from one-time initialization.
+
+## Simple example
+
+```jsx
+function Clock() {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  return <time>{now.toLocaleTimeString()}</time>;
+}
+```
+
+## Industry examples
+
+### Fetch without race conditions
+
+A fast response for an old input can overwrite a newer one, so abort the old request on cleanup.
+
+```jsx
+useEffect(() => {
+  const controller = new AbortController();
+
+  fetch(`/api/users/${id}`, { signal: controller.signal })
+    .then((r) => r.json())
+    .then(setUser)
+    .catch((error) => {
+      if (error.name !== "AbortError") setError(error);
+    });
+
+  return () => controller.abort();
+}, [id]);
+```
+
+### Read the latest value without reconnecting
+
+An Effect Event sees the latest props without being a dependency. Call it only from Effects or other Effect Events.
+
+```jsx
+const onConnected = useEffectEvent(() => {
+  showNotification(`Connected to ${roomId}`, theme);
+});
+
+useEffect(() => {
+  const connection = connect(roomId);
+  connection.on("connected", () => onConnected());
+  return () => connection.disconnect();
+}, [roomId]);
+```
+
+### Focus an input
+
+```jsx
+function Search() {
+  const input = useRef(null);
+  return (
+    <>
+      <input ref={input} />
+      <button onClick={() => input.current.focus()}>Focus</button>
+    </>
+  );
+}
+```
+
+## Patterns and best practices
+
+Use this decision guide before adding an Effect:
+
+| Situation | Do this instead |
+| --- | --- |
+| Value computable from props or state | Calculate during render |
+| Response to a user click | Event handler |
+| Reset all state when a prop changes | Give a different `key` |
+| Connect to an external system | An Effect is the right tool |
+
+The React docs' rule: the user shouldn't be able to distinguish an Effect running once from a setup, cleanup, setup sequence.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Paint-blocking measurement | `useLayoutEffect` | Delays paint |
+| External store | `useSyncExternalStore` | Needs subscribe and snapshot |
+| Data loading | Framework or data library | Added dependency, far fewer edge cases |
+
+## Common mistakes
+
+**Guarding with a ref to prevent the Strict Mode double run.** The React docs say this won't fix the underlying bug. Write proper cleanup.
+
+**Omitting dependencies.** The Effect keeps using stale values.
+
+**Effect chains.** Effects that set state to trigger other Effects cause extra renders. Compute it in one event or render.
+
+**Using an object created during render as a dependency.** It's new each render, so the Effect re-runs. Move it inside the Effect.
+
+## Interview questions
+
+<Question q="When does useEffect run?">
+After React commits and the screen has updated, whenever the dependencies changed since the last render.
+</Question>
+
+<Question q="Why does an Effect run twice in development?">
+Strict Mode remounts components once in development to reveal missing cleanup logic.
+</Question>
+
+<Question q="useRef or useState?">
+Use state when the value affects output. Use a ref when it doesn't and shouldn't trigger a render.
+</Question>

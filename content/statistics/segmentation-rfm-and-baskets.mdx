@@ -1,0 +1,113 @@
+---
+title: "Segmentation, RFM and Market Basket Analysis"
+summary: "Group customers by behaviour with RFM and find products bought together using support, confidence and lift."
+level: intermediate
+section: analysis-types
+order: 7
+tags: ["segmentation","RFM","market basket","association rules","lift"]
+requires: ["statistics/bivariate-analysis"]
+related: ["statistics/conversion-retention-churn","machine-learning/clustering","postgresql/aggregates-windows-and-ctes"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "pandas: qcut"
+    url: "https://pandas.pydata.org/docs/reference/api/pandas.qcut.html"
+  - label: "scikit-learn: Clustering"
+    url: "https://scikit-learn.org/stable/modules/clustering.html"
+---
+
+## What it is
+
+**Segmentation** divides customers into groups that behave differently and should be treated differently. **RFM** scores each customer on Recency, Frequency and Monetary value. **Market basket analysis** finds items purchased together.
+
+## Why it exists
+
+Treating every customer identically wastes money. RFM is cheap, needs only transaction data, and can be explained to a marketing team in one sentence.
+
+## How it works
+
+For RFM, compute days since last purchase, number of purchases and total spend per customer. Rank each into quantiles, then combine scores into named segments. A high recency score means a recent purchase, so its ordering is reversed.
+
+For association rules on A → B:
+
+| Measure | Definition |
+| --- | --- |
+| Support | Share of all baskets with both A and B |
+| Confidence | Of baskets with A, the share that also contain B |
+| Lift | Confidence ÷ overall share of baskets with B |
+
+Lift above 1 means they co-occur more than chance would imply.
+
+## Intuition and formula
+
+<Formula>lift(A → B) = P(A and B) / (P(A) · P(B))</Formula>
+
+## Worked example
+
+From 1,000 baskets, 120 contain pasta, 60 contain sauce and 40 contain both. Support is 4%. Confidence for pasta → sauce is 33.3%. Baseline sauce rate is 6%, so lift is 5.56. Pasta buyers are over five times more likely to buy sauce.
+
+## Python
+
+```python
+import pandas as pd
+
+tx = pd.DataFrame({
+    "customer": ["a", "a", "b", "c", "c", "c", "d"],
+    "days_ago": [5, 40, 90, 2, 10, 30, 200],
+    "amount": [100, 50, 80, 200, 150, 120, 40],
+})
+rfm = tx.groupby("customer").agg(
+    recency=("days_ago", "min"), frequency=("days_ago", "size"), monetary=("amount", "sum")
+)
+rfm["r_score"] = pd.qcut(rfm["recency"], 2, labels=[2, 1]).astype(int)
+assert rfm.loc["c", "monetary"] == 470 and rfm.loc["c", "r_score"] == 2
+
+baskets, a, b, both = 1_000, 120, 60, 40
+lift = (both / a) / (b / baskets)
+assert round(lift, 2) == 5.56
+```
+
+## SQL
+
+```sql
+WITH tx AS (
+  SELECT * FROM (VALUES ('a', 5, 100), ('a', 40, 50), ('b', 90, 80), ('c', 2, 200), ('c', 10, 150))
+    AS t(customer, days_ago, amount)
+)
+SELECT customer, min(days_ago) AS recency, count(*) AS frequency, sum(amount) AS monetary,
+       ntile(2) OVER (ORDER BY min(days_ago) DESC) AS r_score
+FROM tx
+GROUP BY customer
+ORDER BY customer;
+-- rows: [{"customer":"a","recency":5,"frequency":2,"monetary":150,"r_score":1},{"customer":"b","recency":90,"frequency":1,"monetary":80,"r_score":1},{"customer":"c","recency":2,"frequency":2,"monetary":350,"r_score":2}]
+```
+
+## Excel or Power BI
+
+Use `PERCENTRANK.INC` or `NTILE`-style formulas to score RFM in Excel, and Pivot Tables to size segments. In DAX, build calculated tables or measures with `RANKX` and a slicer per segment.
+
+## In industry
+
+Retailers use RFM to prioritize retention campaigns. Basket results drive bundles, placement and "frequently bought together" modules.
+
+## Assumptions and limitations
+
+RFM ignores margin, returns and acquisition channel unless they're added. Rule mining finds co-occurrence, not cause. Low-support rules with high lift are often noise, so set minimum support.
+
+## Common mistakes
+
+- Forgetting to reverse recency's scoring direction.
+- Ranking rules only by confidence, which favours very popular items.
+- Building segments no team can act upon.
+- Calculating RFM on a period that doesn't match purchase cycles.
+
+## Alternatives
+
+K-means or Gaussian mixtures find segments from many behavioural features. Collaborative filtering and sequence models power personalized recommendations at scale.
+
+## Interview questions
+
+<Question q="Why does lift matter more than confidence?">Confidence can be high simply because the consequent is popular. Lift compares against that base rate.</Question>
+
+<Question q="How would you validate a segmentation?">Check stability over time, whether segments differ on outcomes that matter, whether they can be reached, and whether treating them differently improves a measured result.</Question>

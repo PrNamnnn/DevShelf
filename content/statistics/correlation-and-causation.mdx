@@ -1,0 +1,106 @@
+---
+title: "Covariance, Correlation and Causation"
+summary: "Pearson and Spearman correlation, what they measure, and the conditions needed before claiming that one variable causes another."
+level: intermediate
+section: regression
+order: 1
+tags: ["covariance","Pearson","Spearman","causation","confounding"]
+requires: ["statistics/bivariate-analysis"]
+related: ["statistics/simple-linear-regression","statistics/ab-testing-foundations","statistics/multivariate-analysis"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "SciPy: pearsonr"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.pearsonr.html"
+  - label: "SciPy: spearmanr"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.spearmanr.html"
+---
+
+## What it is
+
+**Covariance** measures whether two variables move together, in units that are hard to interpret. **Pearson's r** rescales covariance to between −1 and 1, measuring linear association. **Spearman's ρ** applies Pearson to ranks, measuring monotonic association. **Causation** means that changing one variable would change the other.
+
+## Why it exists
+
+Correlation finds promising relationships cheaply. It's also the most misused number in analytics, because people instinctively read association as cause.
+
+## How it works
+
+Pearson needs numeric variables and is sensitive to outliers. Spearman works for ordinal data or curved but monotonic trends. A correlation of 0 means no linear relationship, and a perfect parabola has r near 0.
+
+Association without causation usually has one of these causes:
+
+| Cause | Example |
+| --- | --- |
+| Confounding | Ice cream sales and drownings both follow summer |
+| Reverse causation | Support tickets rise before cancellations, partly because of bugs |
+| Selection | Conditioning on an outcome creates false links |
+| Chance | Searching many pairs finds something |
+
+Causal claims need randomization, or a credible design and explicit assumptions.
+
+## Intuition and formula
+
+<Formula>cov(x, y) = Σ(xᵢ − x̄)(yᵢ − ȳ) / (n − 1)</Formula>
+
+<Formula>r = cov(x, y) / (sₓ s_y)</Formula>
+
+## Worked example
+
+Monthly ad spend and revenue for 10 months give a covariance of 304.67, Pearson's r = 0.995 and Spearman's ρ = 1.0. Very strong, but the budget was likely raised in seasons with more demand. A geo-holdout test would estimate what the ads actually caused.
+
+## Python
+
+```python
+import numpy as np
+from scipy import stats
+
+spend = np.array([10, 14, 18, 22, 25, 30, 34, 38, 42, 47.0])
+revenue = np.array([38, 44, 50, 62, 64, 72, 86, 90, 104, 110.0])
+
+assert round(np.cov(spend, revenue)[0, 1], 2) == 304.67
+assert round(stats.pearsonr(spend, revenue).statistic, 3) == 0.995
+assert round(stats.spearmanr(spend, revenue).statistic, 6) == 1
+
+x = np.linspace(-3, 3, 101)
+assert abs(np.corrcoef(x, x**2)[0, 1]) < 1e-9
+```
+
+## SQL
+
+```sql
+SELECT round(covar_samp(s, r)::numeric, 2) AS cov, round(corr(s, r)::numeric, 3) AS r
+FROM unnest(ARRAY[10,14,18,22,25,30,34,38,42,47]::float8[],
+            ARRAY[38,44,50,62,64,72,86,90,104,110]::float8[]) AS t(s, r);
+-- rows: [{"cov":"304.67","r":"0.995"}]
+```
+
+## Excel or Power BI
+
+`CORREL(a, b)` for Pearson, `COVARIANCE.S(a, b)` for covariance, and `CORREL` on columns of `RANK.AVG` for Spearman. Power BI offers a correlation quick measure, or calculate one with DAX iterators.
+
+## In industry
+
+Correlation matrices guide feature review, and marketing mix models and experiments are how companies move from correlation toward causal claims.
+
+## Assumptions and limitations
+
+Pearson's significance test assumes approximately bivariate normal data. Outliers can create or destroy a correlation. Correlations in time series are often spurious because both series have trends.
+
+## Common mistakes
+
+- Treating a high r as causal.
+- Calling r near 0 "no relationship" without a plot.
+- Correlating two trending time series.
+- Reporting Pearson on heavily skewed values.
+
+## Alternatives
+
+Kendall's τ for small samples with many ties, mutual information for general dependence, and causal designs like difference-in-differences and instrumental variables.
+
+## Interview questions
+
+<Question q="Pearson vs Spearman?">Pearson measures linear association on raw values. Spearman measures monotonic association on ranks, and is more robust to outliers.</Question>
+
+<Question q="How would you test whether a marketing channel causes sales?">Randomize exposure by region or user through a holdout or geo experiment, and compare outcomes.</Question>

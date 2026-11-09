@@ -1,0 +1,107 @@
+---
+title: "CRUD and Query Operators"
+summary: "Insert, read, update and delete documents, with comparison, logical, array and element operators."
+level: fundamental
+section: foundations
+order: 2
+tags: ["CRUD","find","query operators","$elemMatch"]
+requires: ["mongodb/documents-bson-and-collections"]
+related: ["mongodb/projection-sort-and-updates","mongodb/indexes-and-explain"]
+versions: "Documentation for MongoDB 9.0. Examples executed on MongoDB 8.0.12"
+tested: "JavaScript examples executed against a temporary MongoDB 8.0.12 replica set"
+verified: "2026-11-09"
+docs:
+  - label: "MongoDB: CRUD operations"
+    url: "https://www.mongodb.com/docs/manual/crud/"
+  - label: "MongoDB: Query predicates"
+    url: "https://www.mongodb.com/docs/manual/reference/mql/query-predicates/"
+---
+
+## What it is
+
+CRUD means create, read, update and delete. MongoDB expresses queries as documents built from field conditions and operators.
+
+## Why it exists
+
+A shared query language works for simple lookups and for nested arrays, using the same syntax your application data has.
+
+## How it works
+
+Multiple top-level field conditions are ANDed. Matching on an array field succeeds when any element matches. `$elemMatch` requires one single element to meet all of its conditions, which differs from separate conditions on the array.
+
+| Family | Operators |
+| --- | --- |
+| Comparison | `$eq` `$ne` `$gt` `$gte` `$lt` `$lte` `$in` `$nin` |
+| Logical | `$and` `$or` `$not` `$nor` |
+| Element | `$exists` `$type` |
+| Array | `$all` `$elemMatch` `$size` |
+
+## Syntax and key APIs
+
+```text
+insertOne, insertMany
+find, findOne, countDocuments
+updateOne, updateMany, replaceOne
+deleteOne, deleteMany
+```
+
+## Simple example
+
+```js
+import assert from "node:assert/strict";
+import { MongoClient } from "mongodb";
+
+const client = new MongoClient(process.env.MONGODB_URI);
+const db = client.db("shelf_crud");
+await db.dropDatabase();
+const orders = db.collection("orders");
+
+await orders.insertMany([
+  { _id: 1, status: "paid", total: 120, items: [{ sku: "A", qty: 1 }, { sku: "B", qty: 5 }] },
+  { _id: 2, status: "paid", total: 40, items: [{ sku: "A", qty: 5 }] },
+  { _id: 3, status: "open", total: 300, items: [{ sku: "C", qty: 1 }] },
+]);
+
+assert.equal(await orders.countDocuments({ status: "paid", total: { $gte: 100 } }), 1);
+assert.equal(await orders.countDocuments({ $or: [{ status: "open" }, { total: { $lt: 50 } }] }), 2);
+
+const separate = await orders.countDocuments({ "items.sku": "A", "items.qty": 5 });
+const sameElement = await orders.countDocuments({ items: { $elemMatch: { sku: "A", qty: 5 } } });
+assert.deepEqual([separate, sameElement], [2, 1]);
+
+await orders.deleteMany({ status: "open" });
+assert.equal(await orders.countDocuments(), 2);
+
+await db.dropDatabase();
+await client.close();
+```
+
+The `$elemMatch` difference above is the key: order 1 has an A and a quantity of 5, but in different items.
+
+## Industry examples
+
+Order services filter by status and customer, and feeds fetch recent items with a compound index that matches the query.
+
+## Patterns and best practices
+
+- Prefer `$in` to several `$or` branches on one field.
+- Index common filter fields.
+- Check `matchedCount` and `modifiedCount` on writes.
+- Use `countDocuments` for filtered counts.
+
+## Alternatives and trade-offs
+
+SQL expresses joins more directly, while MongoDB's array queries are more natural for nested data.
+
+## Common mistakes
+
+- Expecting separate array conditions to apply to one element.
+- Matching a subdocument by exact equality and forgetting that field order matters.
+- Passing unvalidated user objects as queries, enabling operator injection.
+- Unindexed regular expression searches.
+
+## Interview questions
+
+<Question q="When do you need $elemMatch?">When several conditions must apply to the same array element.</Question>
+
+<Question q="How do multiple field conditions combine?">Implicitly with AND.</Question>

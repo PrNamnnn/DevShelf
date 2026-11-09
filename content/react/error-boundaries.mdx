@@ -1,0 +1,154 @@
+---
+title: "Error Boundaries"
+summary: "Stopping one crash from blanking the whole app, what boundaries can't catch, and where to place them."
+level: intermediate
+section: architecture
+order: 20
+tags: [error-boundaries, getDerivedStateFromError, componentDidCatch, resilience, fallback]
+requires: [react/components-jsx-and-props]
+related: [react/lazy-loading-and-code-splitting, nextjs/routing-and-layouts]
+versions: "React 16+. There is no function-component API."
+tested: "Boundary behaviour run on React 19.3.1 with jsdom."
+verified: "2026-11-09"
+docs:
+  - label: "React: Component (error boundaries)"
+    url: "https://react.dev/reference/react/Component"
+  - label: "React: lazy"
+    url: "https://react.dev/reference/react/lazy"
+---
+
+## What it is
+
+An error boundary is a class component that catches errors thrown while rendering its children and shows a fallback instead.
+
+## Why it exists
+
+Without a boundary, an error during render unmounts the whole root and the screen goes blank.
+
+## How it works
+
+`static getDerivedStateFromError` returns the state that shows the fallback. `componentDidCatch` handles side effects such as logging. React renders the nearest boundary above the failure.
+
+<TreeViz
+  title="A failure stops at the nearest boundary"
+  nodes={[{ id: "app", label: "App" }, { id: "nav", label: "Nav", parent: "app" }, { id: "eb", label: "ErrorBoundary", parent: "app" }, { id: "chart", label: "Chart (throws)", parent: "eb" }, { id: "list", label: "List", parent: "eb" }]}
+  steps={[
+    { active: ["chart"], note: "Chart throws during rendering." },
+    { active: ["eb"], visited: ["chart"], note: "React walks up to the nearest boundary." },
+    { active: ["eb"], faded: ["chart", "list"], note: "The boundary's subtree is replaced by its fallback." },
+    { visited: ["nav", "app"], faded: ["chart", "list"], note: "Nav and the rest of the app keep working." },
+  ]}
+/>
+
+## Syntax and key APIs
+
+```jsx
+class ErrorBoundary extends React.Component {
+  state = { error: null };
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    reportError(error, info.componentStack);
+  }
+
+  render() {
+    return this.state.error ? this.props.fallback : this.props.children;
+  }
+}
+```
+
+| Caught | Not caught |
+| --- | --- |
+| Errors during render | Event handlers |
+| Lifecycle errors | `setTimeout`, async callbacks |
+| Failed `lazy` imports | Server rendering |
+| Errors in `startTransition` actions | Errors in the boundary itself |
+
+## Simple example
+
+```jsx
+<ErrorBoundary fallback={<p>This section failed to load.</p>}>
+  <RevenueChart />
+</ErrorBoundary>
+```
+
+## Industry examples
+
+### Offer a retry
+
+Changing the key remounts the boundary and its children.
+
+```jsx
+function Retryable({ children }) {
+  const [attempt, setAttempt] = useState(0);
+  return (
+    <ErrorBoundary
+      key={attempt}
+      fallback={<button onClick={() => setAttempt(attempt + 1)}>Try again</button>}
+    >
+      {children}
+    </ErrorBoundary>
+  );
+}
+```
+
+### Surface event handler errors
+
+Handlers run outside rendering, so catch those yourself.
+
+```jsx
+async function handleSave() {
+  try {
+    await save();
+  } catch (error) {
+    setError(error);
+  }
+}
+```
+
+### Place boundaries around independent regions
+
+```jsx
+<AppShell>
+  <ErrorBoundary fallback={<PanelError />}><Feed /></ErrorBoundary>
+  <ErrorBoundary fallback={<PanelError />}><Sidebar /></ErrorBoundary>
+</AppShell>
+```
+
+## Patterns and best practices
+
+- Use one top-level boundary, plus boundaries around independent features.
+- Report errors with the component stack.
+- Pair `Suspense` with a boundary for lazy content.
+- Consider the `react-error-boundary` package, which the docs suggest.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Render failures | Boundary | Class component |
+| Handler failures | `try`/`catch` | Manual |
+| Route errors in Next.js | `error.tsx` | Framework-specific |
+
+## Common mistakes
+
+**Expecting a boundary to catch click handler errors.** It doesn't.
+
+**Calling `setState` in `componentDidCatch` for the fallback.** Use `getDerivedStateFromError`.
+
+**One global boundary only.** A small failure takes down the whole page.
+
+**Showing raw error text to users.** Log the details and show a friendly message.
+
+## Interview questions
+
+<Question q="Can an error boundary be a function component?">
+Not currently. The docs state there's no way to write one as a function component.
+</Question>
+
+<Question q="What don't boundaries catch?">
+Event handlers, asynchronous code outside rendering, server rendering, and errors thrown by the boundary itself.
+</Question>

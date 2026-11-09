@@ -1,0 +1,153 @@
+---
+title: "Metadata, Open Graph and SEO"
+summary: "Static and generated metadata, file conventions for icons and social images, and how streaming affects crawlers."
+level: intermediate
+section: platform
+order: 20
+tags: [metadata, generateMetadata, seo, open-graph, sitemap, robots, icons]
+requires: [nextjs/routing-and-layouts]
+related: [nextjs/images-and-fonts]
+versions: "Next.js 16. params is a promise in generateMetadata."
+tested: "Compiled on Next.js 16.4.5 in a scratch app."
+verified: "2026-11-09"
+docs:
+  - label: "Next.js: Metadata and OG images"
+    url: "https://nextjs.org/docs/app/getting-started/metadata-and-og-images"
+  - label: "Next.js: generateMetadata"
+    url: "https://nextjs.org/docs/app/api-reference/functions/generate-metadata"
+---
+
+## What it is
+
+Next.js generates `<head>` tags from a `metadata` object or a `generateMetadata` function. File conventions add icons, social images, sitemaps and robots rules.
+
+## Why it exists
+
+Titles and previews need to be correct per page and available to crawlers, without manually managing `<head>`.
+
+## How it works
+
+Metadata is resolved from the root down, with deeper segments overriding shallower ones. For dynamic pages it streams separately, but streaming is disabled for bots that need it in `<head>`.
+
+Metadata exports only work in Server Components.
+
+| File | Purpose |
+| --- | --- |
+| `favicon.ico`, `icon.svg` | Browser icon |
+| `apple-icon.png` | iOS icon |
+| `opengraph-image.tsx` | Social preview |
+| `robots.ts`, `sitemap.ts` | Crawler files |
+
+## Syntax and key APIs
+
+```tsx
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: { default: "Shop", template: "%s · Shop" },
+  description: "Buy things.",
+  metadataBase: new URL("https://example.com"),
+};
+```
+
+## Simple example
+
+```tsx
+// app/products/[id]/page.tsx
+import type { Metadata } from "next";
+import { cache } from "react";
+
+const getProduct = cache(async (id: string) => ({ id, name: `Product ${id}` }));
+
+type Props = { params: Promise<{ id: string }> };
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { id } = await params;
+  const product = await getProduct(id);
+  return { title: product.name };
+}
+
+export default async function Page({ params }: Props) {
+  const { id } = await params;
+  const product = await getProduct(id);
+  return <h1>{product.name}</h1>;
+}
+```
+
+React's `cache` shares one fetch between metadata and the page.
+
+## Industry examples
+
+### Generate a sitemap
+
+```ts
+// app/sitemap.ts
+import type { MetadataRoute } from "next";
+
+export default function sitemap(): MetadataRoute.Sitemap {
+  return [{ url: "https://example.com", lastModified: new Date() }];
+}
+```
+
+### Create social images
+
+`ImageResponse` supports flexbox and a subset of CSS, and grid doesn't work.
+
+```tsx
+// app/opengraph-image.tsx
+import { ImageResponse } from "next/og";
+
+export const size = { width: 1200, height: 630 };
+export const contentType = "image/png";
+
+export default function Image() {
+  return new ImageResponse(<div style={{ fontSize: 96, display: "flex" }}>Hello</div>, size);
+}
+```
+
+### Control indexing
+
+```ts
+// app/robots.ts
+import type { MetadataRoute } from "next";
+
+export default function robots(): MetadataRoute.Robots {
+  return { rules: { userAgent: "*", disallow: "/admin" }, sitemap: "https://example.com/sitemap.xml" };
+}
+```
+
+## Patterns and best practices
+
+- Set a title template in the root layout.
+- Use `cache` to avoid duplicate data calls.
+- Provide specific descriptions per page.
+- Use one canonical URL for duplicated content.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Fixed values | `metadata` object | Static only |
+| Data-driven | `generateMetadata` | May add latency |
+| Static social image | Image file | Not per-page |
+| Generated social image | `ImageResponse` | CSS subset |
+
+## Common mistakes
+
+**Exporting metadata from a Client Component.** It isn't supported.
+
+**Forgetting `metadataBase`.** Relative Open Graph URLs can't resolve.
+
+**Using grid in `ImageResponse`.** Only flexbox layouts work.
+
+**Fetching twice for metadata and page.** Wrap the loader in `cache`.
+
+## Interview questions
+
+<Question q="How do nested metadata values combine?">
+They're resolved from the root down, and deeper segments override earlier fields.
+</Question>
+
+<Question q="Where can generateMetadata be used?">
+In a Server Component layout or page.
+</Question>

@@ -1,0 +1,82 @@
+---
+title: "Text and Date Functions"
+summary: "Clean and parse text with LEFT, RIGHT, MID, TRIM and SUBSTITUTE, and build reliable dates with DATE, EOMONTH and TEXT."
+level: fundamental
+section: functions
+order: 4
+tags: ["TEXT","DATE","LEFT","RIGHT","MID","TRIM","SUBSTITUTE"]
+requires: ["excel/essential-functions-and-logic"]
+related: ["statistics/inconsistent-data-and-validation","statistics/datetime-text-and-interactions"]
+versions: "TEXTBEFORE and TEXTAFTER require Microsoft 365 or Excel 2024"
+tested: "Formulas evaluated in Excel build 20527, except TEXTBEFORE and TEXTAFTER, which that build doesn't provide"
+verified: "2026-11-09"
+docs:
+  - label: "Excel: Text functions"
+    url: "https://support.microsoft.com/en-us/office/text-functions-reference-cccd86ad-547d-4ea9-a065-7bb697c2a56e"
+  - label: "Excel: Date and time functions"
+    url: "https://support.microsoft.com/en-us/office/date-and-time-functions-reference-fd1b5961-c1ae-4677-be58-074152f97b81"
+  - label: "Excel: TEXT function"
+    url: "https://support.microsoft.com/en-us/office/text-function-20d5ac4d-7b94-49fd-bb38-93d29371225c"
+---
+
+## What it is
+
+Text functions split, clean and combine strings. Date functions create and manipulate date serial numbers.
+
+## Why it exists
+
+Exports frequently contain codes with embedded meaning, stray spaces and dates in odd formats.
+
+## How it works
+
+`TRIM` removes extra spaces, leaving single spaces between words. Non-breaking spaces from web pages aren't removed, so use `SUBSTITUTE(A1,CHAR(160)," ")` first. `TEXT` converts a value to formatted text, which means the result can no longer be used in math or date calculations.
+
+## Syntax and key APIs
+
+```text
+=LEFT("INV-2026-77",3)             INV
+=RIGHT("INV-2026-77",2)            77
+=MID("INV-2026-77",5,4)            2026
+=TRIM("  a   b ")                  a b
+=SUBSTITUTE("a-b-c","-","/")       a/b/c
+=TEXT(E2,"yyyy-mm")                2026-01
+=DATE(2026,3,15)
+=EOMONTH(DATE(2026,2,10),0)        28 February 2026
+=TEXTBEFORE("a@b.com","@")         a
+=TEXTAFTER("a@b.com","@")          b.com
+```
+
+## Simple example
+
+To convert a text date like `15/03/2026` when Excel doesn't parse it, build it from parts:
+
+```text
+=DATE(RIGHT(A2,4),MID(A2,4,2),LEFT(A2,2))
+```
+
+## Industry examples
+
+Finance teams use `EOMONTH` to create month-end calendars. Data operations teams parse SKU codes into category and region columns.
+
+## Patterns and best practices
+
+- Clean repeating feeds with Power Query instead of formula columns.
+- Keep real dates in cells, and use number formats for display.
+- Use ISO-like `yyyy-mm` text when you need a sortable month key.
+
+## Alternatives and trade-offs
+
+Flash Fill quickly extracts patterns, though it doesn't update. Power Query's Split Column is repeatable and handles delimiters well.
+
+## Common mistakes
+
+- Using `TEXT` for a date and then trying to sort it chronologically with day-first formats.
+- Assuming `TRIM` removes non-breaking spaces.
+- Dates interpreted differently under a different locale.
+- `TEXT` format codes that vary by language settings.
+
+## Interview questions
+
+<Question q="Why can't you do date arithmetic on TEXT(...) results?">TEXT returns a string, not a date serial number.</Question>
+
+<Question q="How do you find the last day of the month?">EOMONTH(date, 0).</Question>

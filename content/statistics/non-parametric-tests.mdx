@@ -1,0 +1,126 @@
+---
+title: "Non-Parametric Tests"
+summary: "Mann-Whitney, Wilcoxon signed-rank, Kruskal-Wallis, Friedman and Kolmogorov-Smirnov tests, and what they really test."
+level: advanced
+section: tests
+order: 5
+tags: ["Mann-Whitney","Wilcoxon","Kruskal-Wallis","Friedman","Kolmogorov-Smirnov"]
+requires: ["statistics/t-tests"]
+related: ["statistics/anova-and-post-hoc","statistics/assumption-and-exact-tests"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "SciPy: mannwhitneyu"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.mannwhitneyu.html"
+  - label: "SciPy: wilcoxon"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.wilcoxon.html"
+  - label: "SciPy: kruskal"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.kruskal.html"
+  - label: "SciPy: friedmanchisquare"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.friedmanchisquare.html"
+  - label: "SciPy: ks_2samp"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.ks_2samp.html"
+---
+
+## What it is
+
+Non-parametric tests make weaker distributional assumptions, typically by analyzing ranks.
+
+| Test | Replaces | Design | H₀ (informal) |
+| --- | --- | --- | --- |
+| Mann-Whitney U | Independent t | 2 independent groups | Neither group tends to have larger values |
+| Wilcoxon signed-rank | Paired t | 2 paired samples | Differences are symmetric around 0 |
+| Kruskal-Wallis | One-way ANOVA | 3+ independent groups | Same distribution across groups |
+| Friedman | Repeated ANOVA | 3+ repeated conditions | Same ranks across conditions |
+| Kolmogorov-Smirnov | | 2 samples or a reference | Same distribution |
+
+## Why it exists
+
+Small samples with heavy skew, outliers or ordinal scales break the assumptions behind t-tests. Ranks limit how much any one extreme value can influence the outcome.
+
+## How it works
+
+**When to use:** ordinal outcomes, or small samples with strong non-normality. **Assumptions:** independence (or paired independence), with some tests requiring similar shapes for a median interpretation.
+
+**P-value:** the chance of a rank pattern this extreme under H₀. **Business meaning:** "customers in B tend to spend more than in A", which isn't a claim about average revenue.
+
+Mann-Whitney's statistic counts, across all pairs, how often one group beats the other. U ÷ (n₁n₂) estimates P(X > Y) and is a useful effect size. KS is sensitive to any distribution difference, including spread or shape, and it's used in drift detection.
+
+## Intuition and formula
+
+<Formula>U₁ = R₁ − n₁(n₁ + 1) / 2</Formula>
+
+R₁ is the sum of ranks of group 1 in the combined data.
+
+## Worked example
+
+Two groups of seven purchase values each, both with one extreme value: A = 12, 15, 14, 10, 39, 13, 11 and B = 22, 25, 19, 27, 24, 120, 21. U = 6, p = 0.017. Value 120 counts simply as the highest rank. 6 ÷ 49 = 12% of pairs have A above B, so B tends to be larger.
+
+Paired scores (8 agents): Wilcoxon W = 1, p = 0.016. Three groups: Kruskal-Wallis H = 9.69, p = 0.0079. Repeated ratings: Friedman χ² = 10.18, p = 0.0062.
+
+## Python
+
+```python
+from scipy import stats
+
+a = [12, 15, 14, 10, 39, 13, 11]
+b = [22, 25, 19, 27, 24, 120, 21]
+mw = stats.mannwhitneyu(a, b)
+assert (mw.statistic, round(mw.pvalue, 3)) == (6.0, 0.017)
+
+before = [62, 70, 55, 68, 74, 59, 66, 71]
+after = [66, 75, 58, 70, 80, 63, 65, 78]
+assert round(stats.wilcoxon(after, before).pvalue, 3) == 0.016
+
+kw = stats.kruskal([23, 25, 21, 24, 26], [28, 30, 27, 29, 31], [22, 24, 23, 25, 21])
+assert round(kw.statistic, 2) == 9.69
+
+fr = stats.friedmanchisquare([5, 6, 5, 7, 6, 5], [7, 8, 6, 8, 7, 7], [6, 7, 6, 8, 8, 6])
+assert round(fr.statistic, 2) == 10.18
+
+ks = stats.ks_2samp(a, b)
+assert 0 <= ks.pvalue <= 1
+```
+
+## SQL
+
+```sql
+WITH d(g, x) AS (
+  SELECT 'a', v FROM unnest(ARRAY[12,15,14,10,39,13,11]) AS v
+  UNION ALL SELECT 'b', v FROM unnest(ARRAY[22,25,19,27,24,120,21]) AS v
+), r AS (SELECT g, rank() OVER (ORDER BY x) AS rnk FROM d)
+SELECT sum(rnk) - 7 * 8 / 2 AS u FROM r WHERE g = 'a';
+-- rows: [{"u":"6"}]
+```
+
+`rank()` gives tied values the same low rank. A correct test with ties needs the average rank.
+
+## Excel or Power BI
+
+`RANK.AVG` produces proper tied ranks, and the U statistic can then be calculated with a `SUMIF`. Excel doesn't provide these tests directly.
+
+## In industry
+
+Useful for ratings, small pilot programs and heavy-tailed operational data. Two-sample KS tests are a common way to monitor feature drift.
+
+## Assumptions and limitations
+
+They aren't assumption-free. Mann-Whitney is not generally a test of medians unless the two distributions share a shape. Massive samples will flag tiny differences. Power is lower than parametric tests when normality holds, though often not by much.
+
+## Common mistakes
+
+- Reporting Mann-Whitney as a median comparison.
+- Using it when the business decision depends on means.
+- Using ordinary rank tests on paired data.
+- Ignoring ties in small samples.
+
+## Alternatives
+
+Permutation and bootstrap methods for many statistics, robust trimmed-mean tests, and transformations such as log followed by parametric tests.
+
+## Interview questions
+
+<Question q="Does Mann-Whitney compare medians?">Only under the additional assumption that the two distributions have the same shape. In general it tests whether one group tends to produce larger values.</Question>
+
+<Question q="When would you use KS?">To compare entire distributions, such as checking whether production data has drifted from training data.</Question>

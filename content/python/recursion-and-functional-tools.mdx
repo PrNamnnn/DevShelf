@@ -1,0 +1,175 @@
+---
+title: "Recursion, Lambda and functools"
+summary: "How recursive calls stack up, when to use lambda, and the functools helpers worth knowing: partial, reduce and singledispatch."
+level: intermediate
+section: functions
+order: 20
+tags: [recursion, lambda, map, filter, reduce, partial, singledispatch, cached_property, functools]
+requires: [python/functions-and-scope]
+related: [python/decorators-and-context-managers, python/iteration-protocol-and-itertools]
+versions: "All current Python 3 versions."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python library: functools"
+    url: "https://docs.python.org/3/library/functools.html"
+  - label: "Python HOWTO: Functional programming"
+    url: "https://docs.python.org/3/howto/functional.html"
+  - label: "Python library: sys.setrecursionlimit"
+    url: "https://docs.python.org/3/library/sys.html#sys.setrecursionlimit"
+---
+
+## What it is
+
+**Recursion** is a function calling itself on a smaller problem. A **lambda** is a small anonymous function. `functools` provides tools that take or return functions.
+
+## Why it exists
+
+Trees and nested data are naturally recursive. Small function objects let you customize behaviour such as sort order without naming a one-line function.
+
+## How it works
+
+Each call gets a new frame on the call stack. Python doesn't optimize tail calls, and it limits recursion depth.
+
+<MemoryViz
+  title="Frames for factorial(3)"
+  stackLabel="Call stack"
+  heapLabel="Returned values"
+  code={["def fact(n):", "    if n <= 1:", "        return 1", "    return n * fact(n - 1)"]}
+  steps={[
+    { line: 3, note: "fact(3) is waiting on fact(2).", stack: [{ name: "fact", value: "n=3" }], heap: [] },
+    { line: 3, note: "A new frame is created for each call. Nothing has been multiplied yet.", stack: [{ name: "fact(3)", value: "n=3" }, { name: "fact(2)", value: "n=2" }], heap: [] },
+    { line: 2, note: "The base case stops the descent.", changed: ["fact(1)"], stack: [{ name: "fact(3)", value: "n=3" }, { name: "fact(2)", value: "n=2" }, { name: "fact(1)", value: "n=1" }], heap: [{ id: "r1", label: "fact(1) returns 1" }] },
+    { line: 3, note: "Frames unwind, and each one finishes its multiplication.", stack: [{ name: "fact(3)", value: "n=3" }, { name: "fact(2)", value: "n=2" }], heap: [{ id: "r2", label: "fact(2) returns 2" }] },
+    { line: 3, note: "The outermost call finishes last.", stack: [{ name: "fact(3)", value: "n=3" }], heap: [{ id: "r3", label: "fact(3) returns 6" }] },
+  ]}
+/>
+
+## Syntax and key APIs
+
+| Tool | Purpose |
+| --- | --- |
+| `lambda x: x + 1` | One-expression function |
+| `map(f, xs)`, `filter(f, xs)` | Lazy transformations |
+| `functools.partial(f, a=1)` | Pre-fill arguments |
+| `functools.reduce(f, xs, start)` | Fold to one value |
+| `functools.singledispatch` | Overload on first argument's type |
+| `functools.cached_property` | Compute once per instance |
+| `sys.getrecursionlimit()` | Current depth limit |
+
+## Simple example
+
+```python
+def flatten(items):
+    result = []
+    for item in items:
+        if isinstance(item, list):
+            result.extend(flatten(item))
+        else:
+            result.append(item)
+    return result
+
+assert flatten([1, [2, [3]], 4]) == [1, 2, 3, 4]
+```
+
+## Industry examples
+
+### Pre-configure a function
+
+```python
+from functools import partial
+import json
+
+pretty = partial(json.dumps, indent=2, sort_keys=True)
+assert pretty({"b": 1, "a": 2}).startswith('{\n  "a"')
+```
+
+### Format by type
+
+```python
+from functools import singledispatch
+from datetime import date
+
+@singledispatch
+def render(value):
+    return str(value)
+
+@render.register
+def _(value: date):
+    return value.isoformat()
+
+@render.register
+def _(value: list):
+    return ", ".join(render(v) for v in value)
+
+assert render([date(2026, 1, 2), 5]) == "2026-01-02, 5"
+```
+
+### Compute an expensive attribute once
+
+```python
+from functools import cached_property
+
+class Report:
+    runs = 0
+
+    @cached_property
+    def total(self):
+        Report.runs += 1
+        return 42
+
+r = Report()
+assert r.total == r.total == 42
+assert Report.runs == 1
+```
+
+### Walk a tree iteratively
+
+For unknown depth, an explicit stack avoids the recursion limit.
+
+```python
+tree = {"v": 1, "kids": [{"v": 2, "kids": []}, {"v": 3, "kids": []}]}
+
+stack, seen = [tree], []
+while stack:
+    node = stack.pop()
+    seen.append(node["v"])
+    stack.extend(reversed(node["kids"]))
+
+assert seen == [1, 2, 3]
+```
+
+## Patterns and best practices
+
+- Use comprehensions over `map` and `filter` with a lambda.
+- Keep lambdas to a single simple expression.
+- Add memoization with `lru_cache` for overlapping recursion.
+- Convert deep recursion to a loop with a stack.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Nested data | Recursion | Depth limit |
+| Unknown depth | Explicit stack | More code |
+| Fold | `sum`, `max`, loop | Clearer than `reduce` |
+
+## Common mistakes
+
+**Missing a base case.** It ends in `RecursionError`.
+
+**Raising the recursion limit to fix deep recursion.** It risks a crash. Use a loop.
+
+**Assigning a lambda to a name.** Use `def` for a real name in tracebacks.
+
+**Consuming a `map` twice.** It's a one-shot iterator.
+
+## Interview questions
+
+<Question q="Does Python optimize tail calls?">
+No. Each recursive call uses a new frame, so deep recursion hits the limit.
+</Question>
+
+<Question q="What is partial for?">
+It creates a new callable with some arguments already fixed.
+</Question>

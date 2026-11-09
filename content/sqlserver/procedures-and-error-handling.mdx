@@ -1,0 +1,190 @@
+---
+title: "Stored Procedures and Error Handling"
+summary: "Writing safe procedures, TRY...CATCH, THROW versus RAISERROR, transaction states, and dynamic SQL without injection."
+level: intermediate
+section: programmability
+order: 10
+tags: [stored-procedures, try-catch, throw, raiserror, xact_abort, dynamic-sql, sp_executesql]
+related: [sqlserver/transactions-and-locking, sqlserver/performance-and-query-store]
+versions: "THROW needs SQL Server 2012+."
+tested: "SQL Server 2025 Developer Edition, using temporary stored procedures and tables"
+verified: "2026-11-09"
+docs:
+  - label: "T-SQL: TRY...CATCH"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/language-elements/try-catch-transact-sql"
+  - label: "T-SQL: THROW"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/language-elements/throw-transact-sql"
+  - label: "T-SQL: CREATE PROCEDURE"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/statements/create-procedure-transact-sql"
+  - label: "T-SQL: sp_executesql"
+    url: "https://learn.microsoft.com/en-us/sql/relational-databases/system-stored-procedures/sp-executesql-transact-sql"
+---
+
+## What it is
+
+A stored procedure is a named batch of T-SQL saved in the database. `TRY...CATCH` handles execution errors.
+
+## Why it exists
+
+Procedures centralize data logic, reuse plans and give a controlled permission boundary. Error handling makes sure failures don't leave partial changes.
+
+## How it works
+
+`TRY...CATCH` catches errors with severity above 10 that don't close the connection. Compile errors in the same batch aren't caught. Errors caught in `CATCH` aren't returned to the application unless you re-raise them.
+
+<StepFlow
+  title="The standard error-handling path"
+  code={["SET XACT_ABORT, NOCOUNT ON;", "BEGIN TRY", "  BEGIN TRANSACTION;", "  -- work", "  COMMIT;", "END TRY", "BEGIN CATCH", "  IF @@TRANCOUNT > 0 ROLLBACK;", "  THROW;", "END CATCH;"]}
+  nodes={["begin work", "error raised", "enter CATCH", "rollback", "re-raise"]}
+  steps={[
+    { line: 2, active: [0], note: "The transaction starts and the work runs.", state: { trancount: "1" } },
+    { line: 3, active: [1], note: "A run-time error occurs. Execution jumps to CATCH immediately, and with XACT_ABORT the transaction is doomed." },
+    { line: 6, active: [2], note: "ERROR_NUMBER and related functions are available here." },
+    { line: 7, active: [3], note: "An open transaction is rolled back.", state: { trancount: "0" } },
+    { line: 8, active: [4], note: "THROW re-raises the original error, so the caller knows that it failed." },
+  ]}
+/>
+
+| Feature | `RAISERROR` | `THROW` |
+| --- | --- | --- |
+| Message ID | Must exist in `sys.messages` | Needn't exist |
+| Formatting | printf-style | Use `FORMATMESSAGE` |
+| Severity | A parameter | 16, or original on rethrow |
+| Honors `XACT_ABORT` | No | Yes |
+
+## Syntax and key APIs
+
+| Function | Returns inside CATCH |
+| --- | --- |
+| `ERROR_NUMBER()` | Error number |
+| `ERROR_MESSAGE()` | Text |
+| `ERROR_PROCEDURE()` | Procedure name |
+| `ERROR_LINE()` | Line number |
+| `XACT_STATE()` | 1 committable, 0 none, -1 doomed |
+
+The statement before `THROW` must end with a semicolon.
+
+## Simple example
+
+```sql
+CREATE PROCEDURE #add_item @name varchar(20), @id int OUTPUT
+AS
+BEGIN
+  SET NOCOUNT ON;
+  SET @id = LEN(@name);
+END;
+```
+
+```sql
+DECLARE @result int;
+EXEC #add_item @name = 'book', @id = @result OUTPUT;
+SELECT @result;
+-- output: 4
+```
+
+## Industry examples
+
+### A robust procedure template
+
+```sql
+CREATE TABLE #log (msg varchar(50));
+```
+
+```sql
+CREATE PROCEDURE #transfer @fail bit
+AS
+BEGIN
+  SET XACT_ABORT, NOCOUNT ON;
+  BEGIN TRY
+    BEGIN TRANSACTION;
+    INSERT #log VALUES ('step 1');
+    IF @fail = 1 THROW 50001, 'Insufficient funds', 1;
+    COMMIT;
+  END TRY
+  BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK;
+    THROW;
+  END CATCH;
+END;
+```
+
+```sql
+BEGIN TRY
+  EXEC #transfer @fail = 1;
+END TRY
+BEGIN CATCH
+  SELECT ERROR_NUMBER();
+END CATCH;
+-- output: 50001
+```
+
+```sql
+SELECT COUNT(*) FROM #log;
+-- output: 0
+```
+
+### Safe dynamic SQL
+
+Use `sp_executesql` with parameters, and `QUOTENAME` for identifiers, which can't be parameters.
+
+```sql
+DECLARE @column sysname = N'name';
+DECLARE @sql nvarchar(max) =
+  N'SELECT ' + QUOTENAME(@column) + N' FROM sys.types WHERE name = @name;';
+
+EXEC sp_executesql @sql, N'@name sysname', @name = N'int';
+-- output: int
+```
+
+### Batch large changes
+
+Small transactions keep locks and the log manageable.
+
+```plsql
+WHILE 1 = 1
+BEGIN
+  DELETE TOP (5000) FROM dbo.Events WHERE CreatedAt < @cutoff;
+  IF @@ROWCOUNT = 0 BREAK;
+END;
+```
+
+## Patterns and best practices
+
+- Start procedures with `SET XACT_ABORT, NOCOUNT ON`.
+- Always re-raise in `CATCH`, unless you've truly handled the error.
+- Use `THROW` for new code.
+- Use the `dbo.` schema when creating and calling.
+
+## Alternatives and trade-offs
+
+| Option | Strength | Weakness |
+| --- | --- | --- |
+| Stored procedure | Security boundary, central logic | Harder to version and test |
+| Application SQL | Lives with the app | Permissions are broader |
+| ORM | Fast development | Generated SQL needs review |
+
+## Common mistakes
+
+**Catching and swallowing errors.** The caller assumes success.
+
+**Using `TRY...CATCH` for syntax errors.** Compile errors at the same level aren't caught.
+
+**Committing a doomed transaction.** When `XACT_STATE()` is -1, only rollback is possible.
+
+**Escaping `%` incorrectly in `THROW`.** Double it, as `%%`.
+
+**Concatenating user input into dynamic SQL.** It's SQL injection.
+
+## Interview questions
+
+<Question q="THROW versus RAISERROR?">
+`THROW` needs no pre-registered message, re-raises original errors and honors `XACT_ABORT`. `RAISERROR` supports printf formatting and a severity parameter.
+</Question>
+
+<Question q="What does XACT_STATE of -1 mean?">
+The transaction is uncommittable. It can only read data or roll back.
+</Question>
+
+<Question q="Why use SET XACT_ABORT ON?">
+So that any run-time error rolls back the whole transaction, including when a client timeout stops the batch.
+</Question>

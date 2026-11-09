@@ -1,0 +1,147 @@
+---
+title: "Responsive Design and State Variants"
+summary: "Mobile-first breakpoints, container queries, and styling from hover, parent, sibling, ARIA and data states."
+level: intermediate
+section: interaction
+order: 10
+tags: [responsive, breakpoints, container-queries, variants, hover, group, peer, has, aria, data]
+related: [tailwind/layout-and-spacing, tailwind/theme-and-dark-mode]
+versions: "Tailwind CSS v4.3. Variants stack left to right in v4."
+tested: "Generated output compiled with Tailwind 4.3.5."
+verified: "2026-11-09"
+docs:
+  - label: "Tailwind: Responsive design"
+    url: "https://tailwindcss.com/docs/responsive-design"
+  - label: "Tailwind: Hover, focus and other states"
+    url: "https://tailwindcss.com/docs/hover-focus-and-other-states"
+---
+
+## What it is
+
+A **variant** is a prefix that applies a utility conditionally: `md:flex` above a width, `hover:underline` on hover, `aria-checked:bg-sky-700` for a state.
+
+## Why it exists
+
+Variants keep conditional styles beside the element they affect, removing the need for separate selectors and media queries.
+
+## How it works
+
+Breakpoints are mobile-first and use minimum widths. An unprefixed class applies everywhere, and a prefixed one applies at that width **and above**.
+
+| Prefix | Minimum width |
+| --- | --- |
+| `sm` | 40rem (640px) |
+| `md` | 48rem (768px) |
+| `lg` | 64rem (1024px) |
+| `xl` | 80rem (1280px) |
+| `2xl` | 96rem (1536px) |
+
+Container queries respond to a parent's width rather than the viewport. They're useful for components that appear in different column widths.
+
+`hover:` only applies when the primary input supports hover, using `@media (hover: hover)`.
+
+## Syntax and key APIs
+
+| Goal | Example |
+| --- | --- |
+| Range of widths | `md:max-xl:flex` |
+| Container query | `@container` then `@md:flex-row` |
+| Named container | `@container/main`, `@sm/main:flex-col` |
+| Parent state | `group`, `group-hover:underline` |
+| Earlier sibling state | `peer`, `peer-invalid:block` |
+| Descendant state | `has-checked:bg-indigo-50` |
+| Negation | `not-focus:opacity-50` |
+| Data attribute | `data-active:border-sky-500`, `data-[size=lg]:p-8` |
+| ARIA | `aria-expanded:rotate-180` |
+| Arbitrary | `[&_p]:mt-4` |
+| Motion preference | `motion-safe:transition` |
+
+## Simple example
+
+```html
+<div class="flex flex-col gap-4 md:flex-row">
+  <aside class="md:w-64">Filters</aside>
+  <section class="flex-1">Results</section>
+</div>
+```
+
+## Industry examples
+
+### A card that adapts to its container
+
+```html
+<div class="@container">
+  <article class="flex flex-col gap-3 @md:flex-row">
+    <img class="@md:w-48" src="/a.png" alt="" />
+    <p>Adapts wherever it's placed.</p>
+  </article>
+</div>
+```
+
+### Show a validation message without JavaScript
+
+`peer` only works when the peer comes before the element it affects.
+
+```html
+<input class="peer border invalid:border-red-500" type="email" required />
+<p class="hidden text-red-600 peer-invalid:block">Enter a valid email.</p>
+```
+
+### Style a card based on a checked radio
+
+```html
+<label class="rounded border p-4 has-checked:border-indigo-500 has-checked:bg-indigo-50">
+  <input type="radio" name="plan" />
+  Pro
+</label>
+```
+
+### Style from accessible state
+
+Driving visuals from ARIA keeps the visual and accessible state in sync.
+
+```html
+<button aria-expanded="false" class="group">
+  Menu
+  <svg class="size-4 group-aria-expanded:rotate-180"></svg>
+</button>
+```
+
+## Patterns and best practices
+
+- Write the mobile layout first, then add larger breakpoints.
+- Use container queries for reusable components.
+- Provide visible `focus-visible:` styles.
+- Wrap decorative animation in `motion-safe:`.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Page-level layout | Breakpoints | Unaware of the component's space |
+| Component-level layout | Container queries | Needs a container ancestor |
+| Complex state | JavaScript | More code |
+
+## Common mistakes
+
+**Using `sm:` to mean "on small screens".** It means 40rem and up. Unprefixed classes target phones.
+
+**Placing a `peer` after its target.** It only affects later siblings.
+
+**Stacking variants in v3 order.** v4 stacks left to right, so `*:first:pt-0` becomes `first:*:pt-0`.
+
+**Relying on hover on touch devices.** It doesn't apply there by default.
+
+## Interview questions
+
+<Question q="What does mobile-first mean in Tailwind?">
+Unprefixed utilities apply at all widths, and breakpoint prefixes add styles from that width upward.
+</Question>
+
+<Question q="What is the difference between group and peer?">
+`group` styles a descendant based on a parent's state. `peer` styles an element based on an earlier sibling's state.
+</Question>
+
+<Question q="When would you use a container query?">
+When a component's layout should depend on the space given to it rather than on the viewport.
+</Question>

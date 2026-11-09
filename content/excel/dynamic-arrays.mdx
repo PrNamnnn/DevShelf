@@ -1,0 +1,86 @@
+---
+title: "Dynamic Arrays: FILTER, SORT, UNIQUE and SEQUENCE"
+summary: "Write one formula that spills results, with safe handling of empty results and Table-based ranges."
+level: intermediate
+section: structure
+order: 1
+tags: ["dynamic arrays","FILTER","SORT","UNIQUE","SEQUENCE","spill"]
+requires: ["excel/lookups"]
+related: ["excel/advanced-formulas","excel/tables-validation-and-formatting"]
+versions: "Microsoft 365, Excel 2021 and Excel 2024"
+tested: "Dynamic array functions aren't available in Excel build 20527 on this machine, so examples were checked against Microsoft documentation and not executed"
+verified: "2026-11-09"
+docs:
+  - label: "Excel: FILTER function"
+    url: "https://support.microsoft.com/en-us/office/filter-function-f4f7cb66-82eb-4767-8f7c-4877ad80c759"
+  - label: "Excel: SORT function"
+    url: "https://support.microsoft.com/en-us/office/sort-function-22f63bd0-ccc8-492f-953d-c20e8e44b86c"
+  - label: "Excel: UNIQUE function"
+    url: "https://support.microsoft.com/en-us/office/unique-function-c5ab87fd-30a3-4ce9-9d1a-40204fb85e1e"
+  - label: "Excel: SEQUENCE function"
+    url: "https://support.microsoft.com/en-us/office/sequence-function-57467a98-57e0-4817-9f14-2eb78519ca90"
+---
+
+## What it is
+
+A **dynamic array** formula returns many values that automatically **spill** into neighbouring empty cells.
+
+## Why it exists
+
+It replaces fill-down formulas, helper columns and legacy array formulas with a single expression that resizes as data changes.
+
+## How it works
+
+The range a formula fills is called the spill range. Refer to all of it using `#`, as in `F2#`. If something blocks it, the formula returns `#SPILL!`. `FILTER` returns `#CALC!` when nothing matches, unless you provide the optional `if_empty` value.
+
+## Syntax and key APIs
+
+```text
+=FILTER(array, include, [if_empty])
+=SORT(array, [sort_index], [sort_order], [by_col])
+=SORTBY(array, by_array1, [sort_order1], ...)
+=UNIQUE(array, [by_col], [exactly_once])
+=SEQUENCE(rows, [columns], [start], [step])
+```
+
+`SORT` order is 1 for ascending and −1 for descending. With `exactly_once` set to `TRUE`, `UNIQUE` returns values that appear only once.
+
+## Simple example
+
+```text
+=FILTER(A2:E6,A2:A6="North","none")     both North rows
+=SORT(UNIQUE(A2:A6))                    East, North, South
+=INDEX(SORT(C2:C6,,-1),1)               12, the largest
+=SUM(SEQUENCE(3))                       6
+=FILTER(A2:E6,(A2:A6="North")*(C2:C6>=5))        AND
+=FILTER(A2:E6,(A2:A6="North")+(A2:A6="East"))    OR
+```
+
+Multiplying boolean arrays performs AND, and adding them performs OR.
+
+## Industry examples
+
+Self-updating leaderboards combine `SORT` and `FILTER`, and dropdowns can reference a `UNIQUE(...)#` spill for a live list of options.
+
+## Patterns and best practices
+
+- Point spills at Excel Tables so that they grow with new rows.
+- Reserve clear space beneath a spilling formula.
+- Always supply `if_empty`.
+
+## Alternatives and trade-offs
+
+Pivot Tables need a refresh but handle summaries with ease. Formula-driven views update instantly, but they can get slow on very large data.
+
+## Common mistakes
+
+- Placing a value in the spill path.
+- Sharing the file with users on older Excel versions, who see static results or `_xlfn` markers.
+- Using a spill formula inside a Table, which isn't allowed.
+- Forgetting the `#` operator.
+
+## Interview questions
+
+<Question q="What causes #SPILL!?">Something occupies a cell that the formula needs, or a Table or merged cell prevents spilling.</Question>
+
+<Question q="How do you combine conditions in FILTER?">Multiply boolean arrays for AND and add them for OR.</Question>

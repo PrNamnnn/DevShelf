@@ -1,0 +1,164 @@
+---
+title: "Custom Hooks"
+summary: "Sharing stateful logic, designing a good Hook API, and the Hooks that aren't worth extracting."
+level: intermediate
+section: hooks
+order: 30
+tags: [custom-hooks, reuse, useData, useDebounce, composition]
+requires: [react/hooks-reference]
+related: [react/context-and-reducers, vue/composables-pinia-and-router]
+versions: "React 16.8+. useEffectEvent is in current docs for 19.2+."
+tested: "Not executed. Checked against the React docs."
+verified: "2026-11-09"
+docs:
+  - label: "React: Reusing logic with custom Hooks"
+    url: "https://react.dev/learn/reusing-logic-with-custom-hooks"
+  - label: "React: useSyncExternalStore"
+    url: "https://react.dev/reference/react/useSyncExternalStore"
+---
+
+## What it is
+
+A custom Hook is a function whose name starts with `use` and which calls other Hooks. It may return anything.
+
+## Why it exists
+
+It's the way to reuse stateful logic across components without changing the component tree.
+
+## How it works
+
+A custom Hook runs as part of the calling component's render. It shares **logic, not state**: each call has completely independent state. Hooks re-run on every render, so they must be pure, like components.
+
+<TreeViz
+  title="Two components, one Hook, separate state"
+  nodes={[{ id: "app", label: "App" }, { id: "a", label: "Header", parent: "app" }, { id: "b", label: "Sidebar", parent: "app" }, { id: "sa", label: "useToggle: true", parent: "a" }, { id: "sb", label: "useToggle: false", parent: "b" }]}
+  steps={[
+    { active: ["a", "b"], note: "Both components call the same useToggle Hook." },
+    { active: ["sa"], note: "Header toggles its state to true." },
+    { visited: ["sa"], active: ["sb"], note: "Sidebar's state is unaffected. To share state, lift it up or use context." },
+  ]}
+/>
+
+## Syntax and key APIs
+
+```jsx
+function useToggle(initial = false) {
+  const [on, setOn] = useState(initial);
+  const toggle = useCallback(() => setOn((value) => !value), []);
+  return [on, toggle];
+}
+```
+
+## Simple example
+
+```jsx
+function useDebouncedValue(value, delay) {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+
+  return debounced;
+}
+```
+
+## Industry examples
+
+### Fetch with cancellation
+
+```jsx
+function useData(url) {
+  const [state, setState] = useState({ status: "loading" });
+
+  useEffect(() => {
+    if (!url) return;
+    const controller = new AbortController();
+    setState({ status: "loading" });
+
+    fetch(url, { signal: controller.signal })
+      .then((r) => r.json())
+      .then((data) => setState({ status: "success", data }))
+      .catch((error) => {
+        if (error.name !== "AbortError") setState({ status: "error", error });
+      });
+
+    return () => controller.abort();
+  }, [url]);
+
+  return state;
+}
+```
+
+### Accept a callback safely
+
+An Effect Event reads the latest callback without reconnecting.
+
+```jsx
+function useChatRoom({ roomId, onMessage }) {
+  const handleMessage = useEffectEvent(onMessage);
+
+  useEffect(() => {
+    const connection = connect(roomId);
+    connection.on("message", (m) => handleMessage(m));
+    return () => connection.disconnect();
+  }, [roomId]);
+}
+```
+
+### Persist to localStorage
+
+```jsx
+function useStoredState(key, initial) {
+  const [value, setValue] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(key)) ?? initial;
+    } catch {
+      return initial;
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem(key, JSON.stringify(value));
+  }, [key, value]);
+
+  return [value, setValue];
+}
+```
+
+## Patterns and best practices
+
+- Name Hooks for their purpose, such as `useOnlineStatus`.
+- Keep the same Hook order internally, as with any component.
+- Return an array for two values and an object for more.
+- Extract when an Effect is repeated, or when its details distract from the component.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Shared logic | Custom Hook | Separate state per call |
+| Shared state | Context or store | More wiring |
+| Pure calculation | Plain function | No Hook needed |
+| Server data | Data library or framework | Dependency |
+
+## Common mistakes
+
+**Naming a non-Hook with `use`.** Only use the prefix if it calls Hooks.
+
+**Lifecycle wrappers like `useMount`.** The React docs advise against them, as they hide dependencies.
+
+**Expecting shared state.** Two calls are independent.
+
+**Calling a custom Hook conditionally.** The Rules of Hooks apply.
+
+## Interview questions
+
+<Question q="Do custom Hooks share state?">
+No. They share logic. Each call has its own state.
+</Question>
+
+<Question q="When should you extract a custom Hook?">
+When stateful logic, especially an Effect, repeats or hides what a component is doing.
+</Question>

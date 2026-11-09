@@ -1,0 +1,169 @@
+---
+title: "Rendering Performance and Memoization"
+summary: "What actually triggers re-renders, when useMemo, useCallback and memo help, and how React Compiler changes the picture."
+level: advanced
+section: performance
+order: 10
+tags: [performance, memo, useMemo, useCallback, react-compiler, re-renders, profiler, optimization]
+related: [react/state-and-rendering, react/reconciliation-and-keys, react/concurrent-features-and-actions]
+versions: "React 19. React Compiler reached v1.0 in October 2025."
+tested: "memo skip behaviour run on React 19.3.1 with jsdom. Compiler output wasn't run."
+verified: "2026-11-09"
+docs:
+  - label: "React: useMemo"
+    url: "https://react.dev/reference/react/useMemo"
+  - label: "React: useCallback"
+    url: "https://react.dev/reference/react/useCallback"
+  - label: "React: memo"
+    url: "https://react.dev/reference/react/memo"
+  - label: "React: React Compiler"
+    url: "https://react.dev/learn/react-compiler"
+  - label: "React: useDeferredValue"
+    url: "https://react.dev/reference/react/useDeferredValue"
+---
+
+## What it is
+
+Memoization reuses a previous result when its inputs haven't changed. In React, that means caching a value (`useMemo`), a function (`useCallback`) or a component's output (`memo`).
+
+## Why it exists
+
+When a component renders, its children render too. That's usually fast, but expensive subtrees can make typing or scrolling lag.
+
+## How it works
+
+A state change renders that component and everything beneath it, whether or not props changed. `memo` adds a check: if every prop is unchanged by `Object.is`, React can skip that component. New objects and functions created during render fail this check, which is why `useMemo` and `useCallback` exist.
+
+<StepFlow
+  title="Why memo alone may do nothing"
+  code={["function Page() {", "  const [q, setQ] = useState('');", "  const onPick = (id) => pick(id);", "  return <List onPick={onPick} />;", "}", "const List = memo(ListImpl);"]}
+  nodes={["Page state changes", "Page renders", "compare List props", "List renders or skips"]}
+  steps={[
+    { line: 1, active: [0, 1], note: "Typing changes q, so Page renders." },
+    { line: 2, active: [1], note: "A new onPick function is created during this render." },
+    { line: 3, active: [2], note: "memo compares the old and new onPick with Object.is. They differ.", state: { "onPick same?": "false" } },
+    { line: 5, active: [3], note: "List renders anyway, so memo wasted its comparison.", state: { List: "rendered" } },
+    { line: 2, active: [2, 3], note: "With useCallback, or with React Compiler, onPick keeps its identity and memo can skip.", state: { "onPick same?": "true", List: "skipped" } },
+  ]}
+/>
+
+Memoization is an optimization, not a guarantee. A memoized component still renders for its own state or a context change.
+
+## Syntax and key APIs
+
+```jsx
+const sorted = useMemo(() => expensiveSort(items), [items]);
+const onSave = useCallback((id) => save(id), [save]);
+const Row = memo(function Row({ item }) { /* ... */ });
+const deferred = useDeferredValue(query);
+```
+
+`useCallback(fn, deps)` is effectively `useMemo(() => fn, deps)`.
+
+<Callout type="version">
+React Compiler automatically memoizes values, functions and components at build time, so new code often doesn't need manual `useMemo`, `useCallback` or `memo`. React still supports them.
+</Callout>
+
+## Simple example
+
+```jsx
+const visible = useMemo(
+  () => todos.filter((todo) => todo.tag === tag),
+  [todos, tag],
+);
+```
+
+## Industry examples
+
+### Keep typing responsive
+
+`useDeferredValue` renders the input immediately and the slow list in an interruptible background pass. The list must be wrapped in `memo` for this to help.
+
+```jsx
+function Search({ items }) {
+  const [query, setQuery] = useState("");
+  const deferred = useDeferredValue(query);
+
+  return (
+    <>
+      <input value={query} onChange={(e) => setQuery(e.target.value)} />
+      <SlowList items={items} query={deferred} />
+    </>
+  );
+}
+
+const SlowList = memo(function SlowList({ items, query }) {
+  return items
+    .filter((item) => item.includes(query))
+    .map((item) => <p key={item}>{item}</p>);
+});
+```
+
+### Move state down
+
+The cheapest fix needs no memoization. Isolate what changes so that fewer components re-render.
+
+```jsx
+function Page() {
+  return (
+    <>
+      <SearchBox />
+      <ExpensiveChart />
+    </>
+  );
+}
+```
+
+### Pass the slow part as children
+
+An element passed from the parent keeps its identity when only the wrapper's state changes.
+
+```jsx
+function Hover({ children }) {
+  const [on, setOn] = useState(false);
+  return <div onMouseEnter={() => setOn(true)}>{children}</div>;
+}
+```
+
+## Patterns and best practices
+
+1. Measure with the React DevTools Profiler first.
+2. Move state closer to where it's used.
+3. Virtualize long lists.
+4. Add memoization only where measurements show value, or enable React Compiler.
+
+Manual `useMemo` is useful when a calculation is slow and rarely changes, when the value goes to a `memo` child, or when it's a dependency of another Hook.
+
+## Alternatives and trade-offs
+
+| Technique | Helps when | Cost |
+| --- | --- | --- |
+| Moving state down | Isolated updates | Restructuring |
+| `memo` with stable props | Costly children | Comparison and upkeep |
+| Virtualization | Thousands of rows | Library and layout constraints |
+| `useDeferredValue` | Slow renders from fast input | Temporarily stale content |
+| React Compiler | App-wide memoization | Build step |
+
+## Common mistakes
+
+**Memoizing everything by hand.** It adds noise and cost for no measurable benefit.
+
+**Missing dependencies.** The value goes stale.
+
+**Using `useMemo` for semantic guarantees.** React may discard a cached value. Use state or a ref when the identity must never change.
+
+**Writing a custom `arePropsEqual` that skips functions.** The docs warn that you must compare every prop, including functions.
+
+## Interview questions
+
+<Question q="Does a component re-render if its props didn't change?">
+Yes, by default, when its parent renders. `memo` allows it to skip if all props are equal by `Object.is`.
+</Question>
+
+<Question q="useMemo versus useCallback?">
+`useMemo` caches a calculated value. `useCallback` caches the function itself.
+</Question>
+
+<Question q="What does React Compiler do?">
+It analyzes components at build time and inserts memoization automatically, reducing the need for manual hooks.
+</Question>

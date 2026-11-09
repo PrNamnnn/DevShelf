@@ -1,0 +1,106 @@
+---
+title: "Probability Fundamentals and Bayes' Theorem"
+summary: "Events, conditional probability, independence and Bayes' theorem, applied to fraud alerts and base rates."
+level: fundamental
+section: probability
+order: 1
+tags: ["probability","conditional probability","independence","Bayes"]
+requires: ["statistics/data-types-and-scales"]
+related: ["statistics/random-variables-and-discrete-distributions","machine-learning/naive-bayes-knn-and-svm","machine-learning/classification-metrics"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "Python: statistics.NormalDist and tools"
+    url: "https://docs.python.org/3/library/statistics.html"
+  - label: "NIST: Probability"
+    url: "https://www.itl.nist.gov/div898/handbook/eda/section3/eda36.htm"
+---
+
+## What it is
+
+Probability is a number from 0 to 1 that expresses how likely an event is. **Conditional probability** P(A | B) is the probability of A given that B occurred. Events are **independent** when knowing one doesn't change the probability of the other.
+
+**Bayes' theorem** reverses a conditional, updating a prior belief in light of evidence.
+
+## Why it exists
+
+Statistics rests on probability, and human intuition is notably poor at it. People confuse P(alert | fraud) with P(fraud | alert), which can be very different numbers.
+
+## How it works
+
+Core rules:
+
+| Rule | Formula |
+| --- | --- |
+| Complement | P(not A) = 1 − P(A) |
+| Addition | P(A or B) = P(A) + P(B) − P(A and B) |
+| Conditional | P(A given B) = P(A and B) ÷ P(B) |
+| Multiplication | P(A and B) = P(A given B) · P(B) |
+| Independent | P(A and B) = P(A) · P(B) |
+
+Mutually exclusive isn't the same as independent. If two events can't both occur and each has positive probability, then learning one happened tells you the other didn't, so they're dependent.
+
+## Intuition and formula
+
+<Formula>P(H | E) = P(E | H) · P(H) / P(E)</Formula>
+
+P(H) is the prior. P(E | H) is the likelihood. P(E) is the total probability of the evidence, and the result is the posterior.
+
+## Worked example
+
+2% of transactions are fraudulent. A detector flags 90% of fraud and 5% of legitimate transactions. Out of 10,000 transactions, 200 are fraud, of which 180 get flagged. Of the 9,800 legitimate ones, 490 get flagged. So P(fraud | flag) = 180 ÷ 670 = 26.9%. Most alerts are false alarms despite an apparently accurate detector, and that's the base-rate effect.
+
+## Python
+
+```python
+fraud = 0.02
+flag_given_fraud = 0.90
+flag_given_legit = 0.05
+
+flag = flag_given_fraud * fraud + flag_given_legit * (1 - fraud)
+fraud_given_flag = flag_given_fraud * fraud / flag
+assert round(fraud_given_flag, 3) == 0.269
+
+# Independence check on a contingency count.
+total, a, b, both = 1_000, 300, 200, 60
+assert both / total == (a / total) * (b / total)
+```
+
+## SQL
+
+```sql
+SELECT round(avg(fraud) FILTER (WHERE flagged = 1), 3) AS p_fraud_given_flag
+FROM (
+  SELECT 1 AS fraud, 1 AS flagged FROM generate_series(1, 180)
+  UNION ALL SELECT 1, 0 FROM generate_series(1, 20)
+  UNION ALL SELECT 0, 1 FROM generate_series(1, 490)
+  UNION ALL SELECT 0, 0 FROM generate_series(1, 9310)
+) AS t;
+-- rows: [{"p_fraud_given_flag":"0.269"}]
+```
+
+## In industry
+
+Conditional rates drive funnels ("given they added to cart, did they buy?"). Bayes' theorem underlies spam filters and A/B platforms that report the probability a variant is best.
+
+## Assumptions and limitations
+
+Bayesian results depend on the prior, and probabilities estimated from history assume stable conditions. Independence is frequently assumed for convenience: sessions from one user aren't independent.
+
+## Common mistakes
+
+- Confusing P(A | B) with P(B | A).
+- Ignoring base rates.
+- Treating exclusive events as independent.
+- Multiplying probabilities of correlated failures.
+
+## Alternatives
+
+Natural frequencies, such as "180 of 670", communicate conditional probability more clearly than formulas. Simulation answers probability questions that are hard to derive analytically.
+
+## Interview questions
+
+<Question q="A test is 99% accurate. Does a positive result mean a 99% chance of disease?">No. It depends on prevalence. With a rare disease, most positives can be false.</Question>
+
+<Question q="Can mutually exclusive events be independent?">Only if at least one has probability zero. Otherwise one occurring rules out the other, which is dependence.</Question>

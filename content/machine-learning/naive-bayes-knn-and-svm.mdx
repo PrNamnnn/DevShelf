@@ -1,0 +1,99 @@
+---
+title: "Naive Bayes, KNN and SVM"
+summary: "Three classical classifiers and the situations where each is still the right tool."
+level: intermediate
+section: algorithms
+order: 3
+tags: ["Naive Bayes","KNN","SVM","kernels"]
+requires: ["machine-learning/ml-foundations","statistics/probability-and-bayes"]
+related: ["statistics/scaling-binning-and-transforms","machine-learning/classification-metrics"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Naive Bayes"
+    url: "https://scikit-learn.org/stable/modules/naive_bayes.html"
+  - label: "scikit-learn: Nearest Neighbors"
+    url: "https://scikit-learn.org/stable/modules/neighbors.html"
+  - label: "scikit-learn: SVM"
+    url: "https://scikit-learn.org/stable/modules/svm.html"
+---
+
+## What it is
+
+- **Naive Bayes** applies Bayes' theorem, assuming features are independent given the class.
+- **KNN** predicts from the k closest training points.
+- **SVM** finds a boundary with the largest margin, and kernels give it nonlinear capability.
+
+## Why it exists
+
+These methods are simple baselines and they remain effective in specific conditions, like short text classification with Naive Bayes.
+
+## How it works
+
+| Method | Training | Prediction | Needs scaling |
+| --- | --- | --- | --- |
+| Naive Bayes | Very fast | Very fast | No |
+| KNN | None | Slow with large data | Yes |
+| SVM | Slow on large data | Depends on support vectors | Yes |
+
+Naive Bayes probabilities are often poorly calibrated even when its class ranking is good. KNN weakens in high dimensions, since distances become similar. SVM's `C` controls margin violations.
+
+## Intuition and formula
+
+<Formula>P(y | x) ∝ P(y) Π P(xⱼ | y)</Formula>
+
+## Worked example
+
+Spam filtering on word counts suits multinomial Naive Bayes. With very few examples, it can beat larger models since it estimates few parameters.
+
+## Python
+
+```python
+from sklearn.datasets import make_moons
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.model_selection import cross_val_score
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
+
+docs = ["win money now", "cheap money offer", "meeting at noon", "project status meeting"]
+labels = [1, 1, 0, 0]
+spam = make_pipeline(CountVectorizer(), MultinomialNB()).fit(docs, labels)
+assert spam.predict(["free money"])[0] == 1
+
+X, y = make_moons(n_samples=500, noise=0.2, random_state=0)
+knn = make_pipeline(StandardScaler(), KNeighborsClassifier(5))
+linear = make_pipeline(StandardScaler(), SVC(kernel="linear"))
+rbf = make_pipeline(StandardScaler(), SVC(kernel="rbf"))
+
+assert cross_val_score(rbf, X, y, cv=5).mean() > cross_val_score(linear, X, y, cv=5).mean()
+assert cross_val_score(knn, X, y, cv=5).mean() > 0.9
+```
+
+## In industry
+
+Used as baselines, in low-latency text filters, and for smaller structured datasets.
+
+## Assumptions and limitations
+
+Naive independence rarely holds. KNN needs all data at prediction time. Kernel SVMs scale poorly to very large datasets.
+
+## Common mistakes
+
+- Skipping scaling for KNN or SVM.
+- Trusting Naive Bayes probabilities directly.
+- Using KNN with hundreds of raw features.
+- Running kernel SVM on millions of rows.
+
+## Alternatives
+
+Logistic regression is usually better calibrated, and boosted trees are typically more accurate on tabular data.
+
+## Interview questions
+
+<Question q="Why is Naive Bayes 'naive'?">It assumes features are conditionally independent given the class.</Question>
+
+<Question q="What is the kernel trick?">Computing similarity as though data were in a higher-dimensional space, without constructing those features.</Question>

@@ -1,0 +1,97 @@
+---
+title: "Storytelling, Uncertainty and Recommendations"
+summary: "Present findings to decision makers with a clear claim, evidence, communicated uncertainty and a specific recommendation."
+level: intermediate
+section: communication
+order: 4
+tags: ["data storytelling","uncertainty","recommendations","presentation"]
+requires: ["statistics/choosing-the-right-chart","statistics/estimation-and-confidence-intervals"]
+related: ["statistics/interpreting-experiments","statistics/asking-analytical-questions"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "Matplotlib: errorbar"
+    url: "https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.errorbar.html"
+  - label: "Microsoft: Create a narrative"
+    url: "https://learn.microsoft.com/en-us/power-bi/visuals/power-bi-visualization-smart-narrative"
+---
+
+## What it is
+
+Data storytelling structures analysis so that a specific audience understands what happened, why it matters and what to do.
+
+## Why it exists
+
+An analysis that isn't understood or acted upon had no value. Decision makers need a conclusion, and they need to know how sure you are.
+
+## How it works
+
+Lead with the answer. Use this pattern:
+
+1. **Situation:** what were we trying to learn?
+2. **Finding:** the main claim in one sentence.
+3. **Evidence:** the one or two charts that prove it.
+4. **Uncertainty:** the range and what could make it wrong.
+5. **Recommendation:** the action, owner and date.
+
+Title each chart with its takeaway instead of a topic. Express uncertainty with intervals, and use language consistently. Separate what the data shows from your interpretation.
+
+Report what you didn't find too, along with analyses that were inconclusive.
+
+## Worked example
+
+Weak: "Here is a chart of churn by plan." Strong: "Monthly-plan churn doubled after the billing change, so reverting it could retain an estimated 900 to 1,400 customers a quarter. We recommend reverting in the next release, and validating with a holdback." The range is the honest part, and the holdback addresses remaining uncertainty.
+
+## Python
+
+```python
+import io
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+labels = ["Control", "Treatment"]
+rates = [16.0, 17.6]
+margins = [0.51, 0.53]
+
+fig, ax = plt.subplots(figsize=(5, 3))
+ax.errorbar(labels, rates, yerr=margins, fmt="o", capsize=4, color="#2f5fc9")
+ax.set_ylabel("Activation (%)")
+ax.set_title("Guided onboarding lifted activation by about 1.6 points")
+
+buffer = io.BytesIO()
+fig.savefig(buffer, format="png")
+plt.close(fig)
+assert buffer.tell() > 1_000
+```
+
+## Excel or Power BI
+
+Add error bars with custom values in Excel. Power BI's error bars and smart narrative visual can add uncertainty and generated summaries, which should still be reviewed.
+
+## In industry
+
+Written decision documents are common for important decisions, with appendices that hold the methodology.
+
+## Assumptions and limitations
+
+A compelling story can oversimplify. Don't hide contradictory evidence, and adapt the depth to the audience without changing the conclusion.
+
+## Common mistakes
+
+- Walking through every step in the order you did it.
+- Titling charts with only a topic.
+- Giving a point estimate to look confident.
+- Making no recommendation.
+
+## Alternatives
+
+Interactive reports suit exploration by analysts, and one-page memos suit executives.
+
+## Interview questions
+
+<Question q="How would you explain a confidence interval to an executive?">Give the plausible range and what the decision would be at each end.</Question>
+
+<Question q="Your analysis contradicts a leader's belief. What do you do?">Share early, show evidence and limitations, invite their alternative explanations and suggest a way to test them.</Question>

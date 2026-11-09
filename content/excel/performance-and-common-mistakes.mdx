@@ -1,0 +1,78 @@
+---
+title: "Performance, Auditing and Realistic Scenarios"
+summary: "Speed up slow workbooks, audit formulas and work through realistic spreadsheet tasks with the right tools."
+level: advanced
+section: professional
+order: 2
+tags: ["performance","volatile functions","auditing","spreadsheet errors"]
+requires: ["excel/advanced-formulas"]
+related: ["statistics/inconsistent-data-and-validation","statistics/data-quality-and-leakage"]
+versions: "Excel 2016 onward"
+tested: "Guidance checked against Microsoft documentation"
+verified: "2026-11-09"
+docs:
+  - label: "Excel: Performance tips"
+    url: "https://learn.microsoft.com/en-us/office/vba/excel/concepts/excel-performance/excel-tips-for-optimizing-performance-obstructions"
+  - label: "Excel: Detect errors in formulas"
+    url: "https://support.microsoft.com/en-us/office/detect-errors-in-formulas-3a8acca5-1d61-4702-80e0-99a36a2822c1"
+---
+
+## What it is
+
+This lesson covers keeping workbooks fast and trustworthy, and applying the book's tools to realistic tasks.
+
+## Why it exists
+
+Spreadsheet mistakes have caused real financial losses. A workbook can look perfectly fine while referencing the wrong range.
+
+## How it works
+
+Recalculation slows with volatile functions (`NOW`, `TODAY`, `RAND`, `OFFSET`, `INDIRECT`), full-column array operations, huge conditional-format ranges and many lookups. Turn off automatic calculation while editing massive models, and use Power Query and the Data Model for millions of rows.
+
+Audit tools include Trace Precedents and Dependents, Evaluate Formula, the Watch Window, Show Formulas, and Go To Special for constants and errors.
+
+## Syntax and key APIs
+
+| Error | Typical cause |
+| --- | --- |
+| `#N/A` | A lookup found nothing |
+| `#REF!` | A deleted reference |
+| `#VALUE!` | Wrong type or mismatched ranges |
+| `#DIV/0!` | Divided by zero |
+| `#NAME?` | Unknown function or typo |
+| `#SPILL!` | Blocked spill area |
+| `#CALC!` | Empty array result |
+
+## Simple example
+
+Scenario: monthly sales from 40 stores arrive as separate workbooks. Power Query combines the folder, types and cleans columns, and loads to the Data Model. A pivot and slicers provide the report. Next month, replace the files and press Refresh, and the formula count stays near zero.
+
+Other scenarios: a reconciliation with `XLOOKUP` and a tolerance flag, a commission calculator based on a tier table, and an ageing report with `TODAY()` and `COUNTIFS` buckets.
+
+## Industry examples
+
+Regulated firms apply spreadsheet control standards covering versioning, review and access. Model-review teams use cell-level comparison tools to find changes.
+
+## Patterns and best practices
+
+- Keep a change log and version naming.
+- Add totals that reconcile to the source.
+- Have someone else review crucial models.
+- Protect formula cells.
+
+## Alternatives and trade-offs
+
+Move to a database and BI tool when many people must edit concurrently, or when data no longer fits comfortably.
+
+## Common mistakes
+
+- Sort operations that break row alignment.
+- Hard-coded numbers typed over formulas.
+- Hidden rows included in totals.
+- Emailed copies that diverge from the master.
+
+## Interview questions
+
+<Question q="How would you speed up a slow workbook?">Find volatile functions, reduce full-column and array formulas, simplify formats, and shift heavy transformation into Power Query.</Question>
+
+<Question q="How do you check a model you inherited?">Trace dependencies, search for constants within formulas, reconcile totals and test with known inputs.</Question>

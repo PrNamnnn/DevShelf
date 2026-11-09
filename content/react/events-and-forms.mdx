@@ -1,0 +1,168 @@
+---
+title: "Events and Forms"
+summary: "Handling events, controlled versus uncontrolled inputs, validation, and submitting forms with Actions."
+level: fundamental
+section: state
+order: 20
+tags: [events, forms, controlled-inputs, uncontrolled, useFormStatus, onChange, validation]
+requires: [react/state-and-rendering]
+related: [react/concurrent-features-and-actions, nextjs/server-actions]
+versions: "useFormStatus and form Actions need React 19."
+tested: "Controlled input behaviour run on React 19.3.1 with jsdom. Not every snippet was executed."
+verified: "2026-11-09"
+docs:
+  - label: "React: Responding to events"
+    url: "https://react.dev/learn/responding-to-events"
+  - label: "React: input"
+    url: "https://react.dev/reference/react-dom/components/input"
+  - label: "React: useFormStatus"
+    url: "https://react.dev/reference/react-dom/hooks/useFormStatus"
+---
+
+## What it is
+
+React attaches event handlers through props such as `onClick`. A **controlled** input takes its value from state. An **uncontrolled** input keeps its own value in the DOM.
+
+## Why it exists
+
+Declarative handlers keep behaviour beside markup. Controlling inputs lets React validate, format or synchronize a value on every keystroke.
+
+## How it works
+
+Handlers receive a synthetic event that wraps the browser event. All events propagate in React except `onScroll`. Add `Capture` to a name, such as `onClickCapture`, to run on the way down.
+
+<StepFlow
+  title="One keystroke in a controlled input"
+  code={["const [q, setQ] = useState('');", "<input value={q} onChange={e => setQ(e.target.value)} />"]}
+  nodes={["user types", "onChange", "setState", "render", "DOM value set"]}
+  steps={[
+    { line: 1, active: [0], note: "The browser updates the input and fires an event.", state: { dom: "a" } },
+    { line: 1, active: [1], note: "React calls your handler with the event.", state: { "e.target.value": "a" } },
+    { line: 1, active: [2], note: "The handler queues a state update.", state: { q: "pending a" } },
+    { line: 1, active: [3], note: "React re-renders with the new value.", state: { q: "a" } },
+    { line: 1, active: [4], note: "React makes the DOM match value={q}. Without the update, the character would be undone." },
+  ]}
+/>
+
+## Syntax and key APIs
+
+```jsx
+<button onClick={handleClick}>Save</button>
+<input value={name} onChange={(e) => setName(e.target.value)} />
+<input type="checkbox" checked={on} onChange={(e) => setOn(e.target.checked)} />
+<input defaultValue="start" />
+<form action={submitAction}>...</form>
+const { pending, data } = useFormStatus();
+```
+
+Name handlers `handleX`, and handler props `onX`.
+
+## Simple example
+
+```jsx
+function Signup() {
+  const [email, setEmail] = useState("");
+  const valid = email.includes("@");
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    if (valid) register(email);
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input value={email} onChange={(e) => setEmail(e.target.value)} />
+      <button disabled={!valid}>Join</button>
+    </form>
+  );
+}
+```
+
+## Industry examples
+
+### One handler for many fields
+
+```jsx
+function Profile() {
+  const [form, setForm] = useState({ first: "", last: "" });
+
+  function handleChange(event) {
+    const { name, value } = event.target;
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+
+  return (
+    <>
+      <input name="first" value={form.first} onChange={handleChange} />
+      <input name="last" value={form.last} onChange={handleChange} />
+    </>
+  );
+}
+```
+
+### Read a form on submit
+
+Uncontrolled inputs avoid a render per keystroke.
+
+```jsx
+function Search({ onSearch }) {
+  function handleSubmit(event) {
+    event.preventDefault();
+    onSearch(new FormData(event.currentTarget).get("q"));
+  }
+  return (
+    <form onSubmit={handleSubmit}>
+      <input name="q" defaultValue="" />
+    </form>
+  );
+}
+```
+
+### A pending-aware submit button
+
+`useFormStatus` must be called from a component rendered inside the `<form>`.
+
+```jsx
+import { useFormStatus } from "react-dom";
+
+function SubmitButton() {
+  const { pending } = useFormStatus();
+  return <button disabled={pending}>{pending ? "Saving…" : "Save"}</button>;
+}
+```
+
+## Patterns and best practices
+
+- Use controlled inputs when you react to each change.
+- Use uncontrolled inputs and `FormData` for simple submit-only forms.
+- Provide `''` rather than `undefined` as an initial value.
+- Associate each input with a `<label>`.
+
+## Alternatives and trade-offs
+
+| Approach | Good for | Trade-off |
+| --- | --- | --- |
+| Controlled | Live validation | Renders on each key |
+| Uncontrolled | Simple forms | Less immediate control |
+| Form library | Large forms | Dependency |
+| Action with `useActionState` | Server submissions | React 19 model to learn |
+
+## Common mistakes
+
+**Calling a handler during render.** `onClick={save()}` runs immediately. Pass `save`.
+
+**`value` without `onChange`.** The field is read-only and React warns.
+
+**Switching from undefined to a string.** An input can't change between uncontrolled and controlled.
+
+**Reading `e.target.value` on a checkbox.** Use `e.target.checked`.
+
+## Interview questions
+
+<Question q="Controlled versus uncontrolled?">
+A controlled input's value is driven by React state. An uncontrolled input keeps its state in the DOM and is read through a ref or form data.
+</Question>
+
+<Question q="stopPropagation versus preventDefault?">
+`stopPropagation` stops the event moving to parents. `preventDefault` stops the browser's default action. They're unrelated.
+</Question>

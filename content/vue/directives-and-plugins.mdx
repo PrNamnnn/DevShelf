@@ -1,0 +1,155 @@
+---
+title: "Custom Directives and Plugins"
+summary: "Reusable low-level DOM behaviour, and packaging app-wide features so they install in one line."
+level: advanced
+section: reuse
+order: 20
+tags: [directives, plugins, app.use, provide, globalProperties]
+requires: [vue/composables-pinia-and-router]
+related: [vue/component-communication]
+versions: "Vue 3."
+tested: "Plugin install logic run on Vue 3.5.45."
+verified: "2026-11-09"
+docs:
+  - label: "Vue: Custom directives"
+    url: "https://vuejs.org/guide/reusability/custom-directives.html"
+  - label: "Vue: Plugins"
+    url: "https://vuejs.org/guide/reusability/plugins.html"
+---
+
+## What it is
+
+A **custom directive** reuses logic that directly touches DOM elements. A **plugin** adds app-level capabilities through `app.use()`.
+
+## Why it exists
+
+Composables handle stateful logic, but some behaviour belongs to the element itself, like focusing it. Plugins bundle registration of many pieces into one step.
+
+## How it works
+
+Directive hooks mirror the component lifecycle: `created`, `beforeMount`, `mounted`, `beforeUpdate`, `updated`, `beforeUnmount` and `unmounted`. Each receives `(el, binding, vnode)`.
+
+| `binding` field | Meaning |
+| --- | --- |
+| `value` | The bound value |
+| `oldValue` | Previous value, on updates |
+| `arg` | `v-x:arg` |
+| `modifiers` | `v-x.a.b` |
+
+A plugin is an object with `install(app, options)`, or a function used as `install`.
+
+## Syntax and key APIs
+
+```vue
+<script setup>
+const vFocus = { mounted: (el) => el.focus() };
+</script>
+
+<template>
+  <input v-focus />
+</template>
+```
+
+In `<script setup>`, a variable named `vFocus` becomes `v-focus`.
+
+## Simple example
+
+```js
+import assert from "node:assert";
+import { createApp, inject } from "vue";
+
+const i18n = {
+  install(app, { messages }) {
+    const t = (key) => messages[key] ?? key;
+    app.provide("t", t);
+  },
+};
+
+const app = createApp({});
+app.use(i18n, { messages: { hi: "Namaste" } });
+
+const t = app.runWithContext(() => inject("t"));
+assert.equal(t("hi"), "Namaste");
+```
+
+## Industry examples
+
+### Click outside
+
+```javascript
+export const vClickOutside = {
+  mounted(el, binding) {
+    el._outside = (event) => {
+      if (!el.contains(event.target)) binding.value(event);
+    };
+    document.addEventListener("click", el._outside);
+  },
+  unmounted(el) {
+    document.removeEventListener("click", el._outside);
+  },
+};
+```
+
+### Lazy images
+
+```javascript
+export const vLazy = {
+  mounted(el, { value }) {
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        el.src = value;
+        observer.disconnect();
+      }
+    });
+    observer.observe(el);
+  },
+};
+```
+
+### Register everything in one place
+
+```javascript
+export const uiKit = {
+  install(app) {
+    app.component("UiButton", UiButton);
+    app.directive("focus", vFocus);
+    app.provide(toastKey, createToasts());
+  },
+};
+```
+
+## Patterns and best practices
+
+- Use directives only for direct DOM work.
+- Remove listeners in `unmounted`.
+- Prefer `provide` over `globalProperties`, which the docs suggest using scarcely.
+- Avoid directives on components with several root nodes.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Stateful logic | Composable | No element access by default |
+| DOM behaviour | Directive | DOM-only |
+| Markup reuse | Component | Heavier |
+| App-wide install | Plugin | Global scope |
+
+## Common mistakes
+
+**Using a directive where a data binding works.** Prefer declarative templates.
+
+**Applying a directive to a multi-root component.** It's ignored with a warning.
+
+**Leaking listeners.** Directives have no automatic cleanup.
+
+**Overusing `globalProperties`.** Dependencies become invisible.
+
+## Interview questions
+
+<Question q="Composable or directive?">
+A composable for reusable stateful logic, and a directive for low-level access to a specific element.
+</Question>
+
+<Question q="What is a Vue plugin?">
+An object with an `install` method, or a function, that receives the app and configures global features.
+</Question>

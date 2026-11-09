@@ -1,0 +1,100 @@
+---
+title: "Reproducibility, Tracking and Serialization"
+summary: "Control seeds and environments, version data and models, track experiments and serialize models safely."
+level: intermediate
+section: foundations
+order: 2
+tags: ["reproducibility","MLflow","DVC","serialization","joblib","model versioning"]
+requires: ["mlops/ml-project-lifecycle"]
+related: ["statistics/data-quality-and-leakage","data-engineering/data-validation-and-observability"]
+versions: "scikit-learn 1.9, MLflow documentation as of November 2026"
+tested: "Python example executed with the listed versions. MLflow fragment checked against its documentation and not executed"
+verified: "2026-11-09"
+docs:
+  - label: "MLflow documentation"
+    url: "https://mlflow.org/docs/latest/"
+  - label: "scikit-learn: Model persistence"
+    url: "https://scikit-learn.org/stable/model_persistence.html"
+  - label: "Python: pickle"
+    url: "https://docs.python.org/3/library/pickle.html"
+  - label: "DVC documentation"
+    url: "https://doc.dvc.org/"
+---
+
+## What it is
+
+Reproducibility means re-creating a result from code, data, configuration and environment. Tracking records what was tried. **Serialization** saves a trained model.
+
+## Why it exists
+
+Weeks later, someone will need to answer: which data trained this model, and why did accuracy change?
+
+## How it works
+
+Record the code commit, data version, parameters, metrics, dependencies and random seed. Dataset files are versioned by tools such as DVC, or through immutable table snapshots.
+
+`pickle` and `joblib` execute code when loading, so never load an untrusted file. ONNX or safetensors formats offer safer, more portable options in some cases. Pin dependency versions, since models may not load across library versions.
+
+## Syntax and key APIs
+
+```py
+import mlflow
+
+with mlflow.start_run():
+    mlflow.log_param("max_depth", 5)
+    mlflow.log_metric("auc", 0.84)
+```
+
+## Simple example
+
+```python
+import hashlib
+import io
+import json
+
+import joblib
+import numpy as np
+from sklearn.linear_model import LogisticRegression
+
+rng = np.random.default_rng(0)
+X, y = rng.normal(size=(100, 3)), rng.integers(0, 2, 100)
+model = LogisticRegression().fit(X, y)
+
+buffer = io.BytesIO()
+joblib.dump(model, buffer)
+buffer.seek(0)
+restored = joblib.load(buffer)
+assert (restored.predict(X) == model.predict(X)).all()
+
+fingerprint = hashlib.sha256(X.tobytes()).hexdigest()[:12]
+card = json.dumps({"data": fingerprint, "params": model.get_params()["C"]})
+assert fingerprint in card
+```
+
+## Industry examples
+
+Teams register approved models with lineage and approval status, and regulated firms retain training data snapshots.
+
+## Patterns and best practices
+
+- Save preprocessing with the model.
+- Log model signatures.
+- Use containers to pin environments.
+- Tag runs by purpose.
+
+## Alternatives and trade-offs
+
+Weights & Biases offers hosted tracking. A simple versioned file store can suffice for small teams.
+
+## Common mistakes
+
+- Loading pickle files from unknown sources.
+- Not recording data versions.
+- Trusting seeds alone for exact reproducibility, especially on GPUs.
+- Unpinned dependencies.
+
+## Interview questions
+
+<Question q="Why is pickle a security risk?">Deserializing can execute arbitrary code.</Question>
+
+<Question q="What needs versioning for reproducibility?">Code, data, parameters, environment and the resulting model.</Question>

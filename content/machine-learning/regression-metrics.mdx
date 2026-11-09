@@ -1,0 +1,79 @@
+---
+title: "Regression Evaluation and CV Strategy"
+summary: "Compare models with MAE, RMSE and R², residual analysis, and match validation to data structure."
+level: intermediate
+section: evaluation
+order: 4
+tags: ["MAE","RMSE","R squared","residuals","model evaluation"]
+requires: ["machine-learning/cross-validation-and-tuning"]
+related: ["statistics/regression-diagnostics","statistics/forecast-evaluation"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Regression metrics"
+    url: "https://scikit-learn.org/stable/modules/model_evaluation.html#regression-metrics"
+  - label: "scikit-learn: Cross-validation"
+    url: "https://scikit-learn.org/stable/modules/cross_validation.html"
+---
+
+## What it is
+
+Regression evaluation measures how far predictions fall from true numeric outcomes. The statistics book covers diagnostics of a fitted model, and this lesson covers comparing predictive models.
+
+## Why it exists
+
+The right metric depends on what errors cost, and an averaged score can conceal poor performance in key segments.
+
+## How it works
+
+Use MAE when cost grows linearly, RMSE when large errors matter more, and quantile loss for asymmetric costs. Always compare against a baseline such as predicting the mean or last value. Examine errors by segment, time and magnitude. Match CV to data: time-based for forecasts and group-based for repeated entities.
+
+## Intuition and formula
+
+<Formula>R² = 1 − Σ(y − ŷ)² / Σ(y − ȳ)²</Formula>
+
+On held-out data, R² can be negative when a model is worse than predicting the mean.
+
+## Worked example
+
+Predictions of 10, 20 and 30 against actuals of 12, 18 and 33 yield an MAE of 2.33 and an RMSE of 2.38. Predicting with a much worse model can produce R² below 0.
+
+## Python
+
+```python
+import numpy as np
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+y = np.array([12.0, 18.0, 33.0])
+pred = np.array([10.0, 20.0, 30.0])
+
+assert round(mean_absolute_error(y, pred), 2) == 2.33
+assert round(np.sqrt(mean_squared_error(y, pred)), 2) == 2.38
+assert r2_score(y, np.array([33.0, 12.0, 18.0])) < 0
+```
+
+## In industry
+
+Demand models report weighted errors by product value, and pricing models monitor bias, the mean signed error, separately.
+
+## Assumptions and limitations
+
+Single-number summaries hide bias across segments. MAPE breaks near zero.
+
+## Common mistakes
+
+- Treating R² as universally comparable.
+- Random CV on time-indexed data.
+- Ignoring systematic over-prediction.
+- Evaluating in transformed units only.
+
+## Alternatives
+
+Prediction intervals and pinball loss evaluate uncertainty.
+
+## Interview questions
+
+<Question q="Can R² be negative?">Yes, on held-out data, if the predictions are worse than the mean.</Question>
+
+<Question q="MAE or RMSE?">MAE for linear costs. RMSE when large errors are especially bad.</Question>

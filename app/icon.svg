@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <style>
+    .a { fill: #2f5fc9; } .b { fill: #17181c; } .c { fill: #c94f7c; }
+    @media (prefers-color-scheme: dark) { .a { fill: #7ea6f5; } .b { fill: #ededec; } .c { fill: #ee8fb3; } }
+  </style>
+  <rect class="a" x="4" y="4" width="7" height="24" rx="1.6"/>
+  <rect class="b" x="13" y="9" width="6" height="19" rx="1.6"/>
+  <rect class="c" x="21.4" y="5" width="6" height="22.800" rx="1.600" transform="rotate(10 24.400 16.400)"/>
+</svg>

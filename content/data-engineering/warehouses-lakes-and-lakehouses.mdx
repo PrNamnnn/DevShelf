@@ -1,0 +1,79 @@
+---
+title: "Warehouses, Lakes, Lakehouses, OLTP and OLAP"
+summary: "Compare storage architectures and why columnar engines suit analytics."
+level: fundamental
+section: foundations
+order: 2
+tags: ["data warehouse","data lake","lakehouse","OLTP","OLAP","columnar"]
+requires: ["data-engineering/etl-elt-and-pipelines"]
+related: ["powerbi/platform-and-storage-modes","data-engineering/dimensional-modelling-and-partitioning"]
+versions: "Concepts current as of November 2026"
+tested: "SQL example executed on PGlite (PostgreSQL 18)"
+verified: "2026-11-09"
+docs:
+  - label: "Apache Spark: SQL guide"
+    url: "https://spark.apache.org/docs/latest/sql-programming-guide.html"
+  - label: "Delta Lake documentation"
+    url: "https://docs.delta.io/"
+---
+
+## What it is
+
+| System | Stores | Optimized for |
+| --- | --- | --- |
+| OLTP database | Current transactions | Many small reads and writes |
+| Data warehouse | Curated structured data | Analytical SQL |
+| Data lake | Raw files of any type | Cheap, flexible storage |
+| Lakehouse | Open table formats on object storage | Warehouse features on the lake |
+
+## Why it exists
+
+Serving an application and scanning years of history are opposite workloads. Separating them protects both.
+
+## How it works
+
+**OLTP** uses row-oriented storage and indexes for fast single-record operations. **OLAP** systems use columnar storage, compression and parallelism. Reading three of 200 columns touches only those columns.
+
+Table formats such as Delta Lake and Apache Iceberg add ACID transactions, schema evolution and time travel over Parquet files.
+
+## Syntax and key APIs
+
+```sql
+SELECT date_trunc('month', day) AS month, sum(amount) AS revenue
+FROM (VALUES (DATE '2026-01-05', 100), (DATE '2026-01-20', 50), (DATE '2026-02-01', 70)) AS s(day, amount)
+GROUP BY 1
+ORDER BY 1 DESC
+LIMIT 1;
+-- rows: [{"month":"2026-02-01T00:00:00.000Z","revenue":70}]
+```
+
+## Simple example
+
+An e-commerce company captures its PostgreSQL changes to object storage, curates them in a lakehouse, and serves dashboards from warehouse-style models.
+
+## Industry examples
+
+Snowflake, BigQuery and Redshift are warehouses. Databricks and Microsoft Fabric provide lakehouse platforms.
+
+## Patterns and best practices
+
+- Use medallion layers: raw, cleaned and curated.
+- Use columnar file formats.
+- Govern access and catalog datasets.
+
+## Alternatives and trade-offs
+
+A single PostgreSQL instance often suffices for modest analytical needs. Lakes without governance become swamps.
+
+## Common mistakes
+
+- Running heavy reports on the production OLTP database.
+- Storing many tiny files.
+- No data catalog.
+- Assuming a lake gives correctness automatically.
+
+## Interview questions
+
+<Question q="Why are columnar stores good for analytics?">They read only needed columns and compress similar values effectively.</Question>
+
+<Question q="What does a lakehouse add to a lake?">Transactions, schema enforcement and table management on open files.</Question>

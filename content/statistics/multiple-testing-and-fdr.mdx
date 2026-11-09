@@ -1,0 +1,105 @@
+---
+title: "Multiple Testing, Bonferroni and FDR"
+summary: "Control family-wise error and false discovery rate when testing many metrics, segments or variants."
+level: advanced
+section: experimentation
+order: 7
+tags: ["multiple testing","Bonferroni","FDR","Benjamini-Hochberg"]
+requires: ["statistics/errors-power-and-effect-size"]
+related: ["statistics/anova-and-post-hoc","statistics/peeking-and-sequential-testing"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "statsmodels: multipletests"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.stats.multitest.multipletests.html"
+---
+
+## What it is
+
+Testing many hypotheses increases the chance of a false positive. The **family-wise error rate (FWER)** is the probability of at least one false positive. The **false discovery rate (FDR)** is the expected share of false positives among those declared significant.
+
+## Why it exists
+
+Slice one experiment by 20 segments at α = 0.05 and you've a 64% chance of at least one "significant" finding even with no effect at all, assuming independence. Many surprising segment results are exactly this.
+
+## How it works
+
+**Bonferroni** tests each at α/m. It's simple and conservative, controlling FWER.
+
+**Holm** is a step-down procedure that controls FWER and is uniformly more powerful than Bonferroni.
+
+**Benjamini-Hochberg** sorts p-values and finds the largest rank k with p₍ₖ₎ ≤ (k/m)·q. All of the first k are declared discoveries. It controls FDR at q and is much less strict, so it's suited to screening.
+
+Use FWER control for a small number of decision-driving hypotheses, and FDR when exploring many.
+
+## Intuition and formula
+
+<Formula>FWER = 1 − (1 − α)ᵐ for m independent tests</Formula>
+
+<Formula>BH threshold for rank k = (k / m) · q</Formula>
+
+## Worked example
+
+Ten p-values: 0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205, 0.212, 0.216. Five fall below 0.05.
+
+Bonferroni's threshold is 0.005, so one is significant. BH thresholds are 0.005, 0.010, 0.015 and so on. Rank 2 (0.008 ≤ 0.010) passes, and rank 3 (0.039 > 0.015) fails, as does every rank above it, so BH declares two discoveries. Three of the "significant" results don't survive either correction.
+
+## Python
+
+```python
+from statsmodels.stats.multitest import multipletests
+
+p_values = [0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205, 0.212, 0.216]
+
+bonferroni = multipletests(p_values, alpha=0.05, method="bonferroni")[0]
+benjamini = multipletests(p_values, alpha=0.05, method="fdr_bh")[0]
+assert bonferroni.sum() == 1
+assert benjamini.sum() == 2
+
+assert round(1 - 0.95**10, 2) == 0.40
+assert round(1 - 0.95**20, 2) == 0.64
+```
+
+## SQL
+
+```sql
+WITH p(metric, value) AS (
+  VALUES ('a', 0.001), ('b', 0.008), ('c', 0.039), ('d', 0.041)
+), ranked AS (
+  SELECT metric, value, rank() OVER (ORDER BY value) AS k, count(*) OVER () AS m FROM p
+), passing AS (
+  SELECT max(k) AS last_k FROM ranked WHERE value <= k::numeric / m * 0.05
+)
+SELECT metric FROM ranked, passing WHERE k <= last_k ORDER BY k;
+-- rows: [{"metric":"a"},{"metric":"b"},{"metric":"c"},{"metric":"d"}]
+```
+
+## Excel or Power BI
+
+Sort p-values in a column, compute `=ROW()/COUNT(p)*q` next to them, and flag those up to the largest passing rank.
+
+## In industry
+
+Experiment scorecards with dozens of metrics apply FDR corrections. Pre-specifying a single primary metric sidesteps most of the problem for the decision.
+
+## Assumptions and limitations
+
+BH strictly requires independence or positive dependence, and Benjamini-Yekutieli handles arbitrary dependence. Corrections can't help if you don't count how many hypotheses were tested.
+
+## Common mistakes
+
+- Counting only the tests that were reported.
+- Applying a correction and treating unadjusted secondary metrics as decisions.
+- Using Bonferroni for large-scale exploration, thus losing all power.
+- Mining segments after the test and shipping based on the best one.
+
+## Alternatives
+
+Hierarchical Bayesian models shrink noisy segment estimates toward the average, and pre-registered segments limit the number of comparisons.
+
+## Interview questions
+
+<Question q="When would you use FDR instead of Bonferroni?">When screening many hypotheses and some false positives are acceptable, in exchange for much greater power.</Question>
+
+<Question q="A segment shows a big lift in a flat test. What now?">Treat it as a hypothesis, correct for how many segments were examined, and confirm in a new experiment.</Question>

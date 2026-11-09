@@ -1,0 +1,157 @@
+---
+title: "React Server Components"
+summary: "The rendering model behind modern React frameworks: what runs where, what can cross the boundary, and how to think about it."
+level: advanced
+section: async-ui
+order: 10
+tags: [server-components, use-client, use-server, serialization, rsc]
+requires: [react/components-jsx-and-props]
+related: [nextjs/server-and-client-components, react/concurrent-features-and-actions]
+versions: "React 19. Requires a supporting framework."
+tested: "Compiled through Next.js examples elsewhere in this library."
+verified: "2026-11-09"
+docs:
+  - label: "React: Server Components"
+    url: "https://react.dev/reference/rsc/server-components"
+  - label: "React: 'use client'"
+    url: "https://react.dev/reference/rsc/use-client"
+  - label: "React: 'use server'"
+    url: "https://react.dev/reference/rsc/use-server"
+---
+
+## What it is
+
+Server Components render ahead of time in a separate environment, and their code is never sent to the browser. They can be `async` and read data directly.
+
+## Why it exists
+
+Client-side rendering ships all component code and fetches data after load. Server Components keep large libraries and data access on the server.
+
+## How it works
+
+There's no directive for Server Components, as they're the default in a supporting framework. `'use client'` marks an entry into client code, and `'use server'` marks Server Functions.
+
+<LanesViz
+  title="Server and client responsibilities"
+  actors={["Database", "Server Component", "Client Component"]}
+  steps={[
+    { from: 1, to: 0, label: "await query", note: "A Server Component reads data directly during render." },
+    { from: 0, to: 1, label: "rows", note: "The data stays on the server." },
+    { from: 1, to: 2, label: "serialized props", note: "Only the props you pass cross the boundary." },
+    { from: 2, to: 2, label: "hydrate, handle clicks", note: "Client Components hold state and handle events." },
+  ]}
+/>
+
+| Server Component | Client Component |
+| --- | --- |
+| `async`, direct data access | `useState`, `useEffect` |
+| No state or effects | Browser APIs |
+| No event handlers | Event handlers |
+| Code not in bundle | Code in bundle |
+
+Props crossing to the client must be serializable: primitives, plain objects, arrays, Maps, Sets, Dates, Promises, JSX and Server Functions.
+
+## Syntax and key APIs
+
+```jsx
+async function Notes() {
+  const notes = await db.notes.getAll();
+  return notes.map((note) => <Note key={note.id} note={note} />);
+}
+```
+
+```jsx
+"use client";
+
+export function LikeButton({ initial }) {
+  const [likes, setLikes] = useState(initial);
+  return <button onClick={() => setLikes(likes + 1)}>{likes}</button>;
+}
+```
+
+`'use client'` must be the first statement in a file, above imports.
+
+## Simple example
+
+```jsx
+import { LikeButton } from "./like-button";
+
+async function Post({ id }) {
+  const post = await db.posts.find(id);
+  return (
+    <article>
+      <h1>{post.title}</h1>
+      <LikeButton initial={post.likes} />
+    </article>
+  );
+}
+```
+
+## Industry examples
+
+### Stream a promise to the client
+
+The server starts the work, and the client reads it with `use`.
+
+```jsx
+function Page() {
+  const comments = fetchComments();
+  return (
+    <Suspense fallback={<Spinner />}>
+      <Comments comments={comments} />
+    </Suspense>
+  );
+}
+```
+
+```jsx
+"use client";
+import { use } from "react";
+
+export function Comments({ comments }) {
+  return use(comments).map((c) => <p key={c.id}>{c.text}</p>);
+}
+```
+
+### Provide context
+
+Server Components can't create context, but they can render a provider from a client module.
+
+```jsx
+<ThemeProvider>{children}</ThemeProvider>
+```
+
+## Patterns and best practices
+
+- Keep leaf interactive parts as Client Components.
+- Pass only the fields the client needs.
+- Pass Server Components through `children` to nest them in client ones.
+- See how this works in practice in [Next.js](/nextjs/server-and-client-components).
+
+## Alternatives and trade-offs
+
+| Model | Strength | Weakness |
+| --- | --- | --- |
+| Server Components | Small bundles, direct data | Framework required |
+| SSR with hydration | Fast first paint | Ships all code |
+| Client rendering | Simple hosting | Slow first load |
+
+## Common mistakes
+
+**Using `useState` without `'use client'`.** Server Components can't use most Hooks.
+
+**Passing a function or class instance as a prop.** They aren't serializable.
+
+**Assuming `'use server'` marks a Server Component.** It marks Server Functions.
+
+**Leaking fields.** Everything sent to the client is visible.
+
+## Interview questions
+
+<Question q="How are Server Components different from SSR?">
+SSR renders components to HTML but still ships their code to hydrate. Server Component code never reaches the client.
+</Question>
+
+<Question q="Can a Client Component import a Server Component?">
+No, it would become client code. It can render one passed in as `children`.
+</Question>

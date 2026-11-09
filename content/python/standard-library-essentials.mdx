@@ -1,0 +1,171 @@
+---
+title: "Standard Library Essentials"
+summary: "The modules that solve everyday work: datetime, re, subprocess, shutil, statistics, and more, without extra dependencies."
+level: advanced
+section: stdlib
+order: 10
+tags: [datetime, zoneinfo, re, subprocess, statistics, shutil, argparse, heapq, uuid, secrets]
+requires: [python/numbers-strings-and-conversion]
+related: [python/files-and-pathlib, python/modules-and-packages]
+versions: "zoneinfo needs Python 3.9+."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python library: datetime"
+    url: "https://docs.python.org/3/library/datetime.html"
+  - label: "Python library: re"
+    url: "https://docs.python.org/3/library/re.html"
+  - label: "Python library: subprocess"
+    url: "https://docs.python.org/3/library/subprocess.html"
+  - label: "Python library: heapq"
+    url: "https://docs.python.org/3/library/heapq.html"
+  - label: "Python library: secrets"
+    url: "https://docs.python.org/3/library/secrets.html"
+---
+
+## What it is
+
+The standard library ships with Python and covers dates, text processing, processes, data structures and more.
+
+## Why it exists
+
+Every dependency adds upgrade and supply-chain risk. Knowing what's already included avoids unnecessary packages.
+
+## How it works
+
+Each module has one focused job. The key concept with dates is **aware versus naive**: an aware `datetime` has a time zone, and a naive one doesn't.
+
+| Task | Module |
+| --- | --- |
+| Dates and time zones | `datetime`, `zoneinfo` |
+| Patterns in text | `re` |
+| Running commands | `subprocess` |
+| Command-line arguments | `argparse` |
+| Priority queues | `heapq` |
+| Secure random values | `secrets` |
+| Identifiers | `uuid` |
+| Basic statistics | `statistics` |
+
+## Syntax and key APIs
+
+```py
+datetime.now(tz=UTC)    dt.isoformat()     datetime.fromisoformat(s)
+re.search(p, s)         re.findall(p, s)   re.sub(p, r, s)
+subprocess.run(["ls"], capture_output=True, text=True, check=True, timeout=30)
+heapq.nsmallest(3, xs)  secrets.token_urlsafe(32)
+```
+
+## Simple example
+
+```python
+from datetime import datetime, timedelta, timezone, UTC
+from zoneinfo import ZoneInfo
+
+moment = datetime(2026, 1, 1, 12, tzinfo=UTC)
+local = moment.astimezone(ZoneInfo("Asia/Kolkata"))
+
+assert local.hour == 17 and local.minute == 30
+assert (moment + timedelta(days=1)).day == 2
+assert datetime.fromisoformat("2026-01-01T12:00:00+00:00") == moment
+```
+
+## Industry examples
+
+### Extract structured data from text
+
+Named groups keep patterns readable. Compile patterns you reuse.
+
+```python
+import re
+
+LINE = re.compile(r"(?P<level>[A-Z]+) \[(?P<id>\d+)\] (?P<msg>.+)")
+match = LINE.match("ERROR [42] disk full")
+
+assert match["level"] == "ERROR"
+assert int(match["id"]) == 42
+assert re.sub(r"\s+", " ", "a   b") == "a b"
+```
+
+### Run a command safely
+
+Pass a list of arguments, and leave `shell=False`, so input isn't interpreted by a shell.
+
+```python
+import subprocess, sys
+
+result = subprocess.run(
+    [sys.executable, "-c", "print('hi')"],
+    capture_output=True, text=True, check=True, timeout=30,
+)
+assert result.stdout.strip() == "hi"
+```
+
+### Keep the top items from a stream
+
+```python
+import heapq
+
+assert heapq.nlargest(2, [5, 1, 9, 3]) == [9, 5]
+
+tasks = []
+heapq.heappush(tasks, (2, "low"))
+heapq.heappush(tasks, (1, "high"))
+assert heapq.heappop(tasks) == (1, "high")
+```
+
+### Generate tokens
+
+`random` isn't suitable for security purposes.
+
+```python
+import secrets
+assert len(secrets.token_hex(16)) == 32
+```
+
+### Build a small CLI
+
+```python
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("path")
+parser.add_argument("--limit", type=int, default=10)
+
+args = parser.parse_args(["data.txt", "--limit", "5"])
+assert (args.path, args.limit) == ("data.txt", 5)
+```
+
+## Patterns and best practices
+
+- Store datetimes in UTC and convert for display.
+- Use raw strings for regular expressions.
+- Set `timeout` and `check=True` on `subprocess.run`.
+- Check the standard library before adding a dependency.
+
+## Alternatives and trade-offs
+
+| Need | Standard | Third-party when |
+| --- | --- | --- |
+| HTTP | `urllib` | You want `httpx` ergonomics and async |
+| CLI | `argparse` | Complex apps may prefer Typer or Click |
+| Dates | `datetime` | Complex calendars need specialist tools |
+
+## Common mistakes
+
+**Mixing aware and naive datetimes.** Comparing them raises `TypeError`.
+
+**Using `datetime.utcnow()`.** It's deprecated and returns a naive value. Use `datetime.now(UTC)`.
+
+**`shell=True` with user input.** That's command injection.
+
+**Parsing HTML with regular expressions.** Use a real parser.
+
+## Interview questions
+
+<Question q="Naive versus aware datetime?">
+An aware datetime has time-zone information, so it identifies a specific moment. A naive one doesn't.
+</Question>
+
+<Question q="Why not use random for tokens?">
+It's predictable. `secrets` uses a cryptographically secure source.
+</Question>

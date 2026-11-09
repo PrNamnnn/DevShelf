@@ -1,0 +1,102 @@
+---
+title: "NoSQL, Documents and BSON"
+summary: "Where document databases fit, how MongoDB organizes databases, collections and documents, and what BSON adds to JSON."
+level: fundamental
+section: foundations
+order: 1
+tags: ["NoSQL","document database","BSON","collections","_id"]
+related: ["mongodb/crud-and-query-operators","statistics/data-types-and-scales","postgresql/jsonb-and-full-text-search"]
+versions: "Documentation for MongoDB 9.0. Examples executed on MongoDB 8.0.12 with the Node.js driver"
+tested: "JavaScript examples executed against a temporary MongoDB 8.0.12 replica set"
+verified: "2026-11-09"
+docs:
+  - label: "MongoDB: Documents"
+    url: "https://www.mongodb.com/docs/manual/core/document/"
+  - label: "MongoDB: Data modeling"
+    url: "https://www.mongodb.com/docs/manual/data-modeling/"
+  - label: "MongoDB: Release notes"
+    url: "https://www.mongodb.com/docs/manual/release-notes/"
+---
+
+## What it is
+
+MongoDB is a **document database**. A deployment contains **databases**, each holds **collections**, and each collection holds **documents**. A document is a field-and-value structure stored as **BSON**, a binary format extending JSON with types such as `ObjectId`, `Date`, `Decimal128` and 64-bit integers.
+
+"NoSQL" covers several families: document (MongoDB), key-value (Redis), wide-column (Cassandra) and graph (Neo4j).
+
+## Why it exists
+
+Applications work with nested objects. A document stores an order and its line items together, so the common read needs no join, and fields can evolve without a table-wide migration.
+
+## How it works
+
+Every document needs a unique `_id`, which has a unique index. The driver generates an `ObjectId` if you don't supply one. `_id` can't be an array, a regex or undefined. Documents have a **16 MiB limit**, and GridFS handles larger files. Fields retain their order.
+
+| Relational | MongoDB |
+| --- | --- |
+| Table | Collection |
+| Row | Document |
+| Column | Field |
+| Join | Embedding, `$lookup` |
+| Foreign key | Reference, by convention |
+
+## Syntax and key APIs
+
+```text
+db.orders.insertOne({ customer: "Asha", total: NumberDecimal("499.00"), items: [{ sku: "A1", qty: 2 }] })
+db.orders.findOne({ customer: "Asha" })
+```
+
+## Simple example
+
+```js
+import assert from "node:assert/strict";
+import { Decimal128, MongoClient, ObjectId } from "mongodb";
+
+const client = new MongoClient(process.env.MONGODB_URI);
+const db = client.db("shelf_documents");
+await db.dropDatabase();
+
+const { insertedId } = await db.collection("orders").insertOne({
+  customer: "Asha",
+  total: Decimal128.fromString("499.00"),
+  items: [{ sku: "A1", qty: 2 }],
+  createdAt: new Date("2026-01-05"),
+});
+
+const doc = await db.collection("orders").findOne({ _id: insertedId });
+assert.ok(doc._id instanceof ObjectId);
+assert.equal(doc.items[0].qty, 2);
+assert.ok(doc.createdAt instanceof Date);
+
+await db.dropDatabase();
+await client.close();
+```
+
+## Industry examples
+
+Product catalogs with varied attributes, content platforms and user profiles fit documents naturally. Event data and IoT readings can use time series collections.
+
+## Patterns and best practices
+
+- Store money as `Decimal128` or as integer minor units, never binary doubles.
+- Store dates as BSON dates.
+- Keep field names short only when scale justifies the loss of clarity.
+- Add schema validation once the shape stabilizes.
+
+## Alternatives and trade-offs
+
+PostgreSQL with `jsonb` covers many document needs alongside relational integrity. Choose MongoDB when documents match the access pattern and horizontal scale is built into the plan.
+
+## Common mistakes
+
+- Treating "schemaless" as "no design".
+- Using the database like a set of normalized SQL tables.
+- Storing unbounded arrays inside a document.
+- Using ad hoc data types for one field across documents.
+
+## Interview questions
+
+<Question q="What does BSON add over JSON?">Binary encoding and extra types such as ObjectId, Date, Decimal128 and precise integers.</Question>
+
+<Question q="What is the document size limit?">16 MiB. GridFS is used for larger binary content.</Question>

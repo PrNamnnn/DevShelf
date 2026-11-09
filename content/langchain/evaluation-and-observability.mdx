@@ -1,0 +1,161 @@
+---
+title: "Evaluation and Observability"
+summary: "Measuring whether an LLM feature actually works, from offline datasets and retrieval metrics to production tracing."
+level: advanced
+section: production
+order: 10
+tags: [evaluation, langsmith, tracing, rag-evaluation, datasets, recall, groundedness, observability]
+related: ["langchain/rag", "langchain/memory-and-langgraph", "mlops/monitoring-drift-and-retraining"]
+versions: "LangSmith concepts as documented on 2026-11-09."
+tested: "Metric functions run on CPython 3.14.6. LangSmith itself wasn't called."
+verified: "2026-11-09"
+docs:
+  - label: "LangSmith: Evaluation concepts"
+    url: "https://docs.langchain.com/langsmith/evaluation-concepts"
+  - label: "LangSmith: Evaluate a RAG application"
+    url: "https://docs.langchain.com/langsmith/evaluate-rag-tutorial"
+  - label: "LangChain: Retrieval"
+    url: "https://docs.langchain.com/oss/python/langchain/retrieval"
+---
+
+## What it is
+
+Evaluation scores an application's outputs against defined criteria. Observability records what each run did: prompts, tool calls, latency and cost.
+
+## Why it exists
+
+LLM behaviour changes with prompts, models and data, and a few manual tries don't reveal regressions. A repeatable score lets you change the system with confidence.
+
+## How it works
+
+**Offline evaluation** runs an app version against a dataset of examples. **Online evaluation** scores production traces, usually with no reference answer. An evaluator returns feedback with a key, a score and an optional comment.
+
+| Technique | Good for | Limit |
+| --- | --- | --- |
+| Code | Format, exact facts, retrieval metrics | Can't judge nuance |
+| LLM as judge | Relevance, groundedness | Costs money, can be wrong |
+| Human | Ground truth, ambiguity | Slow |
+| Pairwise | Comparing versions | Needs a good comparator |
+
+<StepFlow
+  title="Debugging a bad RAG answer"
+  nodes={["question", "retrieval score", "groundedness", "answer quality", "fix the right layer"]}
+  steps={[
+    { active: [0], note: "Start with one failing example from the dataset." },
+    { active: [1], note: "Did the right chunk come back? If recall is low, the problem is retrieval.", state: { "recall@4": "0.5" } },
+    { active: [2], note: "Is the answer supported by the retrieved text? If not, the model is ignoring its context.", state: { grounded: "no" } },
+    { active: [3], note: "Grounded but unhelpful suggests the prompt or the chunks need work." },
+    { active: [4], note: "Change one thing, then re-run the whole dataset to see if it improved without regressions." },
+  ]}
+/>
+
+## Syntax and key APIs
+
+| Metric | Measures |
+| --- | --- |
+| Recall@k | Share of relevant documents found in the top k |
+| Reciprocal rank | How early the first relevant document appears |
+| Groundedness | Whether the answer is supported by the retrieved context |
+| Answer relevance | Whether the answer addresses the question |
+| Correctness | Agreement with a reference answer |
+
+## Simple example
+
+```python
+def recall_at_k(retrieved, relevant, k):
+    return len(set(retrieved[:k]) & relevant) / len(relevant)
+
+assert recall_at_k(["a", "x", "b"], {"a", "b"}, 2) == 0.5
+assert recall_at_k(["a", "x", "b"], {"a", "b"}, 3) == 1.0
+```
+
+## Industry examples
+
+### Score a dataset
+
+```python
+def reciprocal_rank(retrieved, relevant):
+    for position, doc in enumerate(retrieved, 1):
+        if doc in relevant:
+            return 1 / position
+    return 0.0
+
+def evaluate(dataset, retrieve):
+    scores = [reciprocal_rank(retrieve(e["q"]), e["relevant"]) for e in dataset]
+    return sum(scores) / len(scores)
+
+dataset = [
+    {"q": "refund", "relevant": {"billing"}},
+    {"q": "login", "relevant": {"account"}},
+]
+
+results = {"refund": ["billing"], "login": ["faq", "account"]}
+assert evaluate(dataset, results.get) == 0.75
+```
+
+### Block regressions in CI
+
+```python
+def regression_gate(baseline, candidate, tolerance=0.02):
+    return candidate >= baseline - tolerance
+
+assert regression_gate(0.90, 0.89)
+assert not regression_gate(0.90, 0.80)
+```
+
+### Check the output format in code
+
+```python
+import re
+
+def has_citation(answer):
+    return bool(re.search(r"\[\d+\]", answer))
+
+assert has_citation("Refunds take 5 days [1].")
+assert not has_citation("Refunds take 5 days.")
+```
+
+### Enable tracing
+
+Setting these environment variables sends LangChain traces to LangSmith.
+
+```bash
+export LANGSMITH_TRACING=true
+export LANGSMITH_API_KEY="..."
+```
+
+## Patterns and best practices
+
+- Build the dataset from real user questions and failures.
+- Evaluate retrieval and generation separately.
+- Add every production bug to the dataset.
+- Track cost and latency along with quality.
+- Remove personal data before storing traces.
+
+## Alternatives and trade-offs
+
+| Approach | Strength | Weakness |
+| --- | --- | --- |
+| Offline dataset | Repeatable, safe | Can miss real behaviour |
+| Online scoring | Real traffic | Usually lacks ground truth |
+| A/B testing | Business impact | Needs traffic and time |
+
+## Common mistakes
+
+**Trying a handful of prompts and shipping.** That's sampling, not evaluation.
+
+**Using a judge without checking it.** Compare LLM judges against human labels first.
+
+**Changing several variables at once.** You can't tell which helped.
+
+**Measuring only the final answer.** Failures in retrieval then look like model errors.
+
+## Interview questions
+
+<Question q="How would you evaluate a RAG system?">
+Measure retrieval with recall and rank metrics, generation with groundedness and relevance, and the overall result against a reference dataset.
+</Question>
+
+<Question q="Offline versus online evaluation?">
+Offline uses curated datasets with references. Online scores real production traces, generally without references.
+</Question>

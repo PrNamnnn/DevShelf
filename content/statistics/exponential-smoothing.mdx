@@ -1,0 +1,93 @@
+---
+title: "Exponential Smoothing and Holt-Winters"
+summary: "Simple smoothing, trend and seasonal extensions, and why these methods remain strong baselines."
+level: advanced
+section: time-series
+order: 3
+tags: ["exponential smoothing","Holt-Winters","forecasting"]
+requires: ["statistics/time-series-fundamentals"]
+related: ["statistics/arima-and-sarima","statistics/forecast-evaluation"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "statsmodels: ExponentialSmoothing"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.tsa.holtwinters.ExponentialSmoothing.html"
+---
+
+## What it is
+
+Exponential smoothing forecasts with a weighted average in which weights decline geometrically with age. **Holt's** method adds a trend, and **Holt-Winters** adds seasonality.
+
+## Why it exists
+
+It's cheap, requires little data, and it frequently beats more elaborate approaches on business series.
+
+## How it works
+
+The smoothing parameter α is between 0 and 1. High α reacts quickly, and low α smooths heavily. Trend and seasonal components have their own parameters, β and γ, usually chosen by minimizing in-sample one-step errors. Seasonal components may be additive or multiplicative.
+
+## Intuition and formula
+
+<Formula>ℓₜ = α yₜ + (1 − α) ℓₜ₋₁</Formula>
+
+The forecast from simple smoothing is flat at the latest level. Expanding the recursion shows that the weight on a past value decays by (1 − α) per step.
+
+## Worked example
+
+Values are 100, 110, 105, 120 with α = 0.5 and an initial level of 100. Levels become 100, 105, 105, and 112.5, so the next forecast is 112.5.
+
+On the monthly sales series with a 12-month test window, a seasonal-naive forecast's MAE is 20.25 (MAPE 5.41%). Holt-Winters additive cuts MAE to 7.24 (MAPE 1.95%), because it can also capture trend.
+
+## Python
+
+```python
+import numpy as np
+import pandas as pd
+from statsmodels.tsa.holtwinters import ExponentialSmoothing, SimpleExpSmoothing
+
+series = pd.Series([100, 110, 105, 120], dtype=float)
+ses = SimpleExpSmoothing(series, initialization_method="known", initial_level=100)
+fit = ses.fit(smoothing_level=0.5, optimized=False)
+assert fit.forecast(1).iloc[0] == 112.5
+
+rng = np.random.default_rng(11)
+n = 120
+idx = pd.date_range("2016-01-01", periods=n, freq="MS")
+y = pd.Series(200 + 1.5 * np.arange(n) + 25 * np.sin(2 * np.pi * np.arange(n) / 12) + rng.normal(0, 6, n), index=idx)
+train, test = y[:-12], y[-12:]
+
+snaive = pd.Series(train.iloc[-12:].values, index=test.index)
+holt = ExponentialSmoothing(train, trend="add", seasonal="add", seasonal_periods=12).fit().forecast(12)
+assert round((test - snaive).abs().mean(), 2) == 20.25
+assert round((test - holt).abs().mean(), 2) == 7.24
+```
+
+## Excel or Power BI
+
+`FORECAST.ETS` implements AAA exponential smoothing, and the Forecast Sheet command builds a chart with confidence bounds. Power BI's line-chart forecast uses related techniques.
+
+## In industry
+
+Inventory and staffing systems run these methods across thousands of series, where speed matters.
+
+## Assumptions and limitations
+
+Patterns need to be reasonably stable, and it doesn't incorporate external drivers without extensions. Prediction intervals may be too narrow.
+
+## Common mistakes
+
+- Skipping the naive baseline comparison.
+- Applying non-seasonal smoothing to a seasonal series.
+- Using multiplicative seasonality when values can be zero.
+- Tuning on the test period.
+
+## Alternatives
+
+ARIMA models autocorrelation directly, and gradient boosting with lag features can incorporate many external variables.
+
+## Interview questions
+
+<Question q="What does a high α do?">It weighs recent observations heavily, reacting quickly and retaining more noise.</Question>
+
+<Question q="Why compare against a seasonal-naive forecast?">It's a simple benchmark. A complex model that can't beat it isn't adding value.</Question>

@@ -1,0 +1,254 @@
+---
+title: "Generators and Lazy Pipelines"
+summary: "How a suspended frame turns a function into a stream, and how to build memory-safe data pipelines with yield and itertools."
+level: intermediate
+section: iteration
+order: 20
+tags: [generators, iterators, yield, itertools, lazy-evaluation, memory, send, batched]
+related: [javascript/event-loop]
+versions: "Python 3.7+ for StopIteration handling. batched needs 3.12+, and its strict flag and the close() return value need 3.13+."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python reference: Yield expressions"
+    url: "https://docs.python.org/3/reference/expressions.html#yield-expressions"
+  - label: "Python library: Generator types"
+    url: "https://docs.python.org/3/library/stdtypes.html#generator-types"
+  - label: "Python library: itertools"
+    url: "https://docs.python.org/3/library/itertools.html"
+  - label: "Python HOWTO: Functional programming"
+    url: "https://docs.python.org/3/howto/functional.html"
+  - label: "PEP 479: StopIteration handling inside generators"
+    url: "https://peps.python.org/pep-0479/"
+---
+
+## What it is
+
+A generator function is a function containing `yield`. Calling it returns a **generator iterator** and runs none of the body. Each `next()` runs the body until the next `yield`, hands over a value, and pauses.
+
+An **iterable** can produce an iterator through `iter()`. An **iterator** returns items through `next()` and raises `StopIteration` when finished. A generator is an iterator that you write as a function.
+
+## Why it exists
+
+Some data is too large to hold or doesn't end, such as a log file, a paginated API or a sensor stream. A list forces you to build everything first. A generator produces one item on demand, so memory stays flat and work stops as soon as the consumer stops.
+
+Measured on CPython 3.14.6 with one million integers, `sys.getsizeof` reported 8,448,728 bytes for the list and 200 bytes for the equivalent generator.
+
+It also replaces iterator classes. There's no `__next__` to write or manual state to track, because local variables are the state.
+
+## How it works
+
+A normal call's frame is destroyed on return. A generator's frame stays alive between resumptions, keeping its local variables and its position in the code. That's what `yield` adds.
+
+<GeneratorViz />
+
+Values travel in both directions. `yield n` sends `n` out, and the whole expression evaluates to whatever comes back in: `None` after `next()`, or the argument of `send()`.
+
+## Syntax and key APIs
+
+| API | Effect |
+| --- | --- |
+| `yield x` | Pause and give `x` to the caller |
+| `yield from it` | Delegate to `it`. Its result is the subgenerator's return value |
+| `next(gen)` | Resume, with the paused `yield` evaluating to `None` |
+| `gen.send(v)` | Resume, with the paused `yield` evaluating to `v` |
+| `gen.throw(exc)` | Raise `exc` at the paused `yield` |
+| `gen.close()` | Raise `GeneratorExit` at the paused `yield` |
+| `(f(x) for x in xs)` | Generator expression |
+| `inspect.getgeneratorstate(gen)` | `GEN_CREATED`, `GEN_RUNNING`, `GEN_SUSPENDED` or `GEN_CLOSED` |
+
+<Callout type="deprecated">
+The three-argument form `gen.throw(type, value, traceback)` is deprecated since Python 3.12. Use `gen.throw(exception)`.
+</Callout>
+
+<Callout type="version">
+Since Python 3.13, `close()` returns the generator's return value if it returns while closing. Earlier versions always returned `None`.
+</Callout>
+
+The `itertools` functions you'll reach for most:
+
+| Function | Use | Know this |
+| --- | --- | --- |
+| `islice(it, start, stop)` | Slice any iterator | No negative values, and skipped items are consumed |
+| `chain.from_iterable(xs)` | Flatten one level | The outer iterable is read lazily |
+| `batched(it, n, strict=False)` | Fixed-size chunks | `strict=True` raises `ValueError` on a short final batch |
+| `groupby(it, key)` | Group consecutive runs | Needs input already sorted on the key |
+| `tee(it, n)` | Split one iterator | Buffers data, so it can use a lot of memory |
+
+## Simple example
+
+A class is reusable when `__iter__` is a generator, since each loop gets a fresh iterator.
+
+```python
+class Countdown:
+    def __init__(self, n):
+        self.n = n
+
+    def __iter__(self):
+        n = self.n
+        while n > 0:
+            yield n
+            n -= 1
+
+c = Countdown(2)
+print(list(c))  # [2, 1]
+print(list(c))  # [2, 1]
+```
+
+## Industry examples
+
+### Stream a file through a pipeline
+
+Each stage pulls one record from the stage before it. Nothing is read past the point the consumer needs, and the file closes through `with` when the generator finishes.
+
+```python
+def read_lines(path):
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            yield line.rstrip("\n")
+
+def parse(lines):
+    for line in lines:
+        level, _, message = line.partition(" ")
+        yield {"level": level, "message": message}
+
+def only(records, level):
+    return (r for r in records if r["level"] == level)
+
+first_error = next(only(parse(read_lines("app.log")), "ERROR"))
+```
+
+### Write to a database in batches
+
+`batched` keeps memory bounded however many rows arrive. `read_rows` and `cursor` stand in for your own source and database driver.
+
+```python
+from itertools import batched  # Python 3.12+
+
+for batch in batched(read_rows(), 1000):
+    cursor.executemany("INSERT INTO events VALUES (%s, %s)", batch)
+```
+
+### Hide pagination from callers
+
+The caller sees one flat stream. With `islice`, later pages are never requested.
+
+```python
+from itertools import islice
+
+def fetch_all(fetch_page):
+    page = 1
+    while True:
+        items = fetch_page(page)
+        if not items:
+            return
+        yield from items
+        page += 1
+
+first_two = list(islice(fetch_all(fetch_page), 2))
+```
+
+### Guarantee cleanup
+
+If a consumer stops early, the `finally` block runs only when the generator is closed. Close it explicitly when timing matters.
+
+```python
+from contextlib import closing
+
+def resource():
+    print("open")
+    try:
+        yield 1
+        yield 2
+    finally:
+        print("close")
+
+with closing(resource()) as r:
+    next(r)
+# prints open, then close when the with block exits
+```
+
+## Patterns and best practices
+
+- Write pipelines as small single-purpose stages that take and return iterables.
+- Prefer a `for` loop inside a generator to manual `next()` calls.
+- Use `yield from` for delegation, since it also forwards `send()` and `throw()`.
+- Materialize with `list()` when you need `len`, indexing, or more than one pass.
+- For new concurrent code, use `async def` and `await` rather than generator-based coroutines.
+
+## Alternatives and trade-offs
+
+| Option | Choose when | Cost |
+| --- | --- | --- |
+| List comprehension | Data is small, or you need several passes | Holds everything in memory |
+| Generator expression | One transformation in one pass | Single use |
+| Generator function | Multiple steps, state or cleanup | Harder to debug than a list |
+| Iterator class | The object needs extra public methods | More boilerplate |
+| Async generator | Each item involves awaited I/O | Requires an event loop |
+
+Generators are slower per item than tight built-ins and add resumption overhead. Their advantage is memory and early exit, not raw speed.
+
+## Common mistakes
+
+**Reusing an exhausted generator.** It stays empty and raises no error.
+
+```python
+squares = (x * x for x in range(3))
+print(sum(squares))  # 5
+print(sum(squares))  # 0
+```
+
+**Letting `StopIteration` escape.** Since Python 3.7 (PEP 479), it becomes `RuntimeError` inside a generator, which catches a bare `next()` at the worst moment.
+
+```python
+def broken(it):
+    while True:
+        yield next(it)  # RuntimeError when it runs out
+
+def fixed(it):
+    for x in it:
+        yield x
+```
+
+**Forgetting what is evaluated early.** In a generator expression, only the leftmost iterable is evaluated at creation. Everything else is lazy and sees variables as they are when consumed.
+
+```python
+n = 1
+doubled = (x * n for x in [1, 2])
+n = 10
+print(list(doubled))  # [10, 20]
+```
+
+**Calling `groupby` on unsorted data.** It starts a new group whenever the key changes.
+
+```python
+from itertools import groupby
+
+data = ["a", "b", "a"]
+print([k for k, _ in groupby(data)])          # ['a', 'b', 'a']
+print([k for k, _ in groupby(sorted(data))])  # ['a', 'b']
+```
+
+**Keeping `groupby` groups for later.** Advancing the outer iterator invalidates the previous group. Store it with `list(group)` during iteration.
+
+**Sending a value first.** The first resumption must be `next(gen)` or `gen.send(None)`, because no `yield` is waiting yet. Anything else raises `TypeError`.
+
+**Swallowing `GeneratorExit`.** If a generator yields again after catching it, `close()` raises `RuntimeError`.
+
+## Interview questions
+
+<Question q="What is the difference between an iterable and an iterator?">
+An iterable can hand out an iterator through `iter()` and is usually reusable. An iterator produces values through `next()`, remembers its position and is exhausted once consumed. Every iterator is iterable, but a list, for example, isn't an iterator.
+</Question>
+
+<Question q="What does calling a generator function do?">
+It binds the arguments and returns a generator object. None of the body runs until the first `next()`.
+</Question>
+
+<Question q="What is the difference between return and yield in a generator?">
+`yield` pauses and can resume. `return value` ends the generator by raising `StopIteration(value)`, and that value becomes the result of an enclosing `yield from`.
+</Question>
+
+<Question q="How would you process a 50 GB file line by line?">
+Iterate the open file object, which reads lazily, and chain generator stages that keep only the state they need. Use `batched` for bulk writes so that memory depends on batch size rather than file size.
+</Question>

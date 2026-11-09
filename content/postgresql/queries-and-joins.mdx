@@ -1,0 +1,167 @@
+---
+title: "Queries, Joins and NULL Logic"
+summary: "How a query is logically evaluated, join types, the ON versus WHERE trap, LATERAL, and why NOT IN can return nothing."
+level: fundamental
+section: querying
+order: 10
+tags: [select, joins, left-join, lateral, exists, null, subqueries, basics]
+related: ["postgresql/schema-types-and-constraints", "postgresql/aggregates-windows-and-ctes", "sqlserver/joins-apply-and-set-operations", "excel/lookups"]
+versions: "All supported PostgreSQL versions."
+tested: "PostgreSQL 18.6 through PGlite"
+verified: "2026-11-09"
+docs:
+  - label: "PostgreSQL: Table expressions"
+    url: "https://www.postgresql.org/docs/current/queries-table-expressions.html"
+  - label: "PostgreSQL: SELECT"
+    url: "https://www.postgresql.org/docs/current/sql-select.html"
+  - label: "PostgreSQL: Subquery expressions"
+    url: "https://www.postgresql.org/docs/current/functions-subquery.html"
+---
+
+## What it is
+
+`SELECT` describes the rows you want. Joins combine rows from several tables based on a condition.
+
+## Why it exists
+
+Normalized schemas store each fact once, so answering most questions means putting tables back together.
+
+## How it works
+
+SQL is written in one order but logically evaluated in another. The planner may physically reorder work, but the result must match this logic.
+
+<StepFlow
+  title="Logical order of a query"
+  code={["SELECT c.name, count(*) AS n", "FROM customers c", "JOIN orders o ON o.customer_id = c.id", "WHERE o.status = 'paid'", "GROUP BY c.name", "HAVING count(*) > 1", "ORDER BY n DESC", "LIMIT 5;"]}
+  nodes={["FROM and JOIN", "WHERE", "GROUP BY", "HAVING", "SELECT", "ORDER BY", "LIMIT"]}
+  steps={[
+    { line: 1, active: [0], note: "Tables are combined first, using the ON condition." },
+    { line: 3, active: [1], note: "Rows are filtered. Aggregates don't exist yet, so they can't appear here." },
+    { line: 4, active: [2], note: "Remaining rows are grouped." },
+    { line: 5, active: [3], note: "Groups are filtered, and aggregates are now available." },
+    { line: 0, active: [4], note: "Output columns are computed and aliases are defined." },
+    { line: 6, active: [5], note: "Sorting can use the alias n." },
+    { line: 7, active: [6], note: "Only now is the result cut down." },
+  ]}
+/>
+
+SQL uses three-valued logic: comparisons with NULL give *unknown*, and `WHERE` keeps only true.
+
+## Syntax and key APIs
+
+| Join | Result |
+| --- | --- |
+| `INNER JOIN` | Matching rows only |
+| `LEFT JOIN` | All left rows, NULLs when unmatched |
+| `RIGHT JOIN` | All right rows |
+| `FULL JOIN` | All rows from both sides |
+| `CROSS JOIN` | Every combination |
+
+## Simple example
+
+```sql
+CREATE TABLE customers (id int PRIMARY KEY, name text);
+CREATE TABLE orders (id int PRIMARY KEY, customer_id int, status text, total int);
+
+INSERT INTO customers VALUES (1, 'Ada'), (2, 'Bo');
+INSERT INTO orders VALUES (1, 1, 'paid', 10), (2, 1, 'open', 30), (3, 1, 'paid', 20);
+
+SELECT c.name, o.total
+FROM customers c
+LEFT JOIN orders o ON o.customer_id = c.id AND o.status = 'none'
+ORDER BY c.id;
+-- rows: [{"name":"Ada","total":null},{"name":"Bo","total":null}]
+```
+
+## Industry examples
+
+### Keep unmatched rows: ON versus WHERE
+
+`ON` is processed before the join, and `WHERE` after. Filtering the right table in `WHERE` turns a left join into an inner join.
+
+```sql
+SELECT c.name
+FROM customers c
+LEFT JOIN orders o ON o.customer_id = c.id
+WHERE o.status = 'paid'
+GROUP BY c.name;
+-- rows: [{"name":"Ada"}]
+```
+
+Bo disappeared, because the NULL status failed the `WHERE`. Moving the filter to `ON` keeps Bo.
+
+```sql
+SELECT c.name, count(o.id)::int AS paid
+FROM customers c
+LEFT JOIN orders o ON o.customer_id = c.id AND o.status = 'paid'
+GROUP BY c.name
+ORDER BY c.name;
+-- rows: [{"name":"Ada","paid":2},{"name":"Bo","paid":0}]
+```
+
+### Latest N per group with LATERAL
+
+A `LATERAL` subquery can reference earlier `FROM` items and runs per outer row.
+
+```sql
+SELECT c.name, recent.total
+FROM customers c
+CROSS JOIN LATERAL (
+  SELECT total FROM orders o
+  WHERE o.customer_id = c.id
+  ORDER BY o.id DESC
+  LIMIT 1
+) AS recent;
+-- rows: [{"name":"Ada","total":20}]
+```
+
+### Test existence safely
+
+```sql
+SELECT name FROM customers c
+WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);
+-- rows: [{"name":"Bo"}]
+```
+
+## Patterns and best practices
+
+- Use `EXISTS` to test for related rows.
+- Always use `ORDER BY` when order matters, since rows otherwise have no guaranteed order.
+- Name columns instead of using `SELECT *` in application code.
+- Use keyset pagination for deep pages.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Only test existence | `EXISTS` | Doesn't return columns |
+| Need related columns | Join | Can multiply rows |
+| Top N per group | `LATERAL` or `row_number()` | Depends on indexes |
+| Page through results | `OFFSET` | Slows as it grows |
+| Page through results | Keyset (`WHERE id > ...`) | No jumping to a page number |
+
+## Common mistakes
+
+**Comparing with `= NULL`.** Use `IS NULL`.
+
+**`NOT IN` with a NULL in the subquery.** The whole result becomes empty.
+
+```sql
+SELECT count(*)::int AS n FROM customers
+WHERE id NOT IN (SELECT NULL::int);
+-- rows: [{"n":0}]
+```
+
+**`count(*)` after a left join.** It counts unmatched rows as 1. Use `count(o.id)`.
+
+**A row-multiplying join before `sum`.** Totals are inflated. Aggregate first.
+
+## Interview questions
+
+<Question q="What is the difference between WHERE and HAVING?">
+`WHERE` filters rows before grouping. `HAVING` filters groups after aggregation.
+</Question>
+
+<Question q="Why can NOT IN return no rows?">
+If the list contains NULL, each comparison can be unknown rather than true, so no row passes. `NOT EXISTS` avoids this.
+</Question>

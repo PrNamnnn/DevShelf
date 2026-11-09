@@ -1,0 +1,93 @@
+---
+title: "The Logic of Hypothesis Testing"
+summary: "Null and alternative hypotheses, test statistics, significance levels, p-values and one-tailed versus two-tailed tests."
+level: intermediate
+section: inference
+order: 2
+tags: ["hypothesis testing","p-value","significance","null hypothesis"]
+requires: ["statistics/estimation-and-confidence-intervals"]
+related: ["statistics/errors-power-and-effect-size","statistics/choosing-the-right-test","statistics/ab-testing-foundations"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "SciPy: Statistical functions"
+    url: "https://docs.scipy.org/doc/scipy/reference/stats.html"
+  - label: "NIST: Hypothesis tests"
+    url: "https://www.itl.nist.gov/div898/handbook/prc/section1/prc13.htm"
+---
+
+## What it is
+
+A hypothesis test measures how compatible the data is with a specific default claim, called the **null hypothesis** (H₀). The **alternative** (H₁) states what you'd conclude instead.
+
+## Why it exists
+
+Random variation makes groups differ even when nothing real has changed. Testing provides a controlled rule for deciding when a difference is too large to ignore, with a known false-positive rate.
+
+## How it works
+
+<StepFlow
+  title="Every test follows the same steps"
+  nodes={["H0 and H1", "Choose α", "Statistic", "P-value", "Decide"]}
+  steps={[
+    { note: "Write hypotheses before seeing results, for example H₀: new and old checkout convert equally.", active: [0] },
+    { note: "Set the significance level α, the false-positive rate you'll tolerate, commonly 0.05.", active: [1] },
+    { note: "Compute a statistic, usually signal ÷ noise, such as an observed difference divided by its standard error.", active: [2] },
+    { note: "Find the probability of a result at least this extreme if H₀ were true.", active: [3] },
+    { note: "If p ≤ α, reject H₀. Otherwise, fail to reject. Then interpret the size of the effect.", active: [4] }
+  ]}
+/>
+
+A two-tailed test detects change in either direction. A one-tailed test puts all of α in one direction, so it's only justifiable when the opposite result would lead to the same action, and the direction was fixed beforehand. In product experiments, two-tailed is the normal choice, since harm matters.
+
+**A p-value is not** the probability that H₀ is true, the probability that the result happened by chance alone, or a measure of effect size. Failing to reject also doesn't prove H₀.
+
+## Intuition and formula
+
+<Formula>test statistic = (observed − expected under H₀) / standard error</Formula>
+
+<HypothesisViz />
+
+## Worked example
+
+A site's historical conversion is 5%. After a redesign, 130 of 2,000 visitors convert (6.5%). Under H₀: p = 0.05, the standard error is √(0.05 · 0.95 / 2000) = 0.00487, so z = 3.08 and the two-sided p-value is 0.0021. Evidence is strong, but this comparison isn't randomized, so a seasonal change might also explain it.
+
+## Python
+
+```python
+from statsmodels.stats.proportion import proportions_ztest
+
+z, p = proportions_ztest(count=130, nobs=2_000, value=0.05, prop_var=0.05)
+assert round(z, 2) == 3.08
+assert round(p, 4) == 0.0021
+```
+
+## Excel or Power BI
+
+`NORM.S.DIST(z, TRUE)` gives a lower-tail probability, so a two-sided p-value is `=2*(1-NORM.S.DIST(ABS(z),TRUE))`. `T.TEST` directly returns a p-value for two ranges.
+
+## In industry
+
+Most statistical decisions in analytics follow this framework, and strong teams report effects and intervals with the p-value.
+
+## Assumptions and limitations
+
+Every test assumes a data-generating model, usually including independence. With huge samples, trivial differences become significant, and with small samples, real effects may not be. A threshold of 0.05 is a convention, not a scientific law.
+
+## Common mistakes
+
+- Saying p = 0.03 means a 97% chance the variant works.
+- Claiming "no effect" from a non-significant result.
+- Choosing one-tailed after seeing the direction.
+- Running many tests and only reporting the significant ones.
+
+## Alternatives
+
+Confidence intervals show the range of effects consistent with the data. Bayesian analysis yields a posterior probability. Equivalence tests can provide evidence that an effect is negligible.
+
+## Interview questions
+
+<Question q="Explain a p-value to a product manager.">If the change truly did nothing, it's how often we'd see a difference at least this large from randomness alone. A small value means the data is hard to explain by chance.</Question>
+
+<Question q="Why doesn't failing to reject prove the null?">The test may have had too little power to detect the effect. Absence of evidence is not evidence of absence.</Question>

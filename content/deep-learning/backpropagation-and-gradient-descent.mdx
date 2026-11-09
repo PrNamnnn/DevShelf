@@ -1,0 +1,110 @@
+---
+title: "Backpropagation and Gradient Descent"
+summary: "How networks compute gradients through the chain rule and improve by stepping down the loss."
+level: intermediate
+section: foundations
+order: 2
+tags: ["backpropagation","chain rule","gradient descent","autograd"]
+requires: ["deep-learning/neurons-and-activation"]
+related: ["deep-learning/training-losses-and-optimizers"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "NumPy examples executed with the listed versions. PyTorch fragment checked against documentation and not executed"
+verified: "2026-11-09"
+docs:
+  - label: "PyTorch: Autograd mechanics"
+    url: "https://docs.pytorch.org/docs/2.15/notes/autograd.html"
+  - label: "PyTorch: Automatic differentiation"
+    url: "https://docs.pytorch.org/tutorials/beginner/basics/autogradqs_tutorial.html"
+---
+
+## What it is
+
+**Gradient descent** updates parameters in the direction that lowers the loss. **Backpropagation** efficiently computes those gradients by applying the chain rule backward through the network.
+
+## Why it exists
+
+Networks can have billions of parameters. Backpropagation computes all partial derivatives at about the cost of a forward pass or two.
+
+## How it works
+
+Run a forward pass and record operations, compute the loss, go backward multiplying local derivatives, then update. Frameworks record this graph through automatic differentiation.
+
+Long chains of small derivatives make gradients **vanish**, and large ones make them **explode**. Solutions are ReLU, good initialization, normalization, residual connections and gradient clipping.
+
+## Intuition and formula
+
+<Formula>θ ← θ − η ∇L(θ)</Formula>
+
+<Formula>∂L/∂w = (∂L/∂ŷ)(∂ŷ/∂w)</Formula>
+
+## Worked example
+
+For ŷ = wx with x = 2, y = 3, w = 0.5, and L = (ŷ − y)²: the prediction is 1 and the loss is 4. The gradient is 2(ŷ − y)x = −8. With learning rate 0.05, w becomes 0.9, the prediction is 1.8 and the loss falls to 1.44.
+
+## Python
+
+```python
+import numpy as np
+
+x, y, w, lr = 2.0, 3.0, 0.5, 0.05
+loss = lambda w: (w * x - y) ** 2
+gradient = 2 * (w * x - y) * x
+assert gradient == -8
+assert round((loss(w + 1e-6) - loss(w - 1e-6)) / 2e-6, 4) == -8
+
+w -= lr * gradient
+assert round(w, 6) == 0.9 and round(loss(w), 6) == 1.44
+
+rng = np.random.default_rng(1)
+X = np.array([[0, 0], [0, 1], [1, 0], [1, 1]], dtype=float)
+Y = np.array([[0], [1], [1], [0]], dtype=float)
+W1, b1 = rng.normal(0, 1, (2, 4)), np.zeros((1, 4))
+W2, b2 = rng.normal(0, 1, (4, 1)), np.zeros((1, 1))
+
+for _ in range(8_000):
+    h = np.tanh(X @ W1 + b1)
+    p = 1 / (1 + np.exp(-(h @ W2 + b2)))
+    dp = p - Y
+    dh = dp @ W2.T
+    gate = 1 - h**2
+    W1 -= 0.1 * X.T @ (dh * gate) / 4
+    b1 -= 0.1 * (dh * gate).mean(0, keepdims=True)
+    W2 -= 0.1 * h.T @ dp / 4
+    b2 -= 0.1 * dp.mean(0, keepdims=True)
+
+assert (p > 0.5).astype(int).ravel().tolist() == [0, 1, 1, 0]
+```
+
+The equivalent in PyTorch needs only `loss.backward()` followed by `optimizer.step()`:
+
+```py
+optimizer.zero_grad()
+loss = criterion(model(inputs), targets)
+loss.backward()
+optimizer.step()
+```
+
+## In industry
+
+Frameworks automate derivatives, and engineers concentrate on data, architecture, and monitoring gradients and loss curves.
+
+## Assumptions and limitations
+
+Non-convex losses have no guarantee of a global optimum, but work well in practice.
+
+## Common mistakes
+
+- Forgetting to reset gradients.
+- A learning rate too large.
+- Not checking that loss falls on a tiny batch first.
+- Detaching tensors accidentally.
+
+## Alternatives
+
+Second-order methods are expensive at scale. Evolution strategies don't need gradients, but need many more evaluations.
+
+## Interview questions
+
+<Question q="What is backpropagation?">Efficient reverse-mode application of the chain rule to get gradients of the loss.</Question>
+
+<Question q="What causes vanishing gradients?">Repeated multiplication of small derivatives through many layers.</Question>

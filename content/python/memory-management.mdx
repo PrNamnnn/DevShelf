@@ -1,0 +1,165 @@
+---
+title: "Memory Management and Garbage Collection"
+summary: "Reference counting, the cycle collector, weak references and how to find memory problems in practice."
+level: advanced
+section: internals
+order: 10
+tags: [memory, reference-counting, gc, weakref, tracemalloc, slots, internals]
+requires: [python/variables-and-memory]
+related: [python/threads-processes-and-the-gil, python/performance-and-practical-patterns]
+versions: "CPython. Details differ in free-threaded builds and other implementations."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python C API: Memory management"
+    url: "https://docs.python.org/3/c-api/memory.html"
+  - label: "Python library: gc"
+    url: "https://docs.python.org/3/library/gc.html"
+  - label: "Python library: weakref"
+    url: "https://docs.python.org/3/library/weakref.html"
+  - label: "Python library: tracemalloc"
+    url: "https://docs.python.org/3/library/tracemalloc.html"
+---
+
+## What it is
+
+CPython frees most objects through **reference counting**, and a cyclic garbage collector handles reference loops.
+
+## Why it exists
+
+You don't call free, but memory still has to be reclaimed. Counting frees objects promptly. Cycles need a separate pass because their counts never reach zero.
+
+## How it works
+
+Local names live in function frames, while the objects they refer to live on the heap.
+
+<MemoryViz
+  title="Reference counts and a cycle"
+  code={["a = []", "b = a", "del a", "del b", "x = []; y = [x]; x.append(y)", "del x, y"]}
+  steps={[
+    { line: 0, note: "One name refers to the list.", stack: [{ name: "a", ref: "l" }], heap: [{ id: "l", label: "list  refcount=1" }] },
+    { line: 1, note: "A second reference raises the count.", changed: ["l"], stack: [{ name: "a", ref: "l" }, { name: "b", ref: "l" }], heap: [{ id: "l", label: "list  refcount=2" }] },
+    { line: 2, note: "del removes a name, not the object.", changed: ["l"], stack: [{ name: "b", ref: "l" }], heap: [{ id: "l", label: "list  refcount=1" }] },
+    { line: 3, note: "The count reaches zero and the list is freed immediately.", stack: [], heap: [] },
+    { line: 4, note: "Now x and y refer to each other.", stack: [{ name: "x", ref: "p" }, { name: "y", ref: "q" }], heap: [{ id: "p", label: "x list → y  refcount=2" }, { id: "q", label: "y list → x  refcount=2" }] },
+    { line: 5, note: "The names are gone but each object still has a count of 1. Only the cycle collector can free them.", changed: ["p", "q"], stack: [], heap: [{ id: "p", label: "x list → y  refcount=1" }, { id: "q", label: "y list → x  refcount=1" }] },
+  ]}
+/>
+
+## Syntax and key APIs
+
+| Tool | Purpose |
+| --- | --- |
+| `sys.getrefcount(x)` | Count, plus one for the call |
+| `sys.getsizeof(x)` | Shallow size in bytes |
+| `gc.collect()` | Force a cycle collection |
+| `weakref.ref(x)` | Refer without keeping alive |
+| `tracemalloc` | Trace allocations |
+| `__slots__` | Remove per-instance `__dict__` |
+
+## Simple example
+
+```python
+import gc
+
+class Node:
+    freed = 0
+    def __del__(self):
+        Node.freed += 1
+
+a, b = Node(), Node()
+a.other, b.other = b, a
+del a, b
+
+assert Node.freed == 0
+gc.collect()
+assert Node.freed == 2
+```
+
+## Industry examples
+
+### Cache without keeping objects alive
+
+```python
+import gc, weakref
+
+class Image:
+    pass
+
+cache = weakref.WeakValueDictionary()
+image = Image()
+cache["logo"] = image
+assert cache["logo"] is image
+
+del image
+gc.collect()
+assert "logo" not in cache
+```
+
+### Find what is allocating
+
+```python
+import tracemalloc
+
+tracemalloc.start()
+data = [str(i) for i in range(10000)]
+current, peak = tracemalloc.get_traced_memory()
+tracemalloc.stop()
+
+assert current > 100_000
+assert peak >= current
+```
+
+### Shrink many small objects
+
+```python
+import sys
+
+class Plain:
+    def __init__(self):
+        self.x = 1
+
+class Slotted:
+    __slots__ = ("x",)
+    def __init__(self):
+        self.x = 1
+
+assert hasattr(Plain(), "__dict__")
+assert not hasattr(Slotted(), "__dict__")
+```
+
+## Patterns and best practices
+
+- Use `with` for external resources rather than relying on collection.
+- Use generators to keep large data out of memory.
+- Keep long-lived caches bounded.
+- Measure with `tracemalloc` before optimizing.
+
+## Alternatives and trade-offs
+
+| Technique | Helps | Cost |
+| --- | --- | --- |
+| `__slots__` | Many instances | No dynamic attributes |
+| Generators | Large data | One pass |
+| `weakref` | Caches | Entries can vanish |
+| `array`, NumPy | Numeric data | One type |
+
+## Common mistakes
+
+**Relying on `__del__` for cleanup.** Timing isn't guaranteed. Use context managers.
+
+**Unbounded global dictionaries.** That's the most common Python leak.
+
+**Trusting `sys.getsizeof` for containers.** It doesn't include the objects they refer to.
+
+**Assuming `del` frees memory.** It removes one reference.
+
+## Interview questions
+
+<Question q="How does Python manage memory?">
+CPython uses reference counting to free most objects immediately, plus a generational cycle collector for reference loops.
+</Question>
+
+<Question q="What does del do?">
+It unbinds a name. The object is freed only when its last reference is gone.
+</Question>

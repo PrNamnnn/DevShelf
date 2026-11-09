@@ -1,0 +1,177 @@
+---
+title: "The Iteration Protocol, Built-ins and itertools"
+summary: "What for really does, the iteration built-ins from enumerate to sorted, and the itertools recipes used in real pipelines."
+level: intermediate
+section: iteration
+order: 10
+tags: [iterator, iterable, enumerate, zip, map, filter, any, all, sorted, min, max, itertools, accumulate, product]
+requires: [python/conditionals-and-loops]
+related: [python/generators, python/collections-and-comprehensions]
+versions: "itertools.pairwise needs Python 3.10+, and batched needs 3.12+."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python library: Built-in functions"
+    url: "https://docs.python.org/3/library/functions.html"
+  - label: "Python library: itertools"
+    url: "https://docs.python.org/3/library/itertools.html"
+  - label: "Python library: Iterator types"
+    url: "https://docs.python.org/3/library/stdtypes.html#iterator-types"
+---
+
+## What it is
+
+An **iterable** can produce an iterator. An **iterator** returns items through `__next__` and raises `StopIteration` when finished. Every `for` loop uses this protocol.
+
+## Why it exists
+
+One protocol lets lists, files, generators and database cursors all work in the same loop and with the same helpers.
+
+## How it works
+
+<StepFlow
+  title="What a for loop does"
+  code={["it = iter(['a', 'b'])", "while True:", "    try:", "        item = next(it)", "    except StopIteration:", "        break", "    print(item)"]}
+  nodes={["iter(iterable)", "next(iterator)", "run body", "StopIteration", "loop ends"]}
+  steps={[
+    { line: 0, active: [0], note: "for calls iter() on the object to get an iterator with its own position." },
+    { line: 3, active: [1], note: "next() returns the first item.", state: { item: "a" } },
+    { line: 6, active: [2], note: "The loop body runs." },
+    { line: 3, active: [1], note: "next() returns the following item.", state: { item: "b" } },
+    { line: 4, active: [3], note: "With no items left, next() raises StopIteration." },
+    { line: 5, active: [4], note: "for catches it and finishes. You never see the exception." },
+  ]}
+/>
+
+An iterator returns itself from `iter()`, so it can only be consumed once. A list returns a fresh iterator each time.
+
+## Syntax and key APIs
+
+| Built-in | Returns |
+| --- | --- |
+| `enumerate(xs, start=0)` | `(i, x)` pairs, lazily |
+| `zip(a, b, strict=False)` | Tuples, lazily |
+| `map(f, xs)`, `filter(f, xs)` | Lazy results |
+| `any(xs)`, `all(xs)` | Bool, short-circuits |
+| `sum`, `min`, `max` | Consume everything |
+| `sorted(xs, key=, reverse=)` | New list |
+| `reversed(seq)` | Reverse iterator |
+| `next(it, default)` | Item or default |
+
+| itertools | Use |
+| --- | --- |
+| `chain`, `chain.from_iterable` | Concatenate |
+| `islice` | Slice iterators |
+| `accumulate` | Running totals |
+| `pairwise` | Adjacent pairs |
+| `product`, `permutations`, `combinations` | Combinatorics |
+| `groupby` | Consecutive groups |
+| `count`, `cycle`, `repeat` | Infinite sequences |
+
+## Simple example
+
+```python
+it = iter([1, 2])
+
+assert iter(it) is it
+assert list(it) == [1, 2]
+assert list(it) == []
+
+assert any(x > 1 for x in [1, 2])
+assert all(x > 0 for x in [1, 2])
+assert next((x for x in [1, 2] if x > 5), "none") == "none"
+assert max(["aa", "b"], key=len) == "aa"
+assert min([], default=0) == 0
+```
+
+## Industry examples
+
+### Detect changes between neighbours
+
+```python
+from itertools import pairwise
+
+readings = [10, 12, 11, 15]
+assert [b - a for a, b in pairwise(readings)] == [2, -1, 4]
+```
+
+### Running totals
+
+```python
+from itertools import accumulate
+assert list(accumulate([1, 2, 3])) == [1, 3, 6]
+assert list(accumulate([3, 1, 2], max)) == [3, 3, 3]
+```
+
+### Generate test combinations
+
+```python
+from itertools import combinations, product
+
+assert list(product(["GET", "POST"], [200])) == [("GET", 200), ("POST", 200)]
+assert list(combinations("abc", 2)) == [("a", "b"), ("a", "c"), ("b", "c")]
+```
+
+### Stop early on huge input
+
+`any` stops at the first match, so a generator keeps this cheap.
+
+```python
+checked = []
+
+def is_bad(x):
+    checked.append(x)
+    return x == 2
+
+assert any(is_bad(x) for x in [1, 2, 3, 4])
+assert checked == [1, 2]
+```
+
+### A custom iterable
+
+```python
+class Countdown:
+    def __init__(self, start):
+        self.start = start
+
+    def __iter__(self):
+        return iter(range(self.start, 0, -1))
+
+c = Countdown(2)
+assert list(c) == list(c) == [2, 1]
+```
+
+## Patterns and best practices
+
+- Pass generator expressions to `any`, `all`, `sum` and `min`.
+- Use `next(iterator, default)` for "first match".
+- Prefer `zip(strict=True)` when lengths must match.
+- Make classes iterable by having `__iter__` return a new iterator.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Several passes | `list` | Memory |
+| One pass, large data | Iterator | Single use |
+| Heavy numeric work | NumPy | Dependency |
+
+## Common mistakes
+
+**Passing an empty iterable to `max`.** It raises `ValueError`. Use `default=`.
+
+**Iterating a `zip` twice.** It's exhausted after the first.
+
+**`any` on a list comprehension.** The list is fully built first, which loses the short circuit.
+
+**Expecting `sorted` to handle mixed types.** Comparing `int` and `str` raises `TypeError`.
+
+## Interview questions
+
+<Question q="Iterable versus iterator?">
+An iterable has `__iter__` and can produce iterators. An iterator has `__next__`, tracks a position and is consumed.
+</Question>
+
+<Question q="Why can you loop over a list twice but not a generator?">
+A list gives a new iterator on each `iter()` call. A generator is its own iterator.
+</Question>

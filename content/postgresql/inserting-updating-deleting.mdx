@@ -1,0 +1,147 @@
+---
+title: "Inserting, Updating and Deleting"
+summary: "Writing data well: bulk inserts, RETURNING, updates from other tables, MERGE, and fast loading with COPY."
+level: fundamental
+section: foundations
+order: 20
+tags: [insert, update, delete, returning, merge, copy, truncate, dml]
+requires: [postgresql/schema-types-and-constraints]
+related: [postgresql/queries-and-joins, postgresql/transactions-and-mvcc]
+versions: "All supported PostgreSQL versions. MERGE needs 15+."
+tested: "PostgreSQL 18.6 through PGlite"
+verified: "2026-11-09"
+docs:
+  - label: "PostgreSQL: INSERT"
+    url: "https://www.postgresql.org/docs/current/sql-insert.html"
+  - label: "PostgreSQL: UPDATE"
+    url: "https://www.postgresql.org/docs/current/sql-update.html"
+  - label: "PostgreSQL: MERGE"
+    url: "https://www.postgresql.org/docs/current/sql-merge.html"
+  - label: "PostgreSQL: COPY"
+    url: "https://www.postgresql.org/docs/current/sql-copy.html"
+---
+
+## What it is
+
+`INSERT`, `UPDATE`, `DELETE` and `MERGE` change data. `RETURNING` gives back the affected rows in the same statement.
+
+## Why it exists
+
+Applications need to change data precisely and often need the result, such as a generated ID, without another query.
+
+## How it works
+
+Each statement is atomic. Under MVCC, an update writes a new row version and a delete marks the old one, which vacuum reclaims later.
+
+| Task | Best tool |
+| --- | --- |
+| Insert or update one key | `INSERT ... ON CONFLICT` |
+| Sync from another table | `MERGE` or `UPDATE ... FROM` |
+| Load many rows | `COPY` |
+| Empty a table | `TRUNCATE` |
+
+## Syntax and key APIs
+
+```sql
+CREATE TABLE items (id int GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name text, stock int DEFAULT 0);
+
+INSERT INTO items (name, stock) VALUES ('a', 1), ('b', 2);
+SELECT count(*)::int AS n FROM items;
+-- rows: [{"n":2}]
+```
+
+## Simple example
+
+```sql
+INSERT INTO items (name) VALUES ('c') RETURNING id, stock;
+-- rows: [{"id":3,"stock":0}]
+```
+
+```sql
+UPDATE items SET stock = stock + 5 WHERE name = 'a' RETURNING stock;
+-- rows: [{"stock":6}]
+```
+
+## Industry examples
+
+### Update from another table
+
+```sql
+CREATE TABLE deltas (name text, change int);
+INSERT INTO deltas VALUES ('a', 4), ('b', -1);
+
+UPDATE items i SET stock = i.stock + d.change
+FROM deltas d WHERE d.name = i.name;
+
+SELECT stock FROM items WHERE name = 'a';
+-- rows: [{"stock":10}]
+```
+
+### Synchronize with MERGE
+
+```sql
+CREATE TABLE incoming (name text, stock int);
+INSERT INTO incoming VALUES ('a', 100), ('z', 1);
+
+MERGE INTO items t
+USING incoming s ON t.name = s.name
+WHEN MATCHED THEN UPDATE SET stock = s.stock
+WHEN NOT MATCHED THEN INSERT (name, stock) VALUES (s.name, s.stock);
+
+SELECT count(*)::int AS n, max(stock)::int AS top FROM items;
+-- rows: [{"n":4,"top":100}]
+```
+
+Under concurrency, `MERGE` doesn't guarantee an insert or update will occur, and a duplicate concurrent insert raises a uniqueness error. For concurrent upserts, prefer `ON CONFLICT`.
+
+### Delete in batches
+
+Deleting millions of rows in one statement holds locks and creates a burst of dead rows.
+
+```sql
+WITH batch AS (SELECT id FROM items WHERE stock < 3 ORDER BY id LIMIT 1000),
+removed AS (DELETE FROM items WHERE id IN (SELECT id FROM batch) RETURNING id)
+SELECT count(*)::int AS n FROM removed;
+-- rows: [{"n":3}]
+```
+
+### Load quickly
+
+```plsql
+COPY items (name, stock) FROM '/data/items.csv' WITH (FORMAT csv, HEADER true);
+```
+
+## Patterns and best practices
+
+- Use `RETURNING` instead of a follow-up `SELECT`.
+- Use `ON CONFLICT` for concurrent upserts.
+- Batch large deletes and updates.
+- Load with `COPY`, adding indexes afterwards for large initial loads.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Remove all rows | `TRUNCATE` | Takes an exclusive lock |
+| Remove some rows | `DELETE` | Creates dead rows |
+| Keep history | Soft delete column | Queries must filter |
+
+## Common mistakes
+
+**`UPDATE` or `DELETE` without `WHERE`.** Every row changes. Test with a `SELECT` first.
+
+**A row joined to several sources in `UPDATE ... FROM`.** Which one applies is unpredictable.
+
+**Read-then-write for a counter.** Use `SET n = n + 1`.
+
+**Using `DELETE` to empty a huge table.** `TRUNCATE` is far cheaper.
+
+## Interview questions
+
+<Question q="DELETE versus TRUNCATE?">
+`DELETE` removes rows selectively and creates dead tuples. `TRUNCATE` removes all rows quickly with an exclusive lock.
+</Question>
+
+<Question q="ON CONFLICT or MERGE?">
+`ON CONFLICT` guarantees an atomic insert or update under concurrency. `MERGE` handles richer sync logic but doesn't give the same guarantee.
+</Question>

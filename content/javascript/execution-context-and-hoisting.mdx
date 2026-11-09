@@ -1,0 +1,152 @@
+---
+title: "Execution Contexts, the Call Stack and Hoisting"
+summary: "What the engine creates before your code runs, why var and function hoist differently, and how the call stack works."
+level: advanced
+section: internals
+order: 10
+tags: [execution-context, call-stack, hoisting, tdz, lexical-environment, stack-overflow]
+requires: [javascript/scope-closures-and-this]
+related: [javascript/event-loop, javascript/memory-management-and-leaks]
+versions: "All modern engines."
+tested: "Node.js 24.17.0"
+verified: "2026-11-09"
+docs:
+  - label: "MDN: JavaScript execution model"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Execution_model"
+  - label: "MDN: Hoisting"
+    url: "https://developer.mozilla.org/en-US/docs/Glossary/Hoisting"
+  - label: "MDN: Call stack"
+    url: "https://developer.mozilla.org/en-US/docs/Glossary/Call_stack"
+---
+
+## What it is
+
+An **execution context** is the environment in which code runs, tracking its variables and `this`. The **call stack** holds active contexts. **Hoisting** describes declarations being known before their line executes.
+
+## Why it exists
+
+Before running a scope, the engine scans its declarations. That allows functions to be called before their definition and is the root of the differences among `var`, `let` and `function`.
+
+## How it works
+
+Each function call pushes a context, and returning pops it.
+
+<MemoryViz
+  title="Call stack and scope links"
+  stackLabel="Call stack (top last)"
+  heapLabel="Environments"
+  code={["const x = 1;", "function a() { const y = 2; return b(y); }", "function b(z) { return x + z; }", "a();"]}
+  steps={[
+    { line: 0, note: "The global context is created. Declarations are registered first.", stack: [{ name: "global", ref: "g" }], heap: [{ id: "g", label: "x, a, b" }] },
+    { line: 3, note: "Calling a pushes a new context with its own environment.", changed: ["a()"], stack: [{ name: "global", ref: "g" }, { name: "a()", ref: "ea" }], heap: [{ id: "g", label: "x=1, a, b" }, { id: "ea", label: "y=2 → outer: global" }] },
+    { line: 1, note: "a calls b. The stack grows, but b's outer scope is global, where it was defined.", changed: ["b()"], stack: [{ name: "global", ref: "g" }, { name: "a()", ref: "ea" }, { name: "b()", ref: "eb" }], heap: [{ id: "g", label: "x=1, a, b" }, { id: "ea", label: "y=2 → outer: global" }, { id: "eb", label: "z=2 → outer: global" }] },
+    { line: 2, note: "b finds x through its scope chain, not through the caller. It returns and is popped.", stack: [{ name: "global", ref: "g" }, { name: "a()", ref: "ea" }], heap: [{ id: "g", label: "x=1, a, b" }, { id: "ea", label: "y=2 → outer: global" }], state: { returned: "3" } },
+    { line: 3, note: "a returns. Only the global context remains.", stack: [{ name: "global", ref: "g" }], heap: [{ id: "g", label: "x=1, a, b" }], state: { result: "3" } },
+  ]}
+/>
+
+| Declaration | Before its line | Scope |
+| --- | --- | --- |
+| `function f(){}` | Fully usable | Function or block |
+| `var x` | `undefined` | Function |
+| `let`, `const`, `class` | `ReferenceError` (dead zone) | Block |
+
+## Syntax and key APIs
+
+```javascript
+console.trace();               // print the current stack
+new Error().stack;             // capture it as text
+```
+
+## Simple example
+
+```js
+import assert from "node:assert";
+
+assert.equal(hoisted(), "ok");
+function hoisted() {
+  return "ok";
+}
+
+assert.equal(legacy, undefined);
+var legacy = 1;
+
+assert.throws(() => modern, ReferenceError);
+let modern = 1;
+```
+
+## Industry examples
+
+### Scope comes from definition, not the call
+
+```js
+import assert from "node:assert";
+
+const name = "global";
+function read() {
+  return name;
+}
+function caller() {
+  const name = "local";
+  return read();
+}
+
+assert.equal(caller(), "global");
+```
+
+### Avoid stack overflows
+
+```js
+import assert from "node:assert";
+
+function depth(n) {
+  return depth(n + 1);
+}
+assert.throws(() => depth(0), RangeError);
+
+function sum(list) {
+  let total = 0;
+  for (const n of list) total += n;
+  return total;
+}
+assert.equal(sum(new Array(200000).fill(1)), 200000);
+```
+
+### Label asynchronous gaps
+
+Async code loses its original stack across tasks. Attach context with `cause` when rethrowing.
+
+## Patterns and best practices
+
+- Use `const` by default, and declare at the top of a scope.
+- Declare before use, even when hoisting would allow otherwise.
+- Convert deep recursion on unbounded data to loops.
+- Read stack traces from the top.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Block scope | `let`, `const` | Dead zone |
+| Legacy compatibility | `var` | Function scope surprises |
+| Deep traversal | Loop with stack | More code |
+
+## Common mistakes
+
+**Thinking code is physically moved.** Hoisting is a result of the setup phase.
+
+**Relying on `var` in blocks.** It leaks to the function.
+
+**Calling a function expression before assignment.** Only the variable hoists.
+
+**Assuming dynamic scope.** JavaScript uses lexical scope.
+
+## Interview questions
+
+<Question q="What is hoisting?">
+Declarations are processed when a scope is set up. Functions are fully available, `var` starts as `undefined`, and `let` and `const` stay in a dead zone until they run.
+</Question>
+
+<Question q="What is the temporal dead zone?">
+The period from the start of a block until a `let`, `const` or `class` declaration runs, when access throws `ReferenceError`.
+</Question>

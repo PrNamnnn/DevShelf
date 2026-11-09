@@ -1,0 +1,81 @@
+---
+title: "Spark and Distributed Computing"
+summary: "Lazy evaluation, partitions, shuffles and how to reason about Spark performance."
+level: advanced
+section: processing
+order: 1
+tags: ["Apache Spark","distributed computing","shuffle","partitions","lazy evaluation"]
+requires: ["data-engineering/etl-elt-and-pipelines"]
+related: ["python/pandas-essentials","python/threads-processes-and-the-gil"]
+versions: "Apache Spark 4.3 documentation"
+tested: "Spark wasn't run here. PySpark fragment checked against Spark documentation"
+verified: "2026-11-09"
+docs:
+  - label: "Apache Spark: RDD guide"
+    url: "https://spark.apache.org/docs/latest/rdd-programming-guide.html"
+  - label: "Apache Spark: SQL guide"
+    url: "https://spark.apache.org/docs/latest/sql-programming-guide.html"
+  - label: "Apache Spark: Tuning"
+    url: "https://spark.apache.org/docs/latest/sql-performance-tuning.html"
+---
+
+## What it is
+
+Apache Spark is a distributed engine for large data processing. A **driver** plans the job, and **executors** run tasks over **partitions**.
+
+## Why it exists
+
+Data can exceed what one machine can process in a reasonable time.
+
+## How it works
+
+**Transformations** such as `filter` and `groupBy` are lazy and they build a plan. **Actions** such as `count` and `write` execute it. The Catalyst optimizer rewrites the logical plan.
+
+A **shuffle** moves data across the network for wide operations such as grouping and joining, and it's commonly the most expensive step. **Data skew** means a few partitions are much larger than the rest, leaving a few tasks to run far longer than others. Broadcast joins send a small table to every executor and avoid shuffling it.
+
+## Syntax and key APIs
+
+```py
+from pyspark.sql import SparkSession, functions as F
+
+spark = SparkSession.builder.appName("sales").getOrCreate()
+orders = spark.read.parquet("s3://bucket/orders/")
+daily = (
+    orders.filter(F.col("status") == "paid")
+    .groupBy("day")
+    .agg(F.sum("amount").alias("revenue"))
+)
+daily.write.mode("overwrite").partitionBy("day").parquet("s3://bucket/daily/")
+```
+
+## Simple example
+
+Nothing runs until `write`. The optimizer can push the status filter toward the Parquet scan, and column pruning reads only needed columns.
+
+## Industry examples
+
+Large-scale ETL, feature generation and log processing run on Spark, usually through Databricks, EMR or Fabric.
+
+## Patterns and best practices
+
+- Filter and select early.
+- Use the DataFrame API rather than RDDs.
+- Inspect plans with `explain`.
+- Handle skew with salting or adaptive query execution.
+
+## Alternatives and trade-offs
+
+DuckDB or Polars handle surprisingly large datasets on one machine. A warehouse may remove the need for Spark.
+
+## Common mistakes
+
+- `collect()` on large data.
+- Python UDFs where built-in functions exist.
+- Writing thousands of tiny files.
+- Using Spark for small data.
+
+## Interview questions
+
+<Question q="Transformation vs action?">Transformations build a lazy plan. Actions trigger its execution.</Question>
+
+<Question q="Why are shuffles expensive?">They need serialization, network transfer and disk use across executors.</Question>

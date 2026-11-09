@@ -1,0 +1,163 @@
+---
+title: "The Built-in Hooks Map"
+summary: "Every built-in Hook by purpose, the rules of Hooks and why they exist, and the less common Hooks explained."
+level: intermediate
+section: hooks
+order: 20
+tags: [hooks, rules-of-hooks, useId, useLayoutEffect, useImperativeHandle, useDebugValue, useInsertionEffect]
+requires: [react/effects-and-refs]
+related: [react/custom-hooks, react/performance-and-memoization]
+versions: "React 19."
+tested: "Not executed. Checked against the React docs."
+verified: "2026-11-09"
+docs:
+  - label: "React: Built-in Hooks"
+    url: "https://react.dev/reference/react/hooks"
+  - label: "React: useId"
+    url: "https://react.dev/reference/react/useId"
+  - label: "React: useLayoutEffect"
+    url: "https://react.dev/reference/react/useLayoutEffect"
+  - label: "React: useImperativeHandle"
+    url: "https://react.dev/reference/react/useImperativeHandle"
+  - label: "React: Rules of Hooks"
+    url: "https://react.dev/reference/rules/rules-of-hooks"
+---
+
+## What it is
+
+Hooks are functions that let components use React features such as state and effects.
+
+## Why it exists
+
+Before Hooks, stateful logic was tied to class lifecycles and hard to share. Hooks compose as ordinary function calls.
+
+## How it works
+
+React stores each component's Hook state in an ordered list and matches calls by **position**. That's why Hooks must be called in the same order on every render.
+
+<TableViz
+  title="Hooks are matched by call order"
+  code={["const [a, setA] = useState(0);", "const ref = useRef(null);", "useEffect(run, [a]);"]}
+  tables={[{ name: "Hook list for this component", columns: ["slot", "hook", "stored"], rows: [[0, "useState", "a"], [1, "useRef", "ref"], [2, "useEffect", "deps [a]"]] }]}
+  steps={[
+    { line: 0, highlight: { "Hook list for this component": [0] }, note: "The first Hook call reads slot 0." },
+    { line: 1, highlight: { "Hook list for this component": [1] }, note: "The second call reads slot 1." },
+    { line: 2, highlight: { "Hook list for this component": [2] }, note: "The third call reads slot 2. If a condition skipped an earlier Hook, every later call would read the wrong slot." },
+  ]}
+/>
+
+Only call Hooks at the top level of components or custom Hooks. `use` is the exception and can be called conditionally.
+
+## Syntax and key APIs
+
+| Group | Hooks |
+| --- | --- |
+| State | `useState`, `useReducer`, `useOptimistic` |
+| Context | `useContext` |
+| Refs | `useRef`, `useImperativeHandle` |
+| Effects | `useEffect`, `useLayoutEffect`, `useInsertionEffect`, `useEffectEvent` |
+| Performance | `useMemo`, `useCallback`, `useTransition`, `useDeferredValue` |
+| Other | `useId`, `useDebugValue`, `useSyncExternalStore`, `useActionState` |
+| React DOM | `useFormStatus` |
+
+| Effect Hook | Fires |
+| --- | --- |
+| `useInsertionEffect` | Before DOM changes, for CSS-in-JS libraries |
+| `useLayoutEffect` | Before the browser repaints |
+| `useEffect` | After paint, usually |
+
+## Simple example
+
+`useId` creates IDs that match between server and client. It isn't for list keys.
+
+```jsx
+function Field({ label }) {
+  const id = useId();
+  return (
+    <>
+      <label htmlFor={id}>{label}</label>
+      <input id={id} />
+    </>
+  );
+}
+```
+
+## Industry examples
+
+### Measure before paint
+
+`useLayoutEffect` blocks painting, so use it only when you must avoid a visible flicker.
+
+```jsx
+function Tooltip({ anchor }) {
+  const ref = useRef(null);
+  const [top, setTop] = useState(0);
+
+  useLayoutEffect(() => {
+    setTop(anchor.bottom + ref.current.offsetHeight);
+  }, [anchor]);
+
+  return <div ref={ref} style={{ top }} />;
+}
+```
+
+### Expose a narrow imperative API
+
+Don't overuse this. Prefer a prop like `isOpen` when it can express the same thing.
+
+```jsx
+function VideoPlayer({ src, ref }) {
+  const video = useRef(null);
+
+  useImperativeHandle(ref, () => ({
+    play: () => video.current.play(),
+  }), []);
+
+  return <video ref={video} src={src} />;
+}
+```
+
+### Label a custom Hook in DevTools
+
+```jsx
+function useOnline() {
+  const online = useSyncExternalStore(subscribe, getSnapshot);
+  useDebugValue(online ? "Online" : "Offline");
+  return online;
+}
+```
+
+## Patterns and best practices
+
+- Enable the Hooks ESLint rules.
+- Prefer `useEffect`, and use `useLayoutEffect` only for measurement.
+- Reach for the "Other" group mainly when writing libraries.
+- Extract repeated Hook combinations into custom Hooks.
+
+## Alternatives and trade-offs
+
+| Need | Hook | Instead of |
+| --- | --- | --- |
+| Value not affecting output | `useRef` | `useState` |
+| Complex transitions | `useReducer` | Many `useState` calls |
+| Subscribe to outside data | `useSyncExternalStore` | `useEffect` with `setState` |
+
+## Common mistakes
+
+**Calling a Hook in a condition or loop.** Slots misalign.
+
+**Using `useId` for keys.** List keys must come from data.
+
+**Calling Hooks after an early return.** That's also conditional.
+
+**`useLayoutEffect` for ordinary work.** It can hurt performance.
+
+## Interview questions
+
+<Question q="Why can't Hooks be called conditionally?">
+React identifies each Hook by its call order, so order must be identical on every render.
+</Question>
+
+<Question q="useEffect versus useLayoutEffect?">
+`useLayoutEffect` runs before paint and blocks it. `useEffect` generally runs afterwards.
+</Question>

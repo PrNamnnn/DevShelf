@@ -1,0 +1,205 @@
+---
+title: "Scope, Closures and this"
+summary: "How functions remember variables, why this depends on the call, and when arrow functions change the answer."
+level: intermediate
+section: functions
+order: 20
+tags: [scope, closures, this, arrow-functions, bind, call, apply, hoisting]
+related: [javascript/values-and-types, javascript/prototypes-and-classes, python/functions-and-scope]
+versions: "All modern engines."
+tested: "Node.js 24.17.0"
+verified: "2026-11-09"
+docs:
+  - label: "MDN: Closures"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Closures"
+  - label: "MDN: this"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/this"
+  - label: "MDN: Arrow function expressions"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Arrow_functions"
+---
+
+## What it is
+
+A **closure** is a function together with references to the variables in the scope where it was created. `this` is a binding determined mostly by **how a function is called**.
+
+## Why it exists
+
+Closures provide private state and let callbacks use local data later. `this` lets a single function work as a method on many objects.
+
+## How it works
+
+Scope is lexical: it depends on where code is written. Each function keeps a link to its outer environment, so inner functions can use those variables after the outer call returns.
+
+<StepFlow
+  title="A closure outlives its call"
+  code={["function counter() {", "  let n = 0;", "  return () => ++n;", "}", "const next = counter();", "next();", "next();"]}
+  nodes={["counter() call", "environment with n", "returned arrow function", "caller"]}
+  steps={[
+    { line: 4, active: [0, 1], note: "Calling counter creates a new environment holding n.", state: { n: "0" } },
+    { line: 2, active: [1, 2, 3], note: "The arrow function is created there and keeps a reference to that environment. counter returns.", state: { n: "0" } },
+    { line: 5, active: [1, 2], note: "next() updates n in the preserved environment.", state: { n: "1", result: "1" } },
+    { line: 6, active: [1, 2], note: "The same environment is used again, so state persists between calls.", state: { n: "2", result: "2" } },
+  ]}
+/>
+
+The value of `this` follows these rules:
+
+| Call form | `this` |
+| --- | --- |
+| `obj.f()` | `obj` |
+| `f()` in strict code | `undefined` |
+| `f()` in sloppy code | `globalThis` |
+| `f.call(x)`, `f.apply(x)` | `x` |
+| `f.bind(x)()` | `x`, permanently |
+| `new F()` | The new object |
+| Arrow function | Inherited from the enclosing scope |
+
+Class bodies and modules are always strict.
+
+## Syntax and key APIs
+
+```javascript
+fn.call(thisArg, a, b);
+fn.apply(thisArg, [a, b]);
+const bound = fn.bind(thisArg, a);
+const arrow = (x) => x * 2;
+```
+
+## Simple example
+
+```js
+import assert from "node:assert";
+
+const user = {
+  name: "Ada",
+  hello() {
+    return `Hi ${this.name}`;
+  },
+};
+
+assert.equal(user.hello(), "Hi Ada");
+
+const detached = user.hello;
+assert.throws(() => detached(), TypeError);
+assert.equal(detached.call({ name: "Bo" }), "Hi Bo");
+```
+
+## Industry examples
+
+### Private state without a class
+
+```js
+import assert from "node:assert";
+
+function createCache(limit) {
+  const entries = new Map();
+
+  return {
+    set(key, value) {
+      if (entries.size >= limit) entries.delete(entries.keys().next().value);
+      entries.set(key, value);
+    },
+    get: (key) => entries.get(key),
+  };
+}
+
+const cache = createCache(1);
+cache.set("a", 1);
+cache.set("b", 2);
+assert.equal(cache.get("a"), undefined);
+assert.equal(cache.get("b"), 2);
+```
+
+### Run something once
+
+```js
+import assert from "node:assert";
+
+function once(fn) {
+  let called = false;
+  let result;
+  return (...args) => {
+    if (!called) {
+      called = true;
+      result = fn(...args);
+    }
+    return result;
+  };
+}
+
+let runs = 0;
+const init = once(() => ++runs);
+init();
+init();
+assert.equal(runs, 1);
+```
+
+### Keep this in a callback
+
+An arrow function uses the method's `this`, while a regular callback gets its own.
+
+```js
+import assert from "node:assert";
+
+class Timer {
+  ticks = 0;
+  start(items) {
+    items.forEach(() => this.ticks++);
+  }
+}
+
+const timer = new Timer();
+timer.start([1, 2]);
+assert.equal(timer.ticks, 2);
+```
+
+## Patterns and best practices
+
+- Use arrow functions for callbacks inside methods.
+- Use normal methods on objects and classes that need a dynamic `this`.
+- Keep closures small, since they keep captured variables alive.
+- Create one bound handler if you need to remove a listener later.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Hidden state | Closure | One copy of functions per instance |
+| Many instances | Class with `#private` | Slightly more syntax |
+| Fixed `this` | Arrow or `bind` | Can't be rebound |
+
+## Common mistakes
+
+**`var` in loops.** All callbacks share one binding.
+
+```js
+import assert from "node:assert";
+
+const withVar = [];
+for (var i = 0; i < 3; i++) withVar.push(() => i);
+assert.deepEqual(withVar.map((f) => f()), [3, 3, 3]);
+
+const withLet = [];
+for (let j = 0; j < 3; j++) withLet.push(() => j);
+assert.deepEqual(withLet.map((f) => f()), [0, 1, 2]);
+```
+
+**Using an arrow function as an object method.** It doesn't get the object as `this`, and `call` or `bind` can't change that.
+
+**Passing a method as a callback.** `button.addEventListener("click", obj.save)` loses `obj`. Wrap it or bind it.
+
+**Binding twice.** A second `bind` has no effect on `this`.
+
+## Interview questions
+
+<Question q="What is a closure?">
+MDN defines it as a function bundled together with references to its surrounding lexical environment. Closures are created every time a function is created.
+</Question>
+
+<Question q="How is this determined?">
+By the call: a method call uses the object before the dot, `call`, `apply` and `bind` set it explicitly, `new` creates it, and arrow functions inherit it lexically.
+</Question>
+
+<Question q="Why does a detached method fail?">
+A plain call has no receiver. In strict code `this` is `undefined`, so reading a property from it throws.
+</Question>

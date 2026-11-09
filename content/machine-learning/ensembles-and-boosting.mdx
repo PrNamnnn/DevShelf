@@ -1,0 +1,101 @@
+---
+title: "Random Forests, Gradient Boosting and Modern Libraries"
+summary: "Bagging and boosting, the math behind XGBoost, and how LightGBM and CatBoost differ."
+level: advanced
+section: algorithms
+order: 2
+tags: ["random forest","gradient boosting","XGBoost","LightGBM","CatBoost"]
+requires: ["machine-learning/decision-trees"]
+related: ["machine-learning/cross-validation-and-tuning","statistics/encoding-categoricals"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Ensembles"
+    url: "https://scikit-learn.org/stable/modules/ensemble.html"
+  - label: "XGBoost: Introduction to boosted trees"
+    url: "https://xgboost.readthedocs.io/en/stable/tutorials/model.html"
+  - label: "LightGBM: Features"
+    url: "https://lightgbm.readthedocs.io/en/stable/Features.html"
+  - label: "CatBoost documentation"
+    url: "https://catboost.ai/docs/en/"
+---
+
+## What it is
+
+Ensembles combine many models. A **random forest** averages decorrelated trees grown on bootstrap samples, a form of bagging. **Gradient boosting** builds trees sequentially, each one correcting its predecessors' errors.
+
+## Why it exists
+
+Ensembles dominate on tabular data, often with less feature engineering than linear models.
+
+## How it works
+
+Random forests reduce variance and are hard to break. Boosting reduces bias and needs tuning of learning rate and tree count, plus early stopping.
+
+| Library | Distinguishing feature |
+| --- | --- |
+| XGBoost | Regularized objective, second-order optimization |
+| LightGBM | Histogram-based splits, leaf-wise growth, very fast |
+| CatBoost | Ordered boosting, strong built-in categorical handling |
+| scikit-learn HistGradientBoosting | Dependency-free, histogram-based |
+
+## Intuition and formula
+
+XGBoost's objective adds a complexity penalty:
+
+<Formula>Obj = Σ l(yᵢ, ŷᵢ) + Σ (γT + ½λ Σ w²)</Formula>
+
+With gradients G and Hessians H summed for a leaf, its optimal weight is:
+
+<Formula>w* = −G / (H + λ)</Formula>
+
+## Worked example
+
+On a synthetic table with 4,000 rows, a depth-limited single tree has a lower AUC than a random forest or a gradient boosting model. A leaf with G = −6, H = 4 and λ = 2 has weight 1.0.
+
+## Python
+
+```python
+from sklearn.datasets import make_classification
+from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
+from sklearn.model_selection import cross_val_score
+from sklearn.tree import DecisionTreeClassifier
+
+X, y = make_classification(n_samples=4_000, n_informative=10, flip_y=0.05, random_state=0)
+score = lambda m: cross_val_score(m, X, y, cv=3, scoring="roc_auc").mean()
+
+tree = score(DecisionTreeClassifier(max_depth=5, random_state=0))
+forest = score(RandomForestClassifier(n_estimators=100, n_jobs=-1, random_state=0))
+boost = score(HistGradientBoostingClassifier(early_stopping=True, random_state=0))
+
+assert forest > tree and boost > tree
+
+G, H, lam = -6, 4, 2
+assert -G / (H + lam) == 1.0
+```
+
+## In industry
+
+Boosted trees are a default for churn, credit, fraud and pricing on tabular data, frequently explained using SHAP values.
+
+## Assumptions and limitations
+
+Ensembles are harder to explain, and they don't extrapolate. Boosting can overfit if it isn't early-stopped.
+
+## Common mistakes
+
+- Evaluating early stopping on the test set.
+- Tuning everything at once.
+- Using default thresholds on imbalanced data.
+- Reading gain importance as a causal effect.
+
+## Alternatives
+
+Linear models are simple and easily monitored. Neural networks shine on images, text and audio.
+
+## Interview questions
+
+<Question q="How does boosting differ from bagging?">Bagging trains independently and averages to reduce variance. Boosting trains sequentially on previous errors to reduce bias.</Question>
+
+<Question q="Why does a random forest subsample features?">To decorrelate trees, so that averaging reduces variance further.</Question>

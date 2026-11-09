@@ -1,0 +1,167 @@
+---
+title: "Memory Management and Leaks"
+summary: "How garbage collection decides what stays, the leaks that appear in real apps, and how to find them."
+level: advanced
+section: internals
+order: 20
+tags: [memory, garbage-collection, leaks, weakmap, weakref, heap-snapshot, finalizationregistry]
+requires: [javascript/execution-context-and-hoisting]
+related: [javascript/objects-arrays-and-collections, javascript/dom-events-and-patterns]
+versions: "All modern engines."
+tested: "Node.js 24.17.0. Collection timing isn't observable from the examples."
+verified: "2026-11-09"
+docs:
+  - label: "MDN: Memory management"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Memory_management"
+  - label: "MDN: WeakMap"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakMap"
+  - label: "Chrome DevTools: Fix memory problems"
+    url: "https://developer.chrome.com/docs/devtools/memory-problems"
+---
+
+## What it is
+
+JavaScript automatically frees memory that's no longer **reachable** from roots such as globals and the current stack. A leak is memory that's still reachable but no longer useful.
+
+## Why it exists
+
+Automatic collection removes manual frees, but it can't know your intent. If something still refers to an object, it stays.
+
+## How it works
+
+Engines use mark-and-sweep, starting at roots and marking everything reachable. Unmarked objects are freed. Cycles aren't a problem, because reachability doesn't depend on counts.
+
+<TreeViz
+  title="Mark from the roots"
+  nodes={[{ id: "root", label: "roots" }, { id: "a", label: "app state", parent: "root" }, { id: "b", label: "listener", parent: "root" }, { id: "c", label: "cache", parent: "a" }, { id: "d", label: "old view", parent: "b" }, { id: "e", label: "unreachable" }]}
+  steps={[
+    { active: ["root"], note: "Collection starts at the roots." },
+    { active: ["a", "b"], visited: ["root"], note: "Everything directly referenced is marked." },
+    { active: ["c", "d"], visited: ["root", "a", "b"], note: "Marking follows references. The removed view is still held by a listener, so it survives. That's a leak." },
+    { visited: ["root", "a", "b", "c", "d"], faded: ["e"], note: "Unmarked objects are swept and their memory reclaimed." },
+  ]}
+/>
+
+## Syntax and key APIs
+
+| Tool | Use |
+| --- | --- |
+| DevTools Memory panel | Heap snapshots and allocation timeline |
+| `performance.memory`, `process.memoryUsage()` | Rough numbers |
+| `WeakMap`, `WeakSet` | Associate data without retaining keys |
+| `WeakRef`, `FinalizationRegistry` | Specialist use, timing not guaranteed |
+| `AbortController` | Remove listeners in bulk |
+
+## Simple example
+
+```js
+import assert from "node:assert";
+
+const before = process.memoryUsage().heapUsed;
+let big = new Array(1e6).fill(0);
+assert.ok(process.memoryUsage().heapUsed > before);
+
+big = null;
+assert.equal(big, null);
+```
+
+## Industry examples
+
+### Bound a cache
+
+Unbounded `Map`s are the most common leak on servers.
+
+```js
+import assert from "node:assert";
+
+class LruCache {
+  #entries = new Map();
+  constructor(limit) {
+    this.limit = limit;
+  }
+  get(key) {
+    if (!this.#entries.has(key)) return undefined;
+    const value = this.#entries.get(key);
+    this.#entries.delete(key);
+    this.#entries.set(key, value);
+    return value;
+  }
+  set(key, value) {
+    this.#entries.delete(key);
+    this.#entries.set(key, value);
+    if (this.#entries.size > this.limit) {
+      this.#entries.delete(this.#entries.keys().next().value);
+    }
+  }
+}
+
+const cache = new LruCache(2);
+cache.set("a", 1);
+cache.set("b", 2);
+cache.get("a");
+cache.set("c", 3);
+
+assert.equal(cache.get("b"), undefined);
+assert.equal(cache.get("a"), 1);
+```
+
+### Remove listeners and timers
+
+```javascript
+function mount(element) {
+  const controller = new AbortController();
+  window.addEventListener("resize", onResize, { signal: controller.signal });
+  const timer = setInterval(poll, 1000);
+
+  return () => {
+    controller.abort();
+    clearInterval(timer);
+  };
+}
+```
+
+### Avoid capturing what you don't need
+
+A closure keeps the variables it uses alive, so don't hold a whole payload for one field.
+
+```javascript
+function makeLogger(response) {
+  const { id } = response;
+  return () => console.log(id);
+}
+```
+
+## Patterns and best practices
+
+- Pair every `addEventListener`, `setInterval` and subscription with cleanup.
+- Limit in-memory caches by size or age.
+- Compare two heap snapshots after repeating an action.
+- Use `WeakMap` for per-object metadata.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Per-object data | `WeakMap` | Not iterable |
+| Sized cache | LRU | Eviction logic |
+| Shared cache | Redis | Network hop |
+
+## Common mistakes
+
+**Detached DOM nodes.** A variable or listener keeps a removed element alive.
+
+**Forgotten intervals.** Their closures stay reachable forever.
+
+**Global arrays used as logs.** They grow without bound.
+
+**Relying on `WeakRef` for program logic.** Collection timing isn't guaranteed.
+
+## Interview questions
+
+<Question q="How does JavaScript garbage collection work?">
+Mark-and-sweep marks everything reachable from the roots and frees the rest. Modern engines add generational and incremental techniques.
+</Question>
+
+<Question q="How would you debug a memory leak?">
+Repeat the action, take heap snapshots, compare them, and follow the retaining path of objects that keep growing.
+</Question>

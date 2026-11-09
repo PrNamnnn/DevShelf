@@ -1,0 +1,200 @@
+---
+title: "Functions, Scope and Closures"
+summary: "Argument kinds, how names are resolved, why default arguments can leak state, and how closures remember variables."
+level: fundamental
+section: functions
+order: 10
+tags: [functions, arguments, scope, closures, nonlocal, lambda, args, kwargs, defaults]
+related: [python/variables-and-memory, python/decorators-and-context-managers, javascript/scope-closures-and-this]
+versions: "Positional-only parameters need Python 3.8+."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python tutorial: Defining functions"
+    url: "https://docs.python.org/3/tutorial/controlflow.html#defining-functions"
+  - label: "Python reference: Execution model"
+    url: "https://docs.python.org/3/reference/executionmodel.html"
+  - label: "Python tutorial: Default argument values"
+    url: "https://docs.python.org/3/tutorial/controlflow.html#default-argument-values"
+---
+
+## What it is
+
+A function is an object created by `def` that bundles parameters, a body and a link to the scope where it was defined. Calling it binds arguments to parameter names in a new local scope.
+
+## Why it exists
+
+Functions name a piece of behaviour and isolate its variables. Because they're objects, they can be stored, passed and returned, which makes callbacks and decorators possible.
+
+## How it works
+
+A name is resolved in order through the local scope, enclosing function scopes, module globals and finally builtins. Assigning to a name anywhere in a function makes it local to that function, unless it's declared `nonlocal` or `global`.
+
+A closure happens when an inner function uses a variable from an enclosing function. The variable stays alive after the outer call returns.
+
+<StepFlow
+  title="A closure keeps its variable alive"
+  code={["def counter():", "    n = 0", "    def inc():", "        nonlocal n", "        n += 1", "        return n", "    return inc", "c = counter()", "c()", "c()"]}
+  nodes={["counter() frame", "cell holding n", "inc function", "caller"]}
+  steps={[
+    { line: 7, active: [0, 1], note: "Calling counter creates a frame, and n is stored in a cell because an inner function uses it.", state: { n: "0" } },
+    { line: 6, active: [1, 2, 3], note: "counter returns inc. Its frame ends, but inc keeps a reference to the cell.", state: { n: "0" } },
+    { line: 8, active: [1, 2], note: "Calling c runs inc. nonlocal makes n refer to the cell, not a new local.", state: { n: "1", result: "1" } },
+    { line: 9, active: [1, 2], note: "A later call sees the same cell, so the count continues.", state: { n: "2", result: "2" } },
+  ]}
+/>
+
+Default values are evaluated once, when `def` runs, and stored on the function object.
+
+## Syntax and key APIs
+
+```py
+def f(pos_only, /, normal, *args, kw_only, **kwargs): ...
+```
+
+| Part | Meaning |
+| --- | --- |
+| Before `/` | Must be positional |
+| `*args` | Extra positional values, as a tuple |
+| After `*` | Must be passed by keyword |
+| `**kwargs` | Extra keyword values, as a dict |
+| `nonlocal x` | Write to a variable in an enclosing function |
+| `global x` | Write to a module-level variable |
+
+Inside a function, a name that isn't assigned there can be read from outer scopes. Calling with `f(*items, **options)` unpacks at the call site.
+
+## Simple example
+
+```python
+def greet(name, /, *, punctuation="!"):
+    return f"Hello, {name}{punctuation}"
+
+assert greet("Ada") == "Hello, Ada!"
+assert greet("Ada", punctuation="?") == "Hello, Ada?"
+
+try:
+    greet(name="Ada")
+except TypeError:
+    pass
+else:
+    raise AssertionError
+```
+
+## Industry examples
+
+### Configure behaviour with a closure
+
+```python
+def make_retry_policy(max_attempts):
+    def should_retry(attempt, error):
+        return attempt < max_attempts and isinstance(error, TimeoutError)
+    return should_retry
+
+policy = make_retry_policy(3)
+assert policy(1, TimeoutError())
+assert not policy(3, TimeoutError())
+assert not policy(1, ValueError())
+```
+
+### Forward arguments transparently
+
+```python
+def timed(fn):
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return wrapper
+
+@timed
+def add(a, b=0):
+    return a + b
+
+assert add(1, b=2) == 3
+```
+
+### Keyword-only flags keep calls readable
+
+`send(msg, retry=True)` reads clearly, while `send(msg, True)` doesn't. Putting flags after `*` enforces the keyword.
+
+```python
+def send(message, *, retry=False):
+    return (message, retry)
+
+assert send("x", retry=True) == ("x", True)
+```
+
+## Patterns and best practices
+
+- Use `None` as a sentinel for mutable defaults.
+- Make boolean options keyword-only.
+- Prefer returning values over mutating globals.
+- Keep `lambda` for short key functions. A named function is easier to debug.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Small remembered state | Closure | Harder to inspect |
+| Rich state and methods | Class | More code |
+| Pre-filled arguments | `functools.partial` | Less flexible than a function |
+
+## Common mistakes
+
+**Using a mutable default.** The same list is shared across calls.
+
+```python
+def bad(item, bucket=[]):
+    bucket.append(item)
+    return bucket
+
+assert bad(1) == [1]
+assert bad(2) == [1, 2]
+
+def good(item, bucket=None):
+    bucket = [] if bucket is None else bucket
+    bucket.append(item)
+    return bucket
+
+assert good(1) == [1]
+assert good(2) == [2]
+```
+
+**Assigning before reading in a function.** Any assignment makes the name local for the entire function, so an earlier read fails.
+
+```python
+total = 1
+
+def broken():
+    print(total)
+    total = 2
+
+try:
+    broken()
+except UnboundLocalError:
+    pass
+else:
+    raise AssertionError
+```
+
+**Late binding in loops.** Closures see the variable's final value. Bind it as a default to capture each value.
+
+```python
+late = [lambda: i for i in range(3)]
+assert [f() for f in late] == [2, 2, 2]
+
+bound = [lambda i=i: i for i in range(3)]
+assert [f() for f in bound] == [0, 1, 2]
+```
+
+## Interview questions
+
+<Question q="When are default arguments evaluated?">
+Once, when the `def` statement runs. That's why mutable defaults are shared between calls.
+</Question>
+
+<Question q="What does nonlocal do?">
+It makes assignment target a variable in the nearest enclosing function scope. It's a `SyntaxError` if no such variable exists.
+</Question>
+
+<Question q="What is a closure?">
+A function together with the variables it uses from an enclosing scope, which stay alive as long as the function does.
+</Question>

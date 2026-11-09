@@ -1,0 +1,168 @@
+---
+title: "Names, Objects and Memory"
+summary: "What assignment really does in Python, why two names can change together, and how to copy data on purpose."
+level: fundamental
+section: fundamentals
+order: 20
+tags: [variables, references, mutability, identity, copy, types, basics]
+related: [python/collections-and-comprehensions, python/functions-and-scope]
+versions: "All current Python 3 versions."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python reference: Objects, values and types"
+    url: "https://docs.python.org/3/reference/datamodel.html"
+  - label: "Python library: copy"
+    url: "https://docs.python.org/3/library/copy.html"
+  - label: "Python tutorial: Classes (aliasing)"
+    url: "https://docs.python.org/3/tutorial/classes.html"
+---
+
+## What it is
+
+A Python variable is a **name bound to an object**. It isn't a box that holds a value. Every object has an identity, a type and a value. Assignment attaches a name to an object and copies nothing.
+
+## Why it exists
+
+Binding names to objects keeps assignment cheap and makes every value a first-class object, so functions, classes and numbers can all be stored and passed the same way. The cost is aliasing: several names can refer to one mutable object.
+
+## How it works
+
+Follow the two names as the list changes, then as one name is rebound.
+
+<MemoryViz
+  title="Mutation versus rebinding"
+  code={["a = [1, 2]", "b = a", "b.append(3)", "b = [9]"]}
+  steps={[
+    { line: 0, note: "A list object is created, and the name a is bound to it.", stack: [{ name: "a", ref: "l" }], heap: [{ id: "l", label: "list [1, 2]" }] },
+    { line: 1, note: "b = a copies no data. Both names now refer to the same object.", changed: ["b"], stack: [{ name: "a", ref: "l" }, { name: "b", ref: "l" }], heap: [{ id: "l", label: "list [1, 2]" }] },
+    { line: 2, note: "append mutates the object in place, so the change is visible through both names.", changed: ["l"], stack: [{ name: "a", ref: "l" }, { name: "b", ref: "l" }], heap: [{ id: "l", label: "list [1, 2, 3]" }] },
+    { line: 3, note: "Assignment rebinds only the name b to a new list. The name a and its object are untouched.", changed: ["b", "n"], stack: [{ name: "a", ref: "l" }, { name: "b", ref: "n" }], heap: [{ id: "l", label: "list [1, 2, 3]" }, { id: "n", label: "list [9]" }] },
+  ]}
+/>
+
+Numbers, strings and tuples are immutable, while lists and dictionaries are mutable. An operation that seems to change an immutable value really creates a new object and rebinds the name.
+
+CPython reclaims objects mainly through reference counting, with a cycle collector for reference loops. That's an implementation detail, so don't depend on when an object disappears.
+
+## Syntax and key APIs
+
+| Tool | Purpose |
+| --- | --- |
+| `x is y` | Same object? |
+| `x == y` | Equal values? |
+| `id(x)` | Integer identity, the memory address on CPython |
+| `type(x)` | The object's type |
+| `isinstance(x, T)` | Type check that respects inheritance |
+| `copy.copy(x)` | Shallow copy |
+| `copy.deepcopy(x)` | Recursive copy |
+
+## Simple example
+
+```python
+a = [1, 2]
+b = a
+c = list(a)
+
+b.append(3)
+
+assert a == [1, 2, 3]
+assert a is b
+assert c == [1, 2]
+assert c is not a
+```
+
+## Industry examples
+
+### Protect shared configuration
+
+A shallow copy shares nested objects, so a per-request override can silently change the defaults.
+
+```python
+import copy
+
+DEFAULTS = {"retries": 3, "headers": {"accept": "json"}}
+
+shallow = dict(DEFAULTS)
+shallow["headers"]["accept"] = "xml"
+assert DEFAULTS["headers"]["accept"] == "xml"
+
+DEFAULTS["headers"]["accept"] = "json"
+deep = copy.deepcopy(DEFAULTS)
+deep["headers"]["accept"] = "xml"
+assert DEFAULTS["headers"]["accept"] == "json"
+```
+
+### Compare with None using identity
+
+`None` is a singleton, and a class can override `==` in surprising ways.
+
+```python
+class Weird:
+    def __eq__(self, other):
+        return True
+
+value = Weird()
+assert (value == None) is True
+assert (value is None) is False
+```
+
+## Patterns and best practices
+
+- Use `is` only for `None`, `True`, `False` and deliberate identity checks.
+- Don't mutate an argument unless the function's name makes that clear.
+- Prefer immutable data, such as tuples and frozen dataclasses, for values that shouldn't change.
+- Copy at boundaries where ownership changes.
+
+## Alternatives and trade-offs
+
+| Approach | Good for | Cost |
+| --- | --- | --- |
+| Aliasing | Sharing one object cheaply | Changes are visible everywhere |
+| Shallow copy | Flat containers | Nested objects are still shared |
+| `deepcopy` | Independent nested data | Slowest, and fails on some objects such as locks |
+| Immutable types | Safe sharing | Updates create new objects |
+
+## Common mistakes
+
+**Using `is` to compare numbers or strings.** The docs say whether two equal small values share one object depends on the implementation and shouldn't be relied upon. Use `==`.
+
+**Building nested lists with `*`.** Every row is the same list.
+
+```python
+grid = [[0] * 2] * 2
+grid[0][0] = 1
+assert grid == [[1, 0], [1, 0]]
+
+fixed = [[0] * 2 for _ in range(2)]
+fixed[0][0] = 1
+assert fixed == [[1, 0], [0, 0]]
+```
+
+**Expecting `+=` to behave the same for all types.** It mutates a list in place, but rebinds an immutable tuple.
+
+```python
+items = [1]
+alias = items
+items += [2]
+assert alias == [1, 2]
+
+point = (1,)
+alias2 = point
+point += (2,)
+assert alias2 == (1,)
+```
+
+## Interview questions
+
+<Question q="What is the difference between is and ==?">
+`is` tests whether two names refer to the same object. `==` calls the equality method and compares values.
+</Question>
+
+<Question q="Is Python pass-by-value or pass-by-reference?">
+Neither label fits well. The function's parameter is a new name bound to the same object. Mutating that object is visible to the caller, while rebinding the parameter isn't.
+</Question>
+
+<Question q="What is the difference between a shallow and a deep copy?">
+A shallow copy creates a new outer container that still refers to the same inner objects. A deep copy recursively copies the inner objects too.
+</Question>

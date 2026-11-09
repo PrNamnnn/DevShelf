@@ -1,0 +1,122 @@
+---
+title: "Typography, Color and Effects"
+summary: "Type scale and line length, the OKLCH palette and opacity modifiers, and borders, shadows and focus styles."
+level: fundamental
+section: layout
+order: 20
+tags: [typography, color, opacity, shadows, borders, rings, truncate, line-clamp]
+requires: [tailwind/utility-first-and-setup]
+related: [tailwind/theme-and-dark-mode, tailwind/layout-and-spacing]
+versions: "Tailwind CSS v4.3."
+tested: "Generated output compiled with Tailwind 4.3.5."
+verified: "2026-11-09"
+docs:
+  - label: "Tailwind: Colors"
+    url: "https://tailwindcss.com/docs/colors"
+  - label: "Tailwind: font-size"
+    url: "https://tailwindcss.com/docs/font-size"
+  - label: "Tailwind: line-clamp"
+    url: "https://tailwindcss.com/docs/line-clamp"
+  - label: "Tailwind: box-shadow"
+    url: "https://tailwindcss.com/docs/box-shadow"
+---
+
+## What it is
+
+Tailwind's utilities for text, color and visual effects draw from shared scales, keeping interfaces consistent.
+
+## Why it exists
+
+Readable interfaces depend on hierarchy, contrast and rhythm. A fixed scale prevents arbitrary one-off values.
+
+## How it works
+
+Colors are defined in OKLCH in eleven steps from 50 to 950. An opacity modifier like `bg-black/50` uses `color-mix`. `text-lg/7` sets a font size and line height together.
+
+| Task | Classes |
+| --- | --- |
+| Size and leading | `text-lg/7` |
+| Weight | `font-medium` |
+| Line length | `max-w-prose` |
+| One-line clip | `truncate` |
+| Multi-line clip | `line-clamp-3` |
+| Numbers that align | `tabular-nums` |
+| Balanced headings | `text-balance` |
+
+## Syntax and key APIs
+
+```html
+<h1 class="text-4xl/tight font-semibold tracking-tight text-balance">Title</h1>
+<p class="max-w-prose text-base/7 text-gray-700">Body</p>
+<div class="bg-sky-500/10 text-sky-700 ring-1 ring-sky-500/20"></div>
+```
+
+## Simple example
+
+```html
+<article class="rounded-xl border border-gray-200 p-6 shadow-sm">
+  <p class="text-sm font-medium text-gray-500">Revenue</p>
+  <p class="mt-1 text-3xl font-semibold tabular-nums">$4,210</p>
+</article>
+```
+
+## Industry examples
+
+### Clamp long content
+
+```html
+<p class="line-clamp-2 text-sm text-gray-600">A very long description…</p>
+```
+
+### Soft status badges
+
+Using a tint with its matching dark text keeps a consistent look.
+
+```html
+<span class="inline-flex rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-emerald-600/20">
+  Active
+</span>
+```
+
+### Accessible focus
+
+```html
+<button class="rounded-md bg-sky-600 px-3 py-1.5 text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600">
+  Save
+</button>
+```
+
+## Patterns and best practices
+
+- Limit a page to a few sizes and weights.
+- Keep body text near 65 characters per line.
+- Check contrast, particularly on tinted backgrounds.
+- Use `tabular-nums` in tables.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Long-form content | Typography plugin | Opinionated defaults |
+| Custom brand | `@theme` tokens | Design work |
+| One-off value | Arbitrary value | Drifts from the scale |
+
+## Common mistakes
+
+**Using `outline-none` without a replacement.** Keyboard users lose focus visibility.
+
+**Light gray text on white.** Check contrast.
+
+**Using `bg-opacity-*`.** It was removed in v4. Use `/50`.
+
+**Assuming `shadow` means the same as in v3.** The scale shifted by one step.
+
+## Interview questions
+
+<Question q="How do opacity modifiers work?">
+Classes like `bg-black/50` generate a color with that alpha, using `color-mix` in v4.
+</Question>
+
+<Question q="Why use text-balance on headings?">
+It distributes words evenly across lines for a tidier shape.
+</Question>

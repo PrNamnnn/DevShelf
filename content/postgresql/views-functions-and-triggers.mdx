@@ -1,0 +1,156 @@
+---
+title: "Views, Functions and Triggers"
+summary: "Encapsulating queries, materialized views, PL/pgSQL functions, and when triggers help or hurt."
+level: intermediate
+section: advanced-sql
+order: 30
+tags: [views, materialized-views, functions, plpgsql, triggers, audit]
+requires: [postgresql/aggregates-windows-and-ctes]
+related: [postgresql/partitioning-and-maintenance, sqlserver/procedures-and-error-handling]
+versions: "All supported PostgreSQL versions."
+tested: "PostgreSQL 18.6 through PGlite"
+verified: "2026-11-09"
+docs:
+  - label: "PostgreSQL: CREATE VIEW"
+    url: "https://www.postgresql.org/docs/current/sql-createview.html"
+  - label: "PostgreSQL: Materialized views"
+    url: "https://www.postgresql.org/docs/current/rules-materializedviews.html"
+  - label: "PostgreSQL: PL/pgSQL"
+    url: "https://www.postgresql.org/docs/current/plpgsql.html"
+  - label: "PostgreSQL: Triggers"
+    url: "https://www.postgresql.org/docs/current/plpgsql-trigger.html"
+---
+
+## What it is
+
+A **view** is a named query. A **materialized view** stores its result. A **function** is reusable logic in the database. A **trigger** runs a function when data changes.
+
+## Why it exists
+
+They centralize logic so that every client gets the same result, and rules hold no matter who writes the data.
+
+## How it works
+
+A view has no storage. Its definition is merged into each query. A materialized view holds a snapshot until refreshed.
+
+<StepFlow
+  title="An AFTER UPDATE trigger"
+  nodes={["UPDATE statement", "row changes", "trigger fires", "function runs", "same transaction commits"]}
+  steps={[
+    { active: [0], note: "A client runs an update." },
+    { active: [1], note: "The row version is written." },
+    { active: [2], note: "A row-level AFTER trigger fires for each affected row." },
+    { active: [3], note: "The function sees OLD and NEW and writes to the audit table." },
+    { active: [4], note: "It all commits or rolls back together. A failure in the trigger aborts the update." },
+  ]}
+/>
+
+## Syntax and key APIs
+
+| Object | Refreshes | Good for |
+| --- | --- | --- |
+| View | Always current | Encapsulation, permissions |
+| Materialized view | On `REFRESH` | Expensive aggregates |
+| SQL function | n/a | Simple reusable expressions |
+| PL/pgSQL function | n/a | Control flow |
+
+## Simple example
+
+```sql
+CREATE TABLE orders (id int, status text, total int);
+INSERT INTO orders VALUES (1, 'paid', 10), (2, 'open', 5);
+
+CREATE VIEW paid_orders AS SELECT id, total FROM orders WHERE status = 'paid';
+
+SELECT total FROM paid_orders;
+-- rows: [{"total":10}]
+```
+
+## Industry examples
+
+### Cache a report
+
+```sql
+CREATE MATERIALIZED VIEW sales_summary AS
+SELECT status, sum(total)::int AS sum FROM orders GROUP BY status;
+
+INSERT INTO orders VALUES (3, 'paid', 20);
+SELECT sum FROM sales_summary WHERE status = 'paid';
+-- rows: [{"sum":10}]
+```
+
+```sql
+REFRESH MATERIALIZED VIEW sales_summary;
+SELECT sum FROM sales_summary WHERE status = 'paid';
+-- rows: [{"sum":30}]
+```
+
+Add a unique index, and `REFRESH ... CONCURRENTLY` keeps it readable during refresh.
+
+### Write an audit trail
+
+```sql
+CREATE TABLE audit (id int, old_status text, new_status text);
+
+CREATE FUNCTION log_status() RETURNS trigger AS $$
+BEGIN
+  IF NEW.status IS DISTINCT FROM OLD.status THEN
+    INSERT INTO audit VALUES (OLD.id, OLD.status, NEW.status);
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER orders_audit AFTER UPDATE ON orders
+FOR EACH ROW EXECUTE FUNCTION log_status();
+
+UPDATE orders SET status = 'paid' WHERE id = 2;
+SELECT old_status, new_status FROM audit;
+-- rows: [{"old_status":"open","new_status":"paid"}]
+```
+
+### A reusable function
+
+```sql
+CREATE FUNCTION with_tax(amount numeric, rate numeric DEFAULT 0.18)
+RETURNS numeric LANGUAGE sql IMMUTABLE AS $$ SELECT round(amount * (1 + rate), 2) $$;
+
+SELECT with_tax(100)::text AS total;
+-- rows: [{"total":"118.00"}]
+```
+
+## Patterns and best practices
+
+- Use views to give stable interfaces to changing tables.
+- Mark functions `IMMUTABLE` or `STABLE` accurately.
+- Keep triggers small, and use them for invariants and audit.
+- Schedule materialized view refreshes.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Always current | View | Runs on each query |
+| Fast reads | Materialized view | Stale between refreshes |
+| Audit | Trigger | Hidden write cost |
+| Business workflows | Application code | Can be bypassed by other writers |
+
+## Common mistakes
+
+**Long-running logic in triggers.** Each affected row pays for it.
+
+**Mislabeling volatility.** A wrong `IMMUTABLE` gives wrong results or bad index contents.
+
+**Expecting a materialized view to update itself.** You must refresh it.
+
+**Cascading triggers.** They are hard to reason about and debug.
+
+## Interview questions
+
+<Question q="View versus materialized view?">
+A view is a stored query that runs each time. A materialized view stores results and must be refreshed.
+</Question>
+
+<Question q="When is a trigger appropriate?">
+For invariants and auditing that must hold for every writer. Avoid them for complex business workflows.
+</Question>

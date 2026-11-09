@@ -1,0 +1,90 @@
+---
+title: "SUMIF(S), COUNTIF(S) and AVERAGEIF"
+summary: "Aggregate with criteria, including date windows and wildcards, and understand the argument-order trap."
+level: fundamental
+section: functions
+order: 2
+tags: ["SUMIFS","COUNTIFS","AVERAGEIF","criteria","wildcards"]
+requires: ["excel/essential-functions-and-logic"]
+related: ["excel/pivot-tables-and-charts","statistics/central-tendency"]
+versions: "Excel 2016 onward"
+tested: "Every formula evaluated in Excel build 20527"
+verified: "2026-11-09"
+docs:
+  - label: "Excel: SUMIFS function"
+    url: "https://support.microsoft.com/en-us/office/sumifs-function-c9e748f5-7ea7-455d-9406-611cebce642b"
+  - label: "Excel: COUNTIFS function"
+    url: "https://support.microsoft.com/en-us/office/countifs-function-dda3dc6e-f74e-4aee-88bc-aa8c2a866842"
+  - label: "Excel: AVERAGEIF function"
+    url: "https://support.microsoft.com/en-us/office/averageif-function-faec8e2e-0dec-4308-af69-f5576d8ac642"
+---
+
+## What it is
+
+Conditional aggregation functions sum, count or average only the rows meeting specified criteria.
+
+## Why it exists
+
+Reports constantly ask for totals by region, month or status. These functions answer them directly, and keep updating as data changes.
+
+## How it works
+
+<TableViz
+  title="SUMIFS checks every row"
+  code={['=SUMIFS(C2:C6, A2:A6, "North", B2:B6, "Pen")']}
+  tables={[{ name: "Orders", columns: ["Region", "Product", "Units"], rows: [["North", "Pen", 10], ["South", "Book", 5], ["North", "Book", 3], ["East", "Pen", 8], ["South", "Pen", 12]] }]}
+  outputColumns={["Criteria applied", "Sum of Units"]}
+  steps={[
+    { line: 0, highlight: { Orders: [0, 2] }, note: "The first criterion keeps rows where Region is North.", output: [["Region = North", 13]] },
+    { line: 0, highlight: { Orders: [0] }, note: "The second criterion also requires Product to be Pen. Conditions combine with AND.", output: [["Region = North", 13], ["and Product = Pen", 10]] }
+  ]}
+/>
+
+All criteria must be true at once. For OR logic, add separate `SUMIFS` results together. Criteria are text, so comparison operators are written in quotes and concatenated to any cell values.
+
+<Callout type="warning">`SUMIF` places the sum range last, while `SUMIFS` places it first. Mixing these up is a very common bug.</Callout>
+
+## Syntax and key APIs
+
+```text
+=SUMIF(A2:A6,"South",C2:C6)
+=SUMIFS(C2:C6,A2:A6,"North",B2:B6,"Pen")
+=COUNTIF(B2:B6,"Pen")
+=COUNTIFS(B2:B6,"Pen",C2:C6,">=10")
+=AVERAGEIF(B2:B6,"Book",C2:C6)
+=SUMIFS(C2:C6,B2:B6,"P*")
+=SUMIFS(C2:C6,E2:E6,">="&DATE(2026,2,1),E2:E6,"<"&DATE(2026,3,1))
+```
+
+Wildcards are `*` for any text and `?` for one character, with `~` as an escape.
+
+## Simple example
+
+The final formula above sums February's units and returns 11. Using a greater-or-equal start with a strictly-less-than next month handles every month length and any time-of-day values.
+
+## Industry examples
+
+Finance teams build monthly P&L summaries with `SUMIFS` on account and period. Operations teams count overdue tickets with `COUNTIFS` on status and date.
+
+## Patterns and best practices
+
+- Keep criteria in cells so reports can be changed without editing formulas.
+- Reference Table columns such as `SUMIFS(Orders[Units],Orders[Region],"North")`.
+- Use `SUMPRODUCT` when a condition must calculate something row by row, as in `=SUMPRODUCT(C2:C6,D2:D6)`, which returns 1800.
+
+## Alternatives and trade-offs
+
+Pivot Tables are faster to explore and less flexible for fixed layouts. `SUM(FILTER(...))` handles complex logic in modern Excel, and the DAX equivalent is `CALCULATE` over a model.
+
+## Common mistakes
+
+- Using ranges of different sizes, which returns `#VALUE!`.
+- Writing `">="DATE(...)` without `&`.
+- Using `BETWEEN`-style inclusive end dates that miss timestamps.
+- Averaging averages from a `SUMIFS`-built table.
+
+## Interview questions
+
+<Question q="How do you sum with OR conditions using SUMIFS?">Add one SUMIFS per alternative, or use SUMPRODUCT or SUM with FILTER when the alternatives overlap.</Question>
+
+<Question q="What is the argument order difference between SUMIF and SUMIFS?">SUMIF is range, criteria, sum_range. SUMIFS starts with sum_range.</Question>

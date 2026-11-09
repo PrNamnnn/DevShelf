@@ -1,0 +1,165 @@
+---
+title: "Design Tokens, Theme Variables and Dark Mode"
+summary: "How @theme creates utilities from CSS variables, when to use :root instead, and three ways to implement dark mode."
+level: intermediate
+section: theming
+order: 10
+tags: [theme, design-tokens, css-variables, dark-mode, colors, oklch, theme-inline]
+related: [tailwind/responsive-design-and-states, tailwind/custom-utilities-and-directives]
+versions: "Tailwind CSS v4 CSS-first configuration."
+tested: "Generated output compiled with Tailwind 4.3.5."
+verified: "2026-11-09"
+docs:
+  - label: "Tailwind: Theme variables"
+    url: "https://tailwindcss.com/docs/theme"
+  - label: "Tailwind: Colors"
+    url: "https://tailwindcss.com/docs/colors"
+  - label: "Tailwind: Dark mode"
+    url: "https://tailwindcss.com/docs/dark-mode"
+---
+
+## What it is
+
+`@theme` defines design tokens as CSS variables and generates matching utilities. Defining `--color-mint-500` creates `bg-mint-500`, `text-mint-500` and the rest.
+
+## Why it exists
+
+Tokens centralize a design system's decisions, and as real CSS variables, they're also available at runtime and in plain CSS.
+
+## How it works
+
+The variable's **namespace** decides what it produces.
+
+| Namespace | Generates |
+| --- | --- |
+| `--color-*` | Color utilities |
+| `--font-*` | `font-sans` etc. |
+| `--text-*` | Font sizes |
+| `--spacing-*` | Spacing |
+| `--breakpoint-*` | Responsive variants |
+| `--container-*` | Container variants and `max-w-*` |
+| `--radius-*` | `rounded-*` |
+| `--shadow-*` | `shadow-*` |
+| `--animate-*` | `animate-*` |
+
+Only used variables are emitted, unless you write `@theme static`. `@theme` must be top-level, and it can't sit inside a selector or media query.
+
+Use `:root` for ordinary variables that shouldn't create utilities. Use `@theme inline` when a value references another variable, so the utility uses the value directly.
+
+## Syntax and key APIs
+
+```css
+@import "tailwindcss";
+
+@theme {
+  --color-brand: oklch(0.72 0.11 178);
+  --font-display: "Fraunces", serif;
+  --breakpoint-xs: 30rem;
+  --color-lime-*: initial;
+}
+```
+
+Opacity uses a modifier: `bg-brand/50`. The `theme()` function is deprecated in favour of CSS variables.
+
+## Simple example
+
+```html
+<h1 class="font-display text-brand xs:text-4xl">Hello</h1>
+```
+
+## Industry examples
+
+### Semantic colors that switch by theme
+
+This is the pattern DevShelf itself uses. Utilities reference semantic names, and only the variable values change.
+
+```css
+@import "tailwindcss";
+
+:root {
+  --surface: #ffffff;
+  --ink: #111111;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #15171b;
+    --ink: #ecebe6;
+  }
+}
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+}
+```
+
+### A user-controlled dark mode
+
+By default, `dark:` follows `prefers-color-scheme`. Override the variant to control it with a class.
+
+```css
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+```
+
+```javascript
+const stored = localStorage.getItem("theme");
+const dark = stored === "dark" || (!stored && matchMedia("(prefers-color-scheme: dark)").matches);
+document.documentElement.classList.toggle("dark", dark);
+```
+
+Run this inline in `<head>` to avoid a flash of the wrong theme.
+
+### Add an animation token
+
+Keyframes inside `@theme` are emitted along with the variable.
+
+```css
+@import "tailwindcss";
+
+@theme {
+  --animate-rise: rise 200ms ease-out;
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+```
+
+## Patterns and best practices
+
+- Name tokens by purpose: `surface`, `ink`, `danger`.
+- Use semantic tokens, so dark mode needs no `dark:` on each element.
+- Remove defaults you don't want with `--*: initial`.
+- Pair foreground and background tokens, and check contrast.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Token with utility | `@theme` | Must be top-level |
+| Plain variable | `:root` | No utility generated |
+| Few dark overrides | `dark:` classes | Repetition at scale |
+| Many themes | Semantic variables | More initial design |
+
+## Common mistakes
+
+**Nesting `@theme` inside a media query.** Theme variables have to be top-level. Put the switching values in `:root`.
+
+**Using `@theme` where `inline` is needed.** A variable pointing at another variable can resolve in the wrong scope.
+
+**Expecting `dark:` to follow a class by default.** It follows the OS setting until you add `@custom-variant`.
+
+**Using `bg-opacity-50`.** It was removed. Use `bg-black/50`.
+
+## Interview questions
+
+<Question q="What is the difference between @theme and :root?">
+`@theme` variables create utilities. `:root` variables are ordinary CSS variables without utilities.
+</Question>
+
+<Question q="How do you make dark mode class-based in v4?">
+Add `@custom-variant dark (&:where(.dark, .dark *));` to your CSS and toggle the class.
+</Question>

@@ -1,0 +1,166 @@
+---
+title: "Transactions, Locking and Row Versioning"
+summary: "Lock modes and blocking, isolation levels, how RCSI and snapshot differ, optimized locking, and why NOLOCK is dangerous."
+level: advanced
+section: concurrency
+order: 10
+tags: [transactions, locking, isolation, rcsi, snapshot, nolock, blocking, deadlocks, optimized-locking]
+related: [sqlserver/procedures-and-error-handling, sqlserver/performance-and-query-store, postgresql/transactions-and-mvcc]
+versions: "Optimized locking needs SQL Server 2025 and can be enabled per database."
+tested: "Transaction and NOLOCK-versus-lock-timeout behaviour run on SQL Server 2025 using temporary tables. RCSI wasn't enabled on a database."
+verified: "2026-11-09"
+docs:
+  - label: "SQL Server: Transaction locking and row versioning guide"
+    url: "https://learn.microsoft.com/en-us/sql/relational-databases/sql-server-transaction-locking-and-row-versioning-guide"
+  - label: "T-SQL: SET TRANSACTION ISOLATION LEVEL"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/statements/set-transaction-isolation-level-transact-sql"
+  - label: "SQL Server: Optimized locking"
+    url: "https://learn.microsoft.com/en-us/sql/relational-databases/performance/optimized-locking"
+---
+
+## What it is
+
+SQL Server uses locks and optional row versions to isolate concurrent transactions. The isolation level decides what a reader sees and whether it waits.
+
+## Why it exists
+
+Without isolation, transactions could read half-finished data or overwrite each other. Choosing a level trades consistency against waiting.
+
+## How it works
+
+By default on SQL Server, `READ COMMITTED` uses shared locks, so readers can be blocked by writers. Azure SQL Database defaults to **RCSI**, where readers see a version and don't take row locks.
+
+<StepFlow
+  title="A writer and two readers"
+  nodes={["T1 UPDATE (uncommitted)", "reader with NOLOCK", "reader at READ COMMITTED", "T1 ROLLBACK"]}
+  steps={[
+    { active: [0], note: "T1 holds an exclusive lock and changes v from 10 to 20.", state: { committed: "10", uncommitted: "20" } },
+    { active: [1], note: "A NOLOCK reader doesn't wait and returns 20, a value that was never committed.", state: { "NOLOCK sees": "20" } },
+    { active: [2], note: "A locking reader waits. In the test, with LOCK_TIMEOUT 500, it failed with error 1222.", state: { result: "blocked, error 1222" } },
+    { active: [3], note: "T1 rolls back. The NOLOCK reader has acted on data that no longer exists.", state: { committed: "10" } },
+  ]}
+/>
+
+| Level | Reads | Blocked by writers? |
+| --- | --- | --- |
+| `READ UNCOMMITTED` | Dirty data | No |
+| `READ COMMITTED` (locking) | Committed | Yes |
+| RCSI | Committed, statement snapshot | No |
+| `SNAPSHOT` | Committed, transaction snapshot | No |
+| `REPEATABLE READ` | Holds read locks | Yes |
+| `SERIALIZABLE` | Key-range locks | Yes |
+
+Writers always take exclusive locks, whatever the level. Locks escalate from row or page straight to table, typically after a statement acquires about 5,000 locks.
+
+## Syntax and key APIs
+
+```plsql
+ALTER DATABASE Sales SET READ_COMMITTED_SNAPSHOT ON;
+ALTER DATABASE Sales SET ALLOW_SNAPSHOT_ISOLATION ON;
+
+SET TRANSACTION ISOLATION LEVEL SNAPSHOT;
+SET LOCK_TIMEOUT 2000;
+```
+
+<Callout type="version">
+**Optimized locking** in SQL Server 2025 uses transaction ID locking and lock after qualification to reduce blocking and avoid escalation. It requires accelerated database recovery, and lock after qualification also needs RCSI. It's always on in Azure SQL Database.
+</Callout>
+
+## Simple example
+
+```sql
+CREATE TABLE #accounts (id int PRIMARY KEY, balance int);
+INSERT #accounts VALUES (1, 100), (2, 0);
+
+BEGIN TRANSACTION;
+UPDATE #accounts SET balance = balance - 40 WHERE id = 1;
+UPDATE #accounts SET balance = balance + 40 WHERE id = 2;
+COMMIT;
+
+SELECT balance FROM #accounts WHERE id = 2;
+-- output: 40
+```
+
+## Industry examples
+
+### Prevent partial work
+
+`SET XACT_ABORT ON` rolls back the whole transaction on a run-time error. Without it, often only the failing statement rolls back.
+
+```sql
+CREATE TABLE #t (id int PRIMARY KEY);
+
+SET XACT_ABORT OFF;
+BEGIN TRANSACTION;
+INSERT #t VALUES (1);
+BEGIN TRY
+  INSERT #t VALUES (1);
+END TRY
+BEGIN CATCH
+  IF XACT_STATE() = 1 COMMIT;
+END CATCH;
+
+SELECT COUNT(*) FROM #t;
+-- output: 1
+```
+
+### Claim work from a queue
+
+`READPAST` skips locked rows, and `UPDLOCK` prevents two sessions from claiming the same row.
+
+```sql
+CREATE TABLE #jobs (id int PRIMARY KEY, status varchar(10));
+INSERT #jobs VALUES (1, 'pending');
+
+UPDATE TOP (1) j
+SET status = 'running'
+OUTPUT inserted.id
+FROM #jobs j WITH (READPAST, UPDLOCK, ROWLOCK)
+WHERE status = 'pending';
+-- output: 1
+```
+
+### Handle snapshot update conflicts
+
+Under `SNAPSHOT`, writing a row changed by another transaction since your snapshot raises error 3960. Your application must retry.
+
+## Patterns and best practices
+
+- Prefer RCSI to `NOLOCK` hints for reducing reader blocking.
+- Keep transactions short and access tables in a consistent order.
+- Retry on deadlock error 1205 and snapshot conflict error 3960.
+- Monitor tempdb, or the version store under accelerated database recovery.
+
+## Alternatives and trade-offs
+
+| Option | Benefit | Cost |
+| --- | --- | --- |
+| Locking `READ COMMITTED` | Default behaviour | Reader and writer blocking |
+| RCSI | Fewer blocks | Version storage |
+| `SNAPSHOT` | Stable transaction view | Update conflicts |
+| `NOLOCK` | No waiting | Incorrect data possible |
+| `SERIALIZABLE` | Strongest | Most blocking |
+
+## Common mistakes
+
+**Using `NOLOCK` everywhere.** It reads uncommitted data, as the test showed, and can miss or double-count rows.
+
+**Assuming RCSI removes write blocking.** Writers still block writers.
+
+**Forgetting an open transaction.** Check `@@TRANCOUNT` in SSMS.
+
+**Using table hints with optimized locking.** Microsoft advises avoiding them, as they can reduce its effectiveness.
+
+## Interview questions
+
+<Question q="RCSI versus SNAPSHOT?">
+RCSI gives each statement a snapshot and is transparent to applications. `SNAPSHOT` gives the whole transaction one view and can raise update conflicts.
+</Question>
+
+<Question q="Why is NOLOCK risky?">
+It reads uncommitted data and can return inconsistent or missing rows.
+</Question>
+
+<Question q="What is lock escalation?">
+SQL Server replaces many row or page locks with a table lock to save memory, which can increase blocking.
+</Question>

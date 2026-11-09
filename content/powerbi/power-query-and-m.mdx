@@ -1,0 +1,79 @@
+---
+title: "Power Query, M and Data Cleaning"
+summary: "Connect sources, clean with applied steps, write readable M and preserve query folding for performance."
+level: fundamental
+section: modeling
+order: 1
+tags: ["Power Query","M language","query folding","data cleaning"]
+requires: ["powerbi/platform-and-storage-modes"]
+related: ["excel/power-query-and-data-model","statistics/inconsistent-data-and-validation"]
+versions: "Power BI Desktop as documented in November 2026"
+tested: "M syntax checked against Microsoft documentation. Queries weren't executed"
+verified: "2026-11-09"
+docs:
+  - label: "M language"
+    url: "https://learn.microsoft.com/en-us/powerquery-m/"
+  - label: "M expressions and let"
+    url: "https://learn.microsoft.com/en-us/powerquery-m/expressions-values-and-let-expression"
+  - label: "Query folding"
+    url: "https://learn.microsoft.com/en-us/power-query/query-folding-basics"
+---
+
+## What it is
+
+Power Query is Power BI's data preparation layer, and M is its functional language.
+
+## Why it exists
+
+Reports need trustworthy, typed and shaped tables. Applied steps make that preparation repeatable, and independent of any report visual.
+
+## How it works
+
+A query is a `let ... in` expression, where each step references the last. When the source can do so, Power Query translates steps into native queries, known as **query folding**, pushing work back to the source. Some steps break folding, and later steps run locally.
+
+M basics: it's case-sensitive, identifiers with spaces use `#"Step Name"`, functions use `(a, b) => a + b`, and `each [Col]` is shorthand for a single-argument function.
+
+## Syntax and key APIs
+
+```text
+let
+    Source = Sql.Database("server", "sales"),
+    Orders = Source{[Schema="dbo", Item="Orders"]}[Data],
+    Recent = Table.SelectRows(Orders, each [OrderDate] >= #date(2025, 1, 1)),
+    Typed = Table.TransformColumnTypes(Recent, {{"Amount", type number}}),
+    Renamed = Table.RenameColumns(Typed, {{"CustID", "Customer Key"}})
+in
+    Renamed
+```
+
+## Simple example
+
+A messy product export needs trimming, casing, and removing duplicates by key. Right-click a step and check View Native Query to see whether it still folds.
+
+## Industry examples
+
+Parameters for server names allow the same queries to work across dev, test and production. Incremental refresh policies filter using `RangeStart` and `RangeEnd`, and these need to fold.
+
+## Patterns and best practices
+
+- Filter and remove columns early.
+- Do heavy shaping in the source or warehouse.
+- Name steps clearly.
+- Disable load for staging queries.
+
+## Alternatives and trade-offs
+
+SQL views or dbt models are preferable for logic shared across tools. M is a good choice for last-mile shaping.
+
+## Common mistakes
+
+- Breaking folding early on large tables.
+- Leaving automatic type detection on unreliable samples.
+- Hard-coding environment-specific servers.
+- Loading unused columns.
+
+## Interview questions
+
+<Question q="What is query folding?">Translating Power Query steps into a native source query, so the source does the work.</Question>
+
+<Question q="Where should transformation logic live?">As far upstream as is practical, while keeping it reusable.</Question>

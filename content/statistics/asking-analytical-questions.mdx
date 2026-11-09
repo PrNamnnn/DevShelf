@@ -1,0 +1,96 @@
+---
+title: "Asking the Right Business Question"
+summary: "Translate vague requests into measurable questions with a metric, population, time window, comparison and decision."
+level: fundamental
+section: foundations
+order: 2
+tags: ["problem framing","metrics","stakeholders"]
+requires: ["statistics/what-is-data-analysis"]
+related: ["statistics/kpis-and-north-star","statistics/diagnostic-analysis"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "NIST: Exploratory Data Analysis"
+    url: "https://www.itl.nist.gov/div898/handbook/eda/eda.htm"
+---
+
+## What it is
+
+An analytical question names something measurable about a defined group over a defined period, compared with a defined baseline, in service of a decision. "How is the app doing?" isn't one. "Did 7-day retention of Android users acquired in March fall below February's cohort, and should we roll back release 8.2?" is one.
+
+## Why it exists
+
+The most expensive analytical error is answering the wrong question correctly. Vague requests also let results be read however a stakeholder prefers. Writing the question down forces agreement on what evidence would count before anyone sees the answer.
+
+## How it works
+
+Fill in six parts:
+
+| Part | Prompt | Example |
+| --- | --- | --- |
+| Decision | What will change based on this? | Whether to roll back release 8.2 |
+| Metric | What exactly is measured? | Users active on day 7 ÷ users who installed |
+| Population | Who is included? | New Android installs, excluding test accounts |
+| Window | Over what time? | Install cohorts from 1 to 31 March |
+| Comparison | Against what? | February cohorts |
+| Threshold | What result triggers action? | A fall of at least 2 percentage points |
+
+Classify the question next, because the type determines the method: descriptive (what happened), diagnostic (why), predictive (what will happen), or prescriptive (what should we do).
+
+## Worked example
+
+A marketing lead asks, "Are our campaigns working?" After a short conversation it becomes: "For paid channels in Q3, which had a customer acquisition cost above ₹1,200 for customers who made a second purchase within 90 days, so we can reassign next quarter's budget?" This reveals a data need that the original request hid: acquisition cost must be joined to repeat purchases, and customers acquired late in the quarter need a full 90 days before they can be judged.
+
+## Python
+
+```python
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class AnalysisBrief:
+    decision: str
+    metric: str
+    population: str
+    window: str
+    comparison: str
+    threshold: str
+
+    def is_complete(self) -> bool:
+        return all(value.strip() for value in vars(self).values())
+
+brief = AnalysisBrief(
+    decision="Roll back release 8.2?",
+    metric="Day-7 retention",
+    population="New Android installs",
+    window="March install cohorts",
+    comparison="February install cohorts",
+    threshold="Fall of 2 points or more",
+)
+assert brief.is_complete()
+```
+
+## In industry
+
+Strong teams use a short written brief for non-trivial requests. It prevents repeated rework, and it records why a number was defined in a particular way when someone asks six months later.
+
+## Assumptions and limitations
+
+Stakeholders may not know the decision yet, and exploratory work is legitimate. Label it as such, and put a time limit on it. A threshold set in advance is also a judgement call that needs business input rather than statistics alone.
+
+## Common mistakes
+
+- Accepting the requested chart without asking what it's for.
+- Choosing a metric because it's easy to query.
+- Changing the definition after seeing results.
+- Comparing unequal periods, such as a 31-day month with a 28-day month, using totals.
+
+## Alternatives
+
+Hypothesis-driven framing begins with a suspected cause and looks for disconfirming evidence, which suits diagnostic work. Metric trees begin with one outcome and decompose it, which suits recurring reviews. Open exploration suits a new dataset, as long as findings are treated as hypotheses.
+
+## Interview questions
+
+<Question q="A stakeholder asks for a dashboard of everything. What do you do?">Ask which decisions they make regularly and which numbers would change them. Build a small view around those, and offer drill-down for the rest.</Question>
+
+<Question q="Why define a threshold before analyzing?">It separates evidence from interpretation. Deciding afterwards makes it easy to call any result meaningful, intentionally or not.</Question>

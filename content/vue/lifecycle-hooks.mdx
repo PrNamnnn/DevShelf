@@ -1,0 +1,173 @@
+---
+title: "The Component Lifecycle"
+summary: "When each lifecycle hook runs, what's safe to do in each one, and how to clean up correctly."
+level: fundamental
+section: foundations
+order: 20
+tags: [lifecycle, onMounted, onUnmounted, onUpdated, nextTick, onErrorCaptured]
+requires: [vue/templates-and-components]
+related: [vue/computed-and-watchers, react/effects-and-refs]
+versions: "Vue 3."
+tested: "Vue 3.5.45 with jsdom"
+verified: "2026-11-09"
+docs:
+  - label: "Vue: Lifecycle hooks"
+    url: "https://vuejs.org/guide/essentials/lifecycle.html"
+  - label: "Vue API: Composition API lifecycle"
+    url: "https://vuejs.org/api/composition-api-lifecycle.html"
+---
+
+## What it is
+
+Each component instance goes through creation, mounting, updating and unmounting. Lifecycle hooks register code to run at those points.
+
+## Why it exists
+
+Some work needs the real DOM, such as measuring an element. Other work needs teardown, such as removing a listener.
+
+## How it works
+
+<StepFlow
+  title="A component's life"
+  nodes={["setup()", "onBeforeMount", "onMounted", "onBeforeUpdate", "onUpdated", "onBeforeUnmount", "onUnmounted"]}
+  steps={[
+    { active: [0], note: "setup runs first. Reactive state exists but no DOM does." },
+    { active: [1], note: "Reactive state is ready, but no DOM nodes have been created yet." },
+    { active: [2], note: "The DOM is inserted and synchronous children are mounted. Doesn't run during SSR." },
+    { active: [3], note: "State changed. The hook can read the DOM before it's updated." },
+    { active: [4], note: "The DOM is updated, with parents after children. Don't change state here, or you risk an infinite loop." },
+    { active: [5], note: "The instance is still fully functional." },
+    { active: [6], note: "Children are gone and effects have stopped. Clear timers and listeners." },
+  ]}
+/>
+
+Hooks must register synchronously during `setup`. A call inside `setTimeout` won't work.
+
+## Syntax and key APIs
+
+| Hook | Use |
+| --- | --- |
+| `onMounted` | DOM access, starting subscriptions |
+| `onUpdated` | Reacting to any DOM change |
+| `onUnmounted` | Cleanup |
+| `onErrorCaptured(err, instance, info)` | Catch descendant errors |
+| `onActivated`, `onDeactivated` | `KeepAlive` caching |
+| `nextTick()` | Wait for the next DOM update |
+
+## Simple example
+
+```js
+import assert from "node:assert";
+import { JSDOM } from "jsdom";
+
+const { window } = new JSDOM(`<div id="app"></div>`);
+Object.assign(globalThis, { window, document: window.document, Element: window.Element, SVGElement: window.SVGElement, Node: window.Node });
+Object.defineProperty(globalThis, "navigator", { value: window.navigator, configurable: true });
+
+const { createApp, h, onMounted, onUnmounted } = await import("vue");
+const log = [];
+
+const app = createApp({
+  setup() {
+    log.push("setup");
+    onMounted(() => log.push("mounted"));
+    onUnmounted(() => log.push("unmounted"));
+    return () => h("p", "hi");
+  },
+});
+
+app.mount(document.querySelector("#app"));
+app.unmount();
+
+assert.deepEqual(log, ["setup", "mounted", "unmounted"]);
+```
+
+## Industry examples
+
+### Clean up global listeners
+
+```vue
+<script setup>
+import { onMounted, onUnmounted, ref } from "vue";
+
+const width = ref(0);
+const update = () => (width.value = window.innerWidth);
+
+onMounted(() => {
+  update();
+  window.addEventListener("resize", update);
+});
+onUnmounted(() => window.removeEventListener("resize", update));
+</script>
+```
+
+### Read the DOM after a state change
+
+```vue
+<script setup>
+import { nextTick, ref, useTemplateRef } from "vue";
+
+const open = ref(false);
+const input = useTemplateRef("field");
+
+async function show() {
+  open.value = true;
+  await nextTick();
+  input.value.focus();
+}
+</script>
+
+<template>
+  <input v-if="open" ref="field" />
+</template>
+```
+
+### Report errors from a subtree
+
+```vue
+<script setup>
+import { onErrorCaptured, ref } from "vue";
+
+const failed = ref(false);
+onErrorCaptured((error) => {
+  report(error);
+  failed.value = true;
+  return false;
+});
+</script>
+```
+
+## Patterns and best practices
+
+- Pair every subscription with cleanup.
+- Prefer watchers to `onUpdated` for reacting to specific data.
+- Put reusable lifecycle logic in composables.
+- Remember `onMounted` doesn't run during server rendering.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| React to specific data | `watch` | Doesn't guarantee DOM state |
+| After DOM update | `nextTick` | One-off |
+| Any re-render | `onUpdated` | Runs often |
+
+## Common mistakes
+
+**Registering a hook after `await`.** It can lose its instance.
+
+**Mutating state in `onUpdated`.** That can cause an infinite update loop.
+
+**Touching `window` in `setup` with SSR.** Move it to `onMounted`.
+
+**Not returning `false` from `onErrorCaptured` when handling.** The error continues upward.
+
+## Interview questions
+
+<Question q="When can you access the DOM?">
+From `onMounted` onward, or after `await nextTick()` following a state change.
+</Question>
+
+<Question q="Which hooks run during server rendering?">
+`setup` runs. `onBeforeMount` and `onMounted` don't.
+</Question>

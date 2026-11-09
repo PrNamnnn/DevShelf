@@ -1,0 +1,107 @@
+---
+title: "Transactions and Write Concerns"
+summary: "Use multi-document transactions when they're needed, and understand their limits and retry behaviour."
+level: advanced
+section: distributed
+order: 1
+tags: ["transactions","ACID","write concern","read concern"]
+requires: ["mongodb/projection-sort-and-updates"]
+related: ["mongodb/replication-and-sharding","postgresql/transactions-and-mvcc"]
+versions: "Documentation for MongoDB 9.0. Examples executed on MongoDB 8.0.12"
+tested: "JavaScript examples executed against a temporary MongoDB 8.0.12 single-member replica set"
+verified: "2026-11-09"
+docs:
+  - label: "MongoDB: Transactions"
+    url: "https://www.mongodb.com/docs/manual/core/transactions/"
+  - label: "MongoDB: Production considerations"
+    url: "https://www.mongodb.com/docs/manual/core/transactions-production-consideration/"
+---
+
+## What it is
+
+A **multi-document transaction** applies changes across documents and collections all-or-nothing. **Write concern** states how many members must acknowledge a write, and **read concern** states the isolation and durability of what's read.
+
+## Why it exists
+
+Single-document updates are already atomic, and they cover many needs if documents are modelled well. Invariants that span documents, like transferring a balance, need more.
+
+## How it works
+
+Transactions need a replica set or sharded cluster, and don't work on a standalone server. Runtime limit defaults to 60 seconds through `transactionLifetimeLimitSeconds`. A transaction waits only briefly for locks, 5 ms by default, then aborts. Transactions default to primary read preference.
+
+Applications must retry on `TransientTransactionError`. `withTransaction` handles this for you.
+
+## Syntax and key APIs
+
+```text
+session.withTransaction(async () => { ... }, { writeConcern: { w: "majority" } })
+```
+
+Pass `{ session }` to **every** operation in the callback.
+
+## Simple example
+
+```js
+import assert from "node:assert/strict";
+import { MongoClient } from "mongodb";
+
+const client = new MongoClient(process.env.MONGODB_URI);
+const db = client.db("shelf_tx");
+await db.dropDatabase();
+const accounts = db.collection("accounts");
+await accounts.insertMany([{ _id: "a", balance: 100 }, { _id: "b", balance: 0 }]);
+
+async function transfer(from, to, amount) {
+  const session = client.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const debit = await accounts.updateOne(
+        { _id: from, balance: { $gte: amount } },
+        { $inc: { balance: -amount } },
+        { session },
+      );
+      if (debit.modifiedCount !== 1) throw new Error("insufficient funds");
+      await accounts.updateOne({ _id: to }, { $inc: { balance: amount } }, { session });
+    });
+  } finally {
+    await session.endSession();
+  }
+}
+
+await transfer("a", "b", 60);
+await assert.rejects(transfer("a", "b", 60), /insufficient/);
+
+const balances = await accounts.find().sort({ _id: 1 }).toArray();
+assert.deepEqual(balances.map((d) => d.balance), [40, 60]);
+
+await db.dropDatabase();
+await client.close();
+```
+
+## Industry examples
+
+Payments, inventory reservations and order-plus-ledger writes use transactions. Many workloads avoid them by keeping a unit of change within a single document.
+
+## Patterns and best practices
+
+- Keep transactions short.
+- Prefer modelling that needs no transaction.
+- Use `w: "majority"` for important data.
+- Design idempotent retries.
+
+## Alternatives and trade-offs
+
+Sagas handle long or cross-service workflows through compensating steps. Relational databases are a natural fit when transactions dominate.
+
+## Common mistakes
+
+- Forgetting to pass the session to one operation.
+- Long-running transactions.
+- Testing on a standalone server.
+- Calling external services inside the callback.
+
+## Interview questions
+
+<Question q="Why might you not need a transaction?">A single-document write is atomic, so embedding related data can satisfy the requirement.</Question>
+
+<Question q="What does withTransaction do beyond commit?">It retries on transient errors and handles the commit lifecycle.</Question>

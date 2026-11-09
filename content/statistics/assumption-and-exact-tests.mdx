@@ -1,0 +1,97 @@
+---
+title: "Fisher, Levene, Shapiro-Wilk and Breusch-Pagan"
+summary: "Exact and assumption-checking tests, and why a formal assumption test shouldn't be the only thing that drives analysis."
+level: advanced
+section: tests
+order: 6
+tags: ["Fisher exact","Levene","Shapiro-Wilk","Breusch-Pagan","assumptions"]
+requires: ["statistics/chi-square-tests","statistics/anova-and-post-hoc"]
+related: ["statistics/regression-diagnostics","statistics/non-parametric-tests"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "SciPy: fisher_exact"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.fisher_exact.html"
+  - label: "SciPy: levene"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.levene.html"
+  - label: "SciPy: shapiro"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.shapiro.html"
+  - label: "statsmodels: het_breuschpagan"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.stats.diagnostic.het_breuschpagan.html"
+---
+
+## What it is
+
+| Test | Question | H₀ | Data |
+| --- | --- | --- | --- |
+| Fisher's exact | Are two binary variables associated? | No association | Small 2×2 table |
+| Levene | Do groups share a variance? | Variances equal | Numeric by group |
+| Shapiro-Wilk | Is this sample normal? | Sample is normal | Numeric, moderate n |
+| Breusch-Pagan | Do regression errors have constant variance? | Homoscedasticity | Regression residuals |
+
+## Why it exists
+
+Fisher's test gives an exact answer where chi-square's approximation breaks. The other three check assumptions behind tests and regressions.
+
+## How it works
+
+Fisher's test conditions on the table's margins and sums probabilities of tables as or more extreme, using the hypergeometric distribution. Levene's test runs an ANOVA on absolute deviations from a group center, which by default in SciPy is the median, a robust choice. Shapiro-Wilk compares ordered sample values with those expected under normality. Breusch-Pagan regresses squared residuals on the predictors, and tests if they explain the variance.
+
+**Business meaning:** these tests tell you whether an analysis can be trusted, and rarely answer a business question directly.
+
+## Worked example
+
+A pilot found 8 of 10 converted with a new onboarding and 1 of 6 without. Expected counts are too small for chi-square. Fisher's test gives an odds ratio of 20 and p = 0.035.
+
+On three landing page groups, Levene's p = 0.93, so no evidence of unequal variances, and Shapiro-Wilk's p = 0.53 on pooled data.
+
+In a simulated regression where error variance grows with the predictor, Breusch-Pagan's LM = 13.5, p = 0.00024, so robust standard errors would be justified.
+
+## Python
+
+```python
+import numpy as np
+import statsmodels.api as sm
+import statsmodels.stats.api as sms
+from scipy import stats
+
+odds, p = stats.fisher_exact([[8, 2], [1, 5]])
+assert (odds, round(p, 3)) == (20.0, 0.035)
+
+a, b, c = [23, 25, 21, 24, 26], [28, 30, 27, 29, 31], [22, 24, 23, 25, 21]
+assert round(stats.levene(a, b, c).pvalue, 2) == 0.93
+assert stats.shapiro(a + b + c).pvalue > 0.05
+
+rng = np.random.default_rng(0)
+x = rng.normal(20, 5, 2_000)
+y = 5 + 2 * x + rng.normal(0, 1 + x / 5, 2_000)
+X = sm.add_constant(x)
+lm, lm_p, _, _ = sms.het_breuschpagan(sm.OLS(y, X).fit().resid, X)
+assert lm_p < 0.01
+```
+
+## In industry
+
+Fisher's test is common for small pilot data and rare events. Levene and Breusch-Pagan are mostly seen in regulated or formal analyses, while applied teams often default to Welch's t-test and robust standard errors.
+
+## Assumptions and limitations
+
+Shapiro-Wilk rejects negligible departures at large n, and can't detect real problems at small n. Choosing a follow-up test based on a pretest also changes the error rates of the overall procedure.
+
+## Common mistakes
+
+- Using assumption tests as automatic gates.
+- Ignoring Q-Q and residual plots.
+- Claiming normality because p is above 0.05.
+- Applying Fisher's test to huge tables when an approximation is adequate.
+
+## Alternatives
+
+Default to robust methods, Welch's tests and heteroscedasticity-consistent standard errors, and use graphical checks for assumptions. Anderson-Darling focuses more on tails.
+
+## Interview questions
+
+<Question q="Why is Shapiro-Wilk unhelpful with a million rows?">It will reject trivial deviations from normality, even though the t-test is robust to them at that sample size.</Question>
+
+<Question q="When is Fisher's exact test preferred to chi-square?">When any expected count is small, generally below 5.</Question>

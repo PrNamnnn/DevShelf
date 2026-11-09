@@ -1,0 +1,87 @@
+---
+title: "Drill-Through, Tooltips, Bookmarks and Slicers"
+summary: "Build guided exploration without crowding pages."
+level: intermediate
+section: reporting
+order: 2
+tags: ["drill-through","tooltips","bookmarks","slicers"]
+requires: ["powerbi/visuals-and-report-design"]
+related: ["statistics/diagnostic-analysis"]
+versions: "Power BI Desktop as documented in November 2026"
+tested: "Not executable here. Checked against Microsoft documentation"
+verified: "2026-11-09"
+docs:
+  - label: "Drillthrough"
+    url: "https://learn.microsoft.com/en-us/power-bi/create-reports/desktop-drillthrough"
+  - label: "Report page tooltips"
+    url: "https://learn.microsoft.com/en-us/power-bi/create-reports/desktop-tooltips"
+  - label: "Bookmarks"
+    url: "https://learn.microsoft.com/en-us/power-bi/create-reports/desktop-bookmarks"
+  - label: "Slicers"
+    url: "https://learn.microsoft.com/en-us/power-bi/visuals/power-bi-visualization-slicers"
+---
+
+## What it is
+
+These features let readers move from summary to detail.
+
+| Feature | Purpose |
+| --- | --- |
+| Slicer | On-page filter |
+| Sync slicers | Same selection across pages |
+| Drill-down | Move through a hierarchy within a visual |
+| Drill-through | Open a detail page with context |
+| Report-page tooltip | Mini page on hover |
+| Bookmark | Saves view state |
+
+## Why it exists
+
+Readers ask follow-up questions, and a good report answers them without showing everything upfront.
+
+## How it works
+
+For drill-through, add a field to the drill-through area on a detail page. Users right-click a data point on another page. Keep filters passes the source context along.
+
+Report-page tooltips use a page that's marked as a tooltip, sized small, and assigned to a visual. Bookmarks capture filter, slicer and visibility state, and they pair with buttons for guided navigation.
+
+## Syntax and key APIs
+
+A dynamic title measure shows the current selection:
+
+```text
+Title =
+"Sales for " & IF ( ISFILTERED ( DimRegion[Region] ), SELECTEDVALUE ( DimRegion[Region], "several regions" ), "all regions" )
+```
+
+Use `Edit interactions` to control how visuals on a page cross-filter each other.
+
+## Simple example
+
+Clicking through from a Region bar to a "Region Detail" page shows that region's customers. A Back button returns to the summary, and a hover tooltip provides a small trend.
+
+## Industry examples
+
+Sales leaders drill from region to account. Support managers open a ticket-level page from an SLA summary.
+
+## Patterns and best practices
+
+- Show visible cues that drill-through exists.
+- Keep bookmarks few and clearly named.
+- Group slicers and sync them deliberately.
+
+## Alternatives and trade-offs
+
+Field parameters let users swap measures or dimensions without bookmarks. Separate pages are easier to maintain than many bookmark states.
+
+## Common mistakes
+
+- Bookmarks capturing filters unintentionally.
+- Too many high-cardinality slicers.
+- Drill-through pages with no back navigation.
+- Cross-highlighting that confuses readers.
+
+## Interview questions
+
+<Question q="Drill-down vs drill-through?">Drill-down moves within a hierarchy in the same visual. Drill-through goes to a separate page with context.</Question>
+
+<Question q="When use a field parameter instead of a bookmark?">When users want to switch the measure or dimension in a visual without maintaining many saved states.</Question>

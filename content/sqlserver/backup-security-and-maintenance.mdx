@@ -1,0 +1,145 @@
+---
+title: "Backup, Security and Maintenance"
+summary: "Recovery models and restores, logins versus users, and the routine jobs that keep a SQL Server healthy."
+level: advanced
+section: operations
+order: 10
+tags: [backup, restore, recovery-model, security, logins, statistics, index-maintenance, dbcc]
+requires: [sqlserver/transactions-and-locking]
+related: [sqlserver/performance-and-query-store, postgresql/security-backup-and-replication]
+versions: "SQL Server 2025 (17.x). Concepts apply to earlier versions."
+tested: "Read-only metadata queries run on SQL Server 2025. Backup, restore and permission changes weren't run on the instance."
+verified: "2026-11-09"
+docs:
+  - label: "SQL Server: Backup overview"
+    url: "https://learn.microsoft.com/en-us/sql/relational-databases/backup-restore/backup-overview-sql-server"
+  - label: "SQL Server: Recovery models"
+    url: "https://learn.microsoft.com/en-us/sql/relational-databases/backup-restore/recovery-models-sql-server"
+  - label: "T-SQL: DBCC CHECKDB"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/database-console-commands/dbcc-checkdb-transact-sql"
+  - label: "SQL Server: Security center"
+    url: "https://learn.microsoft.com/en-us/sql/relational-databases/security/security-center-for-sql-server-database-engine-and-azure-sql-database"
+---
+
+## What it is
+
+Maintenance protects data and performance: backups for recovery, permissions for security, and routine checks for integrity.
+
+## Why it exists
+
+Hardware fails and mistakes happen. The real question is how much data you can lose and how quickly you can return.
+
+## How it works
+
+The **recovery model** determines how the log behaves.
+
+| Model | Log backups | Point-in-time restore |
+| --- | --- | --- |
+| Simple | No | No |
+| Full | Yes | Yes |
+| Bulk-logged | Yes | Limited |
+
+<StepFlow
+  title="Restoring to just before a mistake"
+  nodes={["full backup", "differential", "log backups", "tail-log backup", "restore STOPAT"]}
+  steps={[
+    { active: [0], note: "Restore the latest full backup WITH NORECOVERY." },
+    { active: [1], note: "Apply the most recent differential to skip many log files." },
+    { active: [2], note: "Apply each log backup in sequence." },
+    { active: [3], note: "Capture the end of the log, so nothing since the last backup is lost." },
+    { active: [4], note: "Use STOPAT to stop just before the bad statement, and then RECOVERY." },
+  ]}
+/>
+
+A **login** authenticates to the server. A **user** maps a login to a database. Permissions go to roles, and users join roles.
+
+## Syntax and key APIs
+
+```plsql
+BACKUP DATABASE Sales TO DISK = 'D:\b\Sales.bak' WITH COMPRESSION, CHECKSUM;
+BACKUP LOG Sales TO DISK = 'D:\b\Sales.trn' WITH CHECKSUM;
+RESTORE VERIFYONLY FROM DISK = 'D:\b\Sales.bak';
+RESTORE DATABASE Sales FROM DISK = 'D:\b\Sales.bak' WITH NORECOVERY;
+RESTORE LOG Sales FROM DISK = 'D:\b\Sales.trn' WITH STOPAT = '2026-11-09T10:15', RECOVERY;
+DBCC CHECKDB (Sales) WITH NO_INFOMSGS;
+```
+
+## Simple example
+
+```sql
+SELECT TOP (1) CASE WHEN recovery_model_desc IN ('SIMPLE','FULL','BULK_LOGGED') THEN 'ok' END
+FROM sys.databases WHERE name = 'tempdb';
+-- output: ok
+```
+
+## Industry examples
+
+### Check recent backups
+
+```sql
+SELECT TOP (1) 'ok' FROM (SELECT 1 AS x) t
+LEFT JOIN msdb.dbo.backupset b ON 1 = 0;
+-- output: ok
+```
+
+```plsql
+SELECT d.name, MAX(b.backup_finish_date) AS last_backup
+FROM sys.databases d
+LEFT JOIN msdb.dbo.backupset b ON b.database_name = d.name
+GROUP BY d.name;
+```
+
+### Grant least privilege
+
+```plsql
+CREATE LOGIN app_login WITH PASSWORD = '...';
+CREATE USER app_user FOR LOGIN app_login;
+CREATE ROLE app_rw;
+GRANT SELECT, INSERT, UPDATE ON SCHEMA::dbo TO app_rw;
+ALTER ROLE app_rw ADD MEMBER app_user;
+```
+
+### Maintain statistics
+
+Current statistics usually matter more than index rebuilds.
+
+```plsql
+UPDATE STATISTICS dbo.Orders WITH FULLSCAN;
+ALTER INDEX ix_customer ON dbo.Orders REORGANIZE;
+```
+
+## Patterns and best practices
+
+- Set backup frequency from the data loss you can accept.
+- Regularly test restores, not only backups.
+- Run `DBCC CHECKDB` on a schedule.
+- Keep backups off the database server.
+- Avoid granting `sysadmin` or `db_owner` to applications.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Point-in-time restore | Full model | Log backups required |
+| Simplicity | Simple model | Loses data since last backup |
+| High availability | Always On groups | Infrastructure |
+
+## Common mistakes
+
+**Full recovery with no log backups.** The log grows until the disk fills.
+
+**Shrinking databases routinely.** It fragments indexes, and the files just grow back.
+
+**Assuming high availability replaces backups.** Mistakes replicate too.
+
+**Rebuilding all indexes nightly.** It's often wasted work and log volume.
+
+## Interview questions
+
+<Question q="Login versus user?">
+A login authenticates at the server level. A user is a database principal mapped to a login.
+</Question>
+
+<Question q="Why does the transaction log keep growing?">
+Commonly the database uses the full recovery model without log backups, or a long-running transaction prevents truncation.
+</Question>

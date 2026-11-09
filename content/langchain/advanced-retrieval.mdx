@@ -1,0 +1,151 @@
+---
+title: "Advanced Retrieval"
+summary: "Loading and chunking real documents, metadata filters, hybrid search, reranking and query rewriting."
+level: advanced
+section: retrieval
+order: 20
+tags: [retrievers, hybrid-search, reranking, metadata-filtering, chunking, reciprocal-rank-fusion]
+requires: [langchain/rag]
+related: [langchain/evaluation-and-observability, postgresql/jsonb-and-full-text-search]
+versions: "LangChain v1."
+tested: "langchain-core 1.7.6 and text splitters locally. No real embedding model or reranker was called."
+verified: "2026-11-09"
+docs:
+  - label: "LangChain: Retrieval"
+    url: "https://docs.langchain.com/oss/python/langchain/retrieval"
+  - label: "LangChain: Document loaders"
+    url: "https://docs.langchain.com/oss/python/integrations/document_loaders"
+  - label: "LangChain: Text splitters"
+    url: "https://docs.langchain.com/oss/python/integrations/splitters"
+---
+
+## What it is
+
+Advanced retrieval improves which documents reach the model, through better chunking, filtering, multiple search methods and reranking.
+
+## Why it exists
+
+Most poor RAG answers are retrieval failures. Vector search alone misses exact terms such as error codes and product names.
+
+## How it works
+
+<StepFlow
+  title="A hybrid retrieval pipeline"
+  nodes={["query", "rewrite", "filter by metadata", "vector + keyword", "fuse ranks", "rerank", "top chunks"]}
+  steps={[
+    { active: [0, 1], note: "An optional step makes the query self-contained using chat history." },
+    { active: [2], note: "Permissions, tenant and date narrow the candidate set before searching." },
+    { active: [3], note: "Vector search finds meaning, and keyword search finds exact terms." },
+    { active: [4], note: "Reciprocal rank fusion combines lists without comparing their scores." },
+    { active: [5], note: "A slower, more accurate model reorders the best candidates." },
+    { active: [6], note: "Only the few strongest chunks go into the prompt." },
+  ]}
+/>
+
+| Technique | Helps when | Cost |
+| --- | --- | --- |
+| Structure-aware splitting | Documents have headings or code | Format-specific code |
+| Metadata filters | Multi-tenant or dated data | Requires good metadata |
+| Hybrid search | Exact terms matter | Two indexes |
+| Reranking | Top results are noisy | Added latency |
+| Query rewriting | Follow-up questions | Extra model call |
+
+## Syntax and key APIs
+
+```py
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+
+store.as_retriever(search_type="mmr", search_kwargs={"k": 5, "fetch_k": 20})
+```
+
+## Simple example
+
+```python
+from langchain_text_splitters import MarkdownHeaderTextSplitter
+
+markdown = "# Billing\n\nRefunds take 5 days.\n\n## Limits\n\nMax 3 per year.\n"
+splitter = MarkdownHeaderTextSplitter(headers_to_split_on=[("#", "h1"), ("##", "h2")])
+
+chunks = splitter.split_text(markdown)
+assert chunks[1].metadata == {"h1": "Billing", "h2": "Limits"}
+```
+
+## Industry examples
+
+### Reciprocal rank fusion
+
+```python
+def fuse(rankings, k=60):
+    scores = {}
+    for ranking in rankings:
+        for rank, doc in enumerate(ranking, 1):
+            scores[doc] = scores.get(doc, 0) + 1 / (k + rank)
+    return sorted(scores, key=scores.get, reverse=True)
+
+vector = ["a", "b", "c"]
+keyword = ["c", "a", "d"]
+
+assert fuse([vector, keyword])[0] == "a"
+assert set(fuse([vector, keyword])) == {"a", "b", "c", "d"}
+```
+
+### Filter before searching
+
+```python
+from langchain_core.documents import Document
+from langchain_core.embeddings import DeterministicFakeEmbedding
+from langchain_core.vectorstores import InMemoryVectorStore
+
+store = InMemoryVectorStore(DeterministicFakeEmbedding(size=32))
+store.add_documents([
+    Document(page_content="alpha", metadata={"tenant": "a"}),
+    Document(page_content="beta", metadata={"tenant": "b"}),
+])
+
+hits = store.similarity_search("anything", k=5, filter=lambda d: d.metadata["tenant"] == "a")
+assert [d.page_content for d in hits] == ["alpha"]
+```
+
+### Keep document context on a chunk
+
+```python
+def contextualize(title, section, text):
+    return f"{title} > {section}\n\n{text}"
+
+assert contextualize("Billing", "Refunds", "5 days").startswith("Billing > Refunds")
+```
+
+## Patterns and best practices
+
+- Measure recall before adding complexity.
+- Keep titles and sections with each chunk.
+- Apply access control at retrieval.
+- Add reranking after hybrid search, not instead of it.
+
+## Alternatives and trade-offs
+
+| Store | Good for | Trade-off |
+| --- | --- | --- |
+| pgvector | Data already in PostgreSQL | Tuning at very large scale |
+| Dedicated vector DB | Large scale | Another system |
+| Keyword only | Exact lookup | No semantic match |
+
+## Common mistakes
+
+**Fixed-size chunks through code.** Functions get cut in half.
+
+**Filtering after retrieval.** You may end up with too few results or leak data.
+
+**Comparing raw scores from different searches.** Use rank fusion.
+
+**Reranking a poor candidate set.** It can't find what wasn't retrieved.
+
+## Interview questions
+
+<Question q="What is hybrid search?">
+Combining semantic vector search with keyword search, often merged by reciprocal rank fusion.
+</Question>
+
+<Question q="Why rerank?">
+Cross-encoder rerankers are more accurate than embeddings but too slow for the whole corpus, so they refine a shortlist.
+</Question>

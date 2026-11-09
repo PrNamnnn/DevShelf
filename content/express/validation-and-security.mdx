@@ -1,0 +1,180 @@
+---
+title: "Validation and Security"
+summary: "Validating every input with a schema, setting safe headers and limits, and avoiding the most common Express vulnerabilities."
+level: intermediate
+section: security
+order: 10
+tags: [validation, zod, security, helmet, cors, rate-limiting, owasp, trust-proxy]
+related: [express/middleware-and-error-handling, express/authentication-sessions-and-jwt, nextjs/server-actions]
+versions: "Express 5 and Zod 4."
+tested: "Validation and body-limit behaviour run with Express 5.3.0, Zod 4 and supertest. Helmet and cors configuration wasn't run."
+verified: "2026-11-09"
+docs:
+  - label: "Express: Security best practices"
+    url: "https://expressjs.com/en/advanced/best-practice-security.html"
+  - label: "Express: Behind proxies"
+    url: "https://expressjs.com/en/guide/behind-proxies.html"
+  - label: "Express: cors middleware"
+    url: "https://expressjs.com/en/resources/middleware/cors.html"
+  - label: "OWASP: Node.js security cheat sheet"
+    url: "https://cheatsheetseries.owasp.org/cheatsheets/Nodejs_Security_Cheat_Sheet.html"
+  - label: "Zod: Basic usage"
+    url: "https://zod.dev/basics"
+---
+
+## What it is
+
+Validation checks that incoming data has the expected shape before you use it. Security middleware applies safe defaults such as response headers and request limits.
+
+## Why it exists
+
+Everything in `req` is attacker-controlled. Most web vulnerabilities come from trusting input, leaking information, or allowing unlimited requests.
+
+## How it works
+
+Validate at the boundary. A schema parses unknown input into typed, known-good data, and everything after it can rely on that.
+
+| Threat | Control |
+| --- | --- |
+| Oversized bodies | `express.json({ limit })` |
+| Unexpected fields, wrong types | Schema validation |
+| Clickjacking, sniffing | `helmet()` |
+| Credential guessing | Rate limiting by user and IP |
+| SQL injection | Parameterized queries |
+| Open redirect | Allow-list redirect hosts |
+| Leaked internals | Generic 5xx messages |
+
+CORS isn't access control. It only tells browsers which origins may read responses.
+
+## Syntax and key APIs
+
+```javascript
+import helmet from "helmet";
+import cors from "cors";
+
+app.disable("x-powered-by");
+app.use(helmet());
+app.use(cors({ origin: ["https://app.example.com"], credentials: true }));
+app.use(express.json({ limit: "100kb" }));
+app.set("trust proxy", 1);
+```
+
+`trust proxy` determines whether `req.ip` and `req.protocol` use forwarded headers. Set it to match your actual deployment, since trusting too much lets clients spoof their IP.
+
+## Simple example
+
+```js
+import assert from "node:assert";
+import { z } from "zod";
+
+const Order = z.object({
+  sku: z.string().min(1),
+  quantity: z.number().int().positive(),
+});
+
+const bad = Order.safeParse({ sku: "", quantity: 0 });
+assert.equal(bad.success, false);
+assert.deepEqual(Object.keys(z.flattenError(bad.error).fieldErrors).sort(), ["quantity", "sku"]);
+
+const good = Order.parse({ sku: "a", quantity: 1, admin: true });
+assert.deepEqual(good, { sku: "a", quantity: 1 });
+```
+
+Objects strip unknown keys by default, so `admin` disappears.
+
+## Industry examples
+
+### A reusable validation middleware
+
+```js
+import assert from "node:assert";
+import express from "express";
+import request from "supertest";
+import { z } from "zod";
+
+const validate = (schema) => (req, res, next) => {
+  const result = schema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(422).json(z.flattenError(result.error));
+  }
+  req.valid = result.data;
+  next();
+};
+
+const app = express();
+app.use(express.json({ limit: "1kb" }));
+
+app.post("/orders", validate(z.object({ sku: z.string() })), (req, res) => {
+  res.status(201).json(req.valid);
+});
+
+app.use((err, req, res, next) => {
+  res.status(err.status ?? 500).json({ type: err.type });
+});
+
+assert.equal((await request(app).post("/orders").send({})).status, 422);
+assert.equal((await request(app).post("/orders").send({ sku: "a" })).status, 201);
+
+const tooLarge = await request(app).post("/orders").send({ sku: "x".repeat(5000) });
+assert.equal(tooLarge.status, 413);
+assert.equal(tooLarge.body.type, "entity.too.large");
+```
+
+### Allow-list redirect targets
+
+```js
+import assert from "node:assert";
+
+function safeRedirect(target, base = "https://app.example.com") {
+  const url = new URL(target, base);
+  return url.origin === base ? url.pathname + url.search : "/";
+}
+
+assert.equal(safeRedirect("/account?tab=1"), "/account?tab=1");
+assert.equal(safeRedirect("https://evil.example/phish"), "/");
+assert.equal(safeRedirect("//evil.example/x"), "/");
+```
+
+### Slow down password guessing
+
+Express's docs recommend tracking failures per user and IP, for example with `rate-limiter-flexible`. Keep the store in Redis when running more than one process.
+
+## Patterns and best practices
+
+- Validate params, query and body at the route boundary.
+- Use parameterized queries for every database call.
+- Run `npm audit` in CI.
+- Set `NODE_ENV=production`, so stack traces aren't sent to clients.
+- Use TLS, and set cookies as `secure` and `httpOnly`.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| TypeScript-first validation | Zod | Runtime cost per request |
+| JSON Schema | Ajv | Separate type generation |
+| Rate limiting | App middleware or gateway | Per-process unless shared |
+
+## Common mistakes
+
+**Validating only on the client.** Attackers call the API directly.
+
+**`origin: "*"` with credentials.** Browsers reject it, and an unconstrained reflection of the origin is dangerous.
+
+**Trusting `X-Forwarded-For` blindly.** Clients can set it unless your last proxy overwrites it.
+
+**Returning error messages from the database.** They reveal table names and queries.
+
+## Interview questions
+
+<Question q="Is CORS a security feature for your API?">
+It protects browsers' users from cross-origin reads, but it doesn't stop direct requests. Authenticate and authorize regardless.
+</Question>
+
+<Question q="Why is 'trust proxy' important?">
+It controls whether forwarded headers are believed. It must match your proxy chain, or `req.ip` and rate limits can be wrong or spoofed.
+</Question>
+
+<Question q="How do you prevent SQL injection?">
+Use parameterized queries so that input is always treated as data, never as SQL.
+</Question>

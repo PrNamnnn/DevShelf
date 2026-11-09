@@ -1,0 +1,89 @@
+---
+title: "Dimensional Modelling, Partitioning and Optimization"
+summary: "Star and snowflake schemas, slowly changing dimensions, partitioning, indexing and query tuning."
+level: intermediate
+section: modeling
+order: 1
+tags: ["star schema","snowflake schema","SCD","partitioning","indexing","query optimization"]
+requires: ["data-engineering/warehouses-lakes-and-lakehouses"]
+related: ["powerbi/star-schema-and-relationships","postgresql/partitioning-and-maintenance","postgresql/explain-analyze"]
+versions: "PostgreSQL 18 for SQL examples"
+tested: "SQL example executed on PGlite (PostgreSQL 18)"
+verified: "2026-11-09"
+docs:
+  - label: "PostgreSQL: Table partitioning"
+    url: "https://www.postgresql.org/docs/current/ddl-partitioning.html"
+  - label: "Star schema"
+    url: "https://learn.microsoft.com/en-us/power-bi/guidance/star-schema"
+---
+
+## What it is
+
+**Dimensional modelling** organizes analytics data into facts and dimensions. A **star schema** has denormalized dimensions, and a **snowflake** normalizes them. **Partitioning** physically divides data so queries can skip what they don't need.
+
+## Why it exists
+
+Well-modelled tables give simple, fast and consistent queries for analysts and BI tools.
+
+## How it works
+
+First declare the **grain**, then identify dimensions and additive facts.
+
+**Slowly changing dimensions** preserve history:
+
+| Type | Behaviour |
+| --- | --- |
+| 1 | Overwrite |
+| 2 | New row with valid-from and valid-to |
+| 3 | Keep a prior-value column |
+
+Partition on a column that queries filter by, generally date. Too many small partitions harm performance. Tuning generally starts with the plan: filter early, reduce data, then check join order and indexes.
+
+## Syntax and key APIs
+
+```sql
+CREATE TEMP TABLE dim_customer (
+  customer_key int PRIMARY KEY, customer_id int, plan text,
+  valid_from date, valid_to date, is_current boolean
+);
+INSERT INTO dim_customer VALUES
+  (1, 77, 'basic', '2025-01-01', '2026-03-01', false),
+  (2, 77, 'pro', '2026-03-01', '9999-12-31', true);
+
+SELECT plan
+FROM dim_customer
+WHERE customer_id = 77 AND DATE '2026-01-15' >= valid_from AND DATE '2026-01-15' < valid_to;
+-- rows: [{"plan":"basic"}]
+```
+
+## Simple example
+
+An order placed in January joins to the customer's basic-plan row, while one placed in April joins the pro-plan row, so history remains accurate.
+
+## Industry examples
+
+Retail star schemas power dashboards, and partitioned event tables by day limit the data scanned and the cost.
+
+## Patterns and best practices
+
+- Use surrogate keys for dimensions.
+- Share conformed dimensions.
+- Partition, then cluster on common filters.
+- Review expensive queries regularly.
+
+## Alternatives and trade-offs
+
+One Big Table designs are simple for BI and costly to update. Data Vault suits auditable integration across many sources.
+
+## Common mistakes
+
+- Undeclared grain.
+- Joining a type 2 dimension without the date range.
+- Partitioning by high-cardinality columns.
+- Functions on partition columns blocking pruning.
+
+## Interview questions
+
+<Question q="What is SCD type 2?">Keeping a new row per change with validity dates, preserving history.</Question>
+
+<Question q="Star vs snowflake?">Star denormalizes dimensions for simple queries. Snowflake normalizes them to reduce redundancy.</Question>

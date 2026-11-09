@@ -1,0 +1,100 @@
+---
+title: "Polynomial Regression, Ridge and Lasso"
+summary: "Model curves, then control complexity with L2 and L1 penalties."
+level: advanced
+section: regression
+order: 6
+tags: ["polynomial regression","Ridge","Lasso","regularization"]
+requires: ["statistics/regression-diagnostics"]
+related: ["machine-learning/bias-variance-and-regularization","statistics/feature-selection-and-pipelines"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Linear models"
+    url: "https://scikit-learn.org/stable/modules/linear_model.html"
+  - label: "scikit-learn: PolynomialFeatures"
+    url: "https://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.PolynomialFeatures.html"
+---
+
+## What it is
+
+**Polynomial regression** adds powers of predictors, keeping the model linear in its coefficients. **Regularization** adds a penalty to coefficients. **Ridge** uses a squared (L2) penalty and **Lasso** uses an absolute (L1) penalty.
+
+## Why it exists
+
+Real relationships curve, but flexible models overfit. With many predictors, ordinary least squares becomes unstable, and penalties trade a little bias for a large reduction in variance.
+
+## How it works
+
+Ridge shrinks coefficients smoothly and handles correlated features by sharing weight among them. Lasso can set coefficients to exactly zero, performing variable selection. **Elastic Net** combines them. α controls penalty strength and should be selected by cross-validation.
+
+Standardize features first, because penalties depend on coefficient scale.
+
+## Intuition and formula
+
+<Formula>Ridge: minimize Σ(yᵢ − ŷᵢ)² + α Σβⱼ²</Formula>
+
+<Formula>Lasso: minimize (1/2n) Σ(yᵢ − ŷᵢ)² + α Σ|βⱼ|</Formula>
+
+## Worked example
+
+Consider 200 customers and 50 features where only three matter. OLS gives nonzero coefficients to all 50. Lasso with α = 0.1 keeps a small subset including the three real ones. Ridge keeps all 50 but makes the irrelevant ones small.
+
+## Python
+
+```python
+import numpy as np
+from sklearn.linear_model import Lasso, LinearRegression, Ridge
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+
+rng = np.random.default_rng(0)
+X = rng.normal(size=(200, 50))
+y = 3 * X[:, 0] - 2 * X[:, 1] + 1.5 * X[:, 2] + rng.normal(0, 1, 200)
+
+ols = LinearRegression().fit(X, y)
+lasso = Lasso(alpha=0.1).fit(X, y)
+ridge = Ridge(alpha=10).fit(X, y)
+
+assert np.sum(np.abs(ols.coef_) > 1e-6) == 50
+assert np.sum(lasso.coef_ != 0) < 25
+assert set(np.flatnonzero(lasso.coef_)) >= {0, 1, 2}
+assert np.abs(ridge.coef_[3:]).mean() < np.abs(ols.coef_[3:]).mean()
+
+x = rng.uniform(-3, 3, (100, 1))
+curve = 2 * x[:, 0] ** 2 + rng.normal(0, 0.5, 100)
+pipe = make_pipeline(PolynomialFeatures(2, include_bias=False), StandardScaler(), LinearRegression())
+assert pipe.fit(x, curve).score(x, curve) > 0.95
+```
+
+<Callout type="note">scikit-learn's Lasso objective divides the squared error by 2n, while Ridge doesn't. The same α value isn't comparable between the two.</Callout>
+
+## Excel or Power BI
+
+Add columns for x² and x³ and use `LINEST`. Regularization isn't built in, so use Python.
+
+## In industry
+
+Regularized linear models are fast, stable baselines for high-dimensional features, including text and marketing data.
+
+## Assumptions and limitations
+
+Polynomial fits behave badly at the edges of the data. Lasso may pick one of several correlated features arbitrarily, and regularized coefficients are biased, which makes classical p-values invalid.
+
+## Common mistakes
+
+- Skipping standardization.
+- Fitting the scaler on all the data before cross-validation.
+- Using high-degree polynomials.
+- Interpreting Lasso's selection as proof of importance.
+
+## Alternatives
+
+Splines and generalized additive models for flexible, controlled curves, and tree ensembles for automatic nonlinearity.
+
+## Interview questions
+
+<Question q="Why can Lasso zero out a coefficient while Ridge can't?">The L1 penalty has a corner at zero, so optimal solutions often land there. L2's penalty gradient vanishes near zero.</Question>
+
+<Question q="Why standardize for regularization?">Otherwise the penalty affects coefficients according to the scale of each feature's units.</Question>

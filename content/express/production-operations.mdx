@@ -1,0 +1,169 @@
+---
+title: "Production Operations"
+summary: "Graceful shutdown, health checks, streaming, logging and scaling, the parts of running Express that tutorials skip."
+level: advanced
+section: production
+order: 20
+tags: [production, graceful-shutdown, health-checks, streams, logging, clustering, compression]
+related: [express/project-structure-and-testing, express/validation-and-security]
+versions: "Node.js 19+ closes idle keep-alive connections in server.close."
+tested: "Shutdown and stream pipeline examples run on Node.js 24.17.0 with Express 5.3.0."
+verified: "2026-11-09"
+docs:
+  - label: "Express: Performance best practices"
+    url: "https://expressjs.com/en/advanced/best-practice-performance.html"
+  - label: "Express: Health checks and graceful shutdown"
+    url: "https://expressjs.com/en/advanced/healthcheck-graceful-shutdown.html"
+  - label: "Node.js: HTTP"
+    url: "https://nodejs.org/api/http.html"
+  - label: "Node.js: Stream"
+    url: "https://nodejs.org/api/stream.html"
+---
+
+## What it is
+
+Production operations cover how a service starts, stops, reports health, handles large payloads and scales.
+
+## Why it exists
+
+Deployments restart processes constantly. Without care, each restart drops in-flight requests, and one large response or crash can affect everyone.
+
+## How it works
+
+Orchestrators send `SIGTERM` before killing a process. A graceful shutdown stops accepting connections, finishes current requests and releases resources, then exits.
+
+<StepFlow
+  title="A rolling deploy of one instance"
+  nodes={["SIGTERM received", "readiness fails", "server.close", "in-flight finish", "close DB pool", "exit"]}
+  steps={[
+    { active: [0], note: "The orchestrator asks the process to stop." },
+    { active: [1], note: "The readiness endpoint starts returning 503, so the load balancer stops sending traffic." },
+    { active: [2], note: "server.close stops new connections. Since Node 19 it also closes idle keep-alive connections." },
+    { active: [3], note: "Active requests are allowed to complete, up to a deadline." },
+    { active: [4], note: "Database pools and other resources close after the HTTP server has drained." },
+    { active: [5], note: "The process exits, and the orchestrator starts routing to the new version." },
+  ]}
+/>
+
+## Syntax and key APIs
+
+| Tool | Purpose |
+| --- | --- |
+| `server.close(cb)` | Stop accepting and drain |
+| `server.closeAllConnections()` | Forcefully close everything |
+| `stream/promises` `pipeline` | Pipe with error handling and cleanup |
+| `cluster`, process manager | One process per core |
+| `compression()` | Gzip at the app level |
+
+## Simple example
+
+```js
+import assert from "node:assert";
+import express from "express";
+
+const app = express();
+let accepting = true;
+
+app.get("/ready", (req, res) => res.sendStatus(accepting ? 200 : 503));
+app.get("/live", (req, res) => res.sendStatus(200));
+
+const server = app.listen(0);
+await new Promise((resolve) => server.once("listening", resolve));
+const url = `http://127.0.0.1:${server.address().port}`;
+
+assert.equal((await fetch(`${url}/ready`)).status, 200);
+accepting = false;
+assert.equal((await fetch(`${url}/ready`)).status, 503);
+
+await new Promise((resolve) => server.close(resolve));
+server.closeAllConnections();
+assert.equal(server.listening, false);
+```
+
+## Industry examples
+
+### Shut down with a deadline
+
+```javascript
+function shutdown(server, pool) {
+  const force = setTimeout(() => server.closeAllConnections(), 10_000);
+
+  server.close(async () => {
+    clearTimeout(force);
+    await pool.end();
+    process.exit(0);
+  });
+}
+
+process.on("SIGTERM", () => shutdown(server, pool));
+```
+
+### Stream large data
+
+`pipeline` destroys all streams when one fails. Plain `.pipe` doesn't forward errors.
+
+```js
+import assert from "node:assert";
+import { Readable, Writable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { createGzip } from "node:zlib";
+
+const chunks = [];
+
+await pipeline(
+  Readable.from(["a".repeat(1000)]),
+  createGzip(),
+  new Writable({
+    write(chunk, encoding, done) {
+      chunks.push(chunk);
+      done();
+    },
+  }),
+);
+
+assert.ok(Buffer.concat(chunks).length < 1000);
+```
+
+### Separate liveness from readiness
+
+Liveness says "restart me if this fails". Readiness says "don't send me traffic right now". If a liveness check depends on the database, a database outage restarts every instance.
+
+## Patterns and best practices
+
+- Run behind a reverse proxy such as Nginx or HAProxy.
+- Use a structured logger such as Pino, because `console.log` is synchronous to terminals and files.
+- Crash on unexpected errors, and let a process manager restart you. Don't use `uncaughtException` to keep running.
+- Put CPU-heavy work in worker threads.
+- Keep state in Redis or a database, because processes don't share memory.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Compression | Reverse proxy | Better at high traffic, more infrastructure |
+| Multi-core | `cluster`, pm2 or containers | No shared memory |
+| Long CPU work | Worker threads or a queue | Added complexity |
+
+## Common mistakes
+
+**Calling `process.exit` immediately on SIGTERM.** In-flight requests are dropped.
+
+**Using `readFile` to serve large files.** The whole file sits in memory. Stream it.
+
+**Leaving `NODE_ENV` unset.** Express then skips view caching and sends verbose errors.
+
+**Continuing after an uncaught exception.** The process state is unknown. Exit and restart.
+
+## Interview questions
+
+<Question q="How does a graceful shutdown work?">
+Handle `SIGTERM`, fail readiness, stop accepting connections, let current requests finish within a deadline, close resources and exit.
+</Question>
+
+<Question q="Liveness versus readiness?">
+Liveness failure causes a restart. Readiness failure only removes the instance from traffic.
+</Question>
+
+<Question q="Why use pipeline instead of pipe?">
+`pipeline` propagates errors and destroys every stream in the chain, preventing leaks.
+</Question>

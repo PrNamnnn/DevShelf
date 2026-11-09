@@ -1,0 +1,104 @@
+---
+title: "Loss Functions, Optimizers and Regularization"
+summary: "Cross-entropy and MSE, SGD through Adam, and dropout, weight decay and early stopping."
+level: advanced
+section: foundations
+order: 3
+tags: ["cross-entropy","SGD","Adam","dropout","batch normalization"]
+requires: ["deep-learning/backpropagation-and-gradient-descent"]
+related: ["machine-learning/bias-variance-and-regularization","machine-learning/roc-pr-and-calibration"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "NumPy examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "PyTorch: Loss functions"
+    url: "https://docs.pytorch.org/docs/stable/nn.html#loss-functions"
+  - label: "PyTorch: torch.optim"
+    url: "https://docs.pytorch.org/docs/stable/optim.html"
+---
+
+## What it is
+
+A **loss** measures prediction error. An **optimizer** decides how to update parameters. **Regularization** improves generalization.
+
+## Why it exists
+
+These choices often have more effect on a training run's success than small architectural changes do.
+
+## How it works
+
+| Task | Output | Loss |
+| --- | --- | --- |
+| Regression | Linear | MSE or Huber |
+| Binary | Logit | Binary cross-entropy with logits |
+| Multi-class | Logits | Cross-entropy |
+
+| Optimizer | Idea |
+| --- | --- |
+| SGD | Mini-batch gradients |
+| Momentum | Accumulate direction |
+| RMSprop | Scale by recent gradient size |
+| Adam | Momentum and per-parameter scaling |
+| AdamW | Adam with decoupled weight decay |
+
+Regularize with weight decay, dropout, data augmentation, early stopping and normalization. Learning-rate schedules are often more valuable than changing the optimizer.
+
+## Intuition and formula
+
+<Formula>CE = − Σ yₖ log pₖ</Formula>
+
+<Formula>m ← βm + (1 − β)g, s ← β₂s + (1 − β₂)g²</Formula>
+
+## Worked example
+
+Predicting 0.7 for the true class costs −ln(0.7) = 0.357. Predicting 0.01 costs 4.605. Minimizing a bowl-shaped function f(w) = w² from w = 5, plain SGD and Adam both converge toward 0.
+
+## Python
+
+```python
+import math
+
+assert round(-math.log(0.7), 3) == 0.357
+assert round(-math.log(0.01), 3) == 4.605
+
+def adam(steps, lr=0.1, b1=0.9, b2=0.999, eps=1e-8):
+    w, m, s = 5.0, 0.0, 0.0
+    for t in range(1, steps + 1):
+        g = 2 * w
+        m = b1 * m + (1 - b1) * g
+        s = b2 * s + (1 - b2) * g**2
+        w -= lr * (m / (1 - b1**t)) / (math.sqrt(s / (1 - b2**t)) + eps)
+    return w
+
+w = 5.0
+for _ in range(500):
+    w -= 0.1 * 2 * w
+
+assert abs(w) < 1e-6
+assert abs(adam(800)) < 0.2
+```
+
+## In industry
+
+AdamW with a schedule is a common starting point for transformers, and SGD with momentum remains strong for vision.
+
+## Assumptions and limitations
+
+Best settings depend on problem, batch size and architecture, and defaults are starting points.
+
+## Common mistakes
+
+- Softmax combined with a logits-based loss.
+- Leaving dropout on during evaluation.
+- Applying weight decay incorrectly with Adam.
+- Changing many settings at once.
+
+## Alternatives
+
+Label smoothing and mixup are further regularizers, and focal loss helps with extreme imbalance.
+
+## Interview questions
+
+<Question q="Why cross-entropy for classification?">It's the negative log-likelihood of a categorical model, with useful gradients on confident mistakes.</Question>
+
+<Question q="What does dropout do?">It randomly zeros activations during training, discouraging co-adaptation.</Question>

@@ -1,0 +1,170 @@
+---
+title: "Routing, Requests and Responses"
+summary: "How Express matches URLs, what request and response objects provide, and how Express 5 changed path syntax."
+level: fundamental
+section: http
+order: 10
+tags: [routing, request, response, params, query, router, express-5, basics]
+related: [express/middleware-and-error-handling, express/validation-and-security]
+versions: "Express 5 requires Node.js 18 or higher."
+tested: "Express 5.3.0 on Node.js 24.17.0"
+verified: "2026-11-09"
+docs:
+  - label: "Express: Routing"
+    url: "https://expressjs.com/en/guide/routing.html"
+  - label: "Express 5 API: Request"
+    url: "https://expressjs.com/en/5x/api/request/"
+  - label: "Express 5 API: Response"
+    url: "https://expressjs.com/en/5x/api/response/"
+  - label: "Express 5 API: Router"
+    url: "https://expressjs.com/en/5x/api/router/"
+---
+
+## What it is
+
+Express is a minimal Node.js web framework. A route combines an HTTP method, a path and one or more handlers. `req` describes the incoming request and `res` sends the response.
+
+## Why it exists
+
+Node's built-in `http` module provides raw requests. Express adds routing, parameter parsing, response helpers and a middleware pipeline.
+
+## How it works
+
+Express compares each request with its routes in registration order, using path-to-regexp v8. The first handler that ends the response wins.
+
+| Path | Matches | Result |
+| --- | --- | --- |
+| `/users/:id` | `/users/7` | `req.params.id` is `"7"` |
+| `/files/*splat` | `/files/a/b` | `req.params.splat` is `["a","b"]` |
+| `/{*splat}` | Also the root | Named wildcard |
+| `/order{/:id}` | With or without id | Optional segment |
+
+Regular-expression syntax inside string paths, such as `:id(\d+)`, isn't supported in Express 5. Use a regex route, or validate the parameter.
+
+## Syntax and key APIs
+
+| API | Purpose |
+| --- | --- |
+| `req.params` | Route parameters |
+| `req.query` | Query string, a read-only getter |
+| `req.body` | Parsed body, `undefined` without a parser |
+| `req.get(name)` | Header, case-insensitive |
+| `res.status(code)` | Chainable status setter |
+| `res.json(value)` | Send JSON |
+| `res.send(value)` | String, object or Buffer |
+| `res.sendStatus(code)` | Status and its message |
+| `res.redirect(url)` | Redirect |
+
+All values from `req` are untrusted input.
+
+## Simple example
+
+```js
+import assert from "node:assert";
+import express from "express";
+import request from "supertest";
+
+const app = express();
+
+app.get("/users/:id", (req, res) => {
+  res.json({ id: req.params.id, sort: req.query.sort });
+});
+
+const response = await request(app).get("/users/7?sort=asc");
+
+assert.equal(response.status, 200);
+assert.deepEqual(response.body, { id: "7", sort: "asc" });
+```
+
+## Industry examples
+
+### Split resources with Router
+
+Child routers don't see parent parameters unless `mergeParams` is set.
+
+```js
+import assert from "node:assert";
+import express from "express";
+import request from "supertest";
+
+const comments = express.Router({ mergeParams: true });
+comments.get("/", (req, res) => res.json({ post: req.params.postId }));
+
+const posts = express.Router();
+posts.use("/:postId/comments", comments);
+
+const app = express();
+app.use("/posts", posts);
+
+const response = await request(app).get("/posts/9/comments");
+assert.deepEqual(response.body, { post: "9" });
+```
+
+### Group methods on one path
+
+```js
+import assert from "node:assert";
+import express from "express";
+import request from "supertest";
+
+const app = express();
+
+app.route("/items")
+  .get((req, res) => res.json([]))
+  .post((req, res) => res.sendStatus(201));
+
+assert.equal((await request(app).post("/items")).status, 201);
+```
+
+### Serve a download safely
+
+User-controlled paths are dangerous. Use the `root` option, so that files stay inside one folder.
+
+```javascript
+app.get("/reports/:name", (req, res, next) => {
+  res.download(req.params.name, { root: "/srv/reports" }, (error) => {
+    if (error && !res.headersSent) next(error);
+  });
+});
+```
+
+## Patterns and best practices
+
+- Keep route handlers thin and call into service functions.
+- Use nouns for resources and HTTP methods for actions.
+- Return accurate status codes.
+- Parse and validate `req.params` values, which are always strings.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Minimal API | Express | You add validation yourself |
+| Schema-first performance | Fastify | Different plugin model |
+| Full-stack React app | Next.js Route Handlers | Tied to the framework |
+
+## Common mistakes
+
+**Registering a generic route first.** `/users/:id` before `/users/me` captures `me`.
+
+**Sending two responses.** Once a response is sent, a later `res.json` throws.
+
+**Using an old wildcard.** `/*` must be named: `/*splat`.
+
+**Writing to `req.query`.** It's a getter in Express 5.
+
+**Assuming nested query parsing.** The default parser is now `simple`, so `a[b]=1` stays the key `a[b]`.
+
+## Interview questions
+
+<Question q="What is the difference between req.params and req.query?">
+`req.params` comes from named path segments. `req.query` comes from the query string.
+</Question>
+
+<Question q="How do route order and matching work?">
+Express checks routes in the order they were registered and runs the first that matches until something ends the response.
+</Question>
+
+<Question q="What does mergeParams do?">
+It makes the parent router's parameters available in a child router.
+</Question>

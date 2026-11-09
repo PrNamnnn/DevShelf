@@ -1,0 +1,97 @@
+---
+title: "Multiple Linear Regression"
+summary: "Control for several predictors, read coefficients correctly, use adjusted R², interactions and dummy variables."
+level: intermediate
+section: regression
+order: 3
+tags: ["multiple regression","adjusted R squared","dummy variables","interactions"]
+requires: ["statistics/simple-linear-regression"]
+related: ["statistics/regression-diagnostics","statistics/polynomial-and-regularization","statistics/encoding-categoricals"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "statsmodels: Formula API"
+    url: "https://www.statsmodels.org/stable/example_formulas.html"
+  - label: "statsmodels: RegressionResults"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.regression.linear_model.RegressionResults.html"
+---
+
+## What it is
+
+Multiple regression estimates an outcome from several predictors. Each coefficient is the expected change in y for a one-unit change in that predictor, **holding the others constant**.
+
+## Why it exists
+
+Outcomes have several drivers, and predictors overlap. Regression can separate their associations, and it's the workhorse for adjusting comparisons.
+
+## How it works
+
+- Categorical predictors become **dummy variables**, with one level dropped as a reference.
+- An **interaction** term x₁·x₂ lets the effect of x₁ depend on x₂.
+- **Adjusted R²** penalizes additional predictors, while plain R² can only increase.
+- The overall **F-test** asks whether the predictors jointly explain anything.
+- Adjust only for pre-treatment confounders. Controlling for a mediator or a collider can bias results.
+
+## Intuition and formula
+
+<Formula>ŷ = β₀ + β₁x₁ + … + βₖxₖ</Formula>
+
+<Formula>adjusted R² = 1 − (1 − R²)(n − 1) / (n − k − 1)</Formula>
+
+## Worked example
+
+Simulated spend on 500 customers against visits, tenure and discount gives coefficients 2.80, 1.59 and −9.32, with R² = 0.860 and adjusted R² = 0.860. One extra visit, holding tenure and discount constant, relates to ₹2.80 more spend. The true values were 3, 1.5 and −10, so the regression has recovered them.
+
+## Python
+
+```python
+import numpy as np
+import pandas as pd
+import statsmodels.formula.api as smf
+
+rng = np.random.default_rng(7)
+n = 500
+visits = rng.normal(20, 5, n)
+tenure = visits * 0.8 + rng.normal(0, 2, n)
+discount = rng.uniform(0, 1, n)
+spend = 50 + 3 * visits + 1.5 * tenure - 10 * discount + rng.normal(0, 8, n)
+data = pd.DataFrame({"spend": spend, "visits": visits, "tenure": tenure, "discount": discount})
+
+model = smf.ols("spend ~ visits + tenure + discount", data).fit()
+assert round(model.params["visits"], 2) == 2.80
+assert round(model.rsquared, 3) == 0.860
+
+data["plan"] = rng.choice(["basic", "pro"], n)
+with_plan = smf.ols("spend ~ visits * C(plan)", data).fit()
+assert "visits:C(plan)[T.pro]" in with_plan.params.index
+```
+
+## Excel or Power BI
+
+`LINEST` and the Data Analysis ToolPak's Regression tool handle up to 16 predictors. Power BI isn't a regression tool, so fit the model elsewhere and bring in the results.
+
+## In industry
+
+Used for pricing analysis, marketing attribution inputs, wage studies, and adjusting experiments for covariates.
+
+## Assumptions and limitations
+
+Beyond the usual assumptions, "holding others constant" may be unrealistic when predictors are strongly related, and omitted variables bias the coefficients.
+
+## Common mistakes
+
+- Reading coefficients causally from observational data.
+- Comparing raw coefficients on different scales.
+- Forgetting the reference category.
+- Adding every available column.
+
+## Alternatives
+
+Regularized regression for many predictors, tree ensembles for automatic interactions, and generalized linear models for counts or binary outcomes.
+
+## Interview questions
+
+<Question q="What does 'holding others constant' mean?">The coefficient estimates the association after accounting for the linear relationship of the other predictors in the model.</Question>
+
+<Question q="Why use adjusted R²?">Plain R² never decreases as you add predictors, while adjusted R² penalizes additions that contribute too little.</Question>

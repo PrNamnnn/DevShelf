@@ -1,0 +1,82 @@
+---
+title: "Replication and Sharding"
+summary: "Replica sets for availability, sharded clusters for scale, read preferences, and how to choose a shard key."
+level: advanced
+section: distributed
+order: 2
+tags: ["replication","replica set","sharding","shard key","read preference"]
+requires: ["mongodb/transactions"]
+related: ["mongodb/atlas-security-and-production","postgresql/security-backup-and-replication"]
+versions: "Documentation for MongoDB 9.0"
+tested: "Concepts checked against MongoDB documentation. Multi-node failover and sharding weren't run"
+verified: "2026-11-09"
+docs:
+  - label: "MongoDB: Replication"
+    url: "https://www.mongodb.com/docs/manual/replication/"
+  - label: "MongoDB: Elections"
+    url: "https://www.mongodb.com/docs/manual/core/replica-set-elections/"
+  - label: "MongoDB: Sharding"
+    url: "https://www.mongodb.com/docs/manual/sharding/"
+  - label: "MongoDB: Choose a shard key"
+    url: "https://www.mongodb.com/docs/manual/core/sharding-choose-a-shard-key/"
+  - label: "MongoDB: Read preference"
+    url: "https://www.mongodb.com/docs/manual/core/read-preference/"
+---
+
+## What it is
+
+A **replica set** holds copies of data on several servers for high availability. **Sharding** partitions data across shards for horizontal scale.
+
+## Why it exists
+
+One server is a single point of failure and has limited capacity.
+
+## How it works
+
+A replica set has one primary accepting writes, with secondaries replicating through the oplog. Members exchange heartbeats every 2 seconds. If a primary is unavailable beyond the election timeout, 10 seconds by default, an eligible secondary may become primary. A set can have up to 50 members and 7 voters.
+
+A sharded cluster consists of shards (each a replica set), `mongos` routers and config servers.
+
+A **shard key** determines placement. A good key has high cardinality, low frequency and non-monotonic values. Monotonic keys like timestamps send all inserts to one shard, unless hashed. Queries without the shard key must **scatter-gather** across all shards.
+
+Reshard online from version 5.0, and `analyzeShardKey` is available from 7.0.
+
+## Syntax and key APIs
+
+```text
+rs.status()
+sh.shardCollection("shop.orders", { customerId: "hashed" })
+readPreference: primary | primaryPreferred | secondary | secondaryPreferred | nearest
+```
+
+## Simple example
+
+A SaaS application shards on `{ tenantId: 1, _id: 1 }`, so one tenant's queries route to a limited set of shards while inserts spread over tenants.
+
+## Industry examples
+
+Multi-region deployments place secondaries near users for reads, using zone sharding for data residency rules.
+
+## Patterns and best practices
+
+- Use an odd number of voters across failure zones.
+- Set `retryWrites` and `w: "majority"`.
+- Exhaust vertical scaling and index tuning first.
+- Include the shard key in common queries.
+
+## Alternatives and trade-offs
+
+Non-primary reads reduce primary load, but may be stale. Sharding adds operational complexity, and it's rarely necessary early on.
+
+## Common mistakes
+
+- Treating replication as a backup.
+- Picking a monotonic shard key.
+- Reading from secondaries when up-to-date data is required.
+- Sharding before it's justified.
+
+## Interview questions
+
+<Question q="What makes a good shard key?">High cardinality, even distribution and alignment with common queries.</Question>
+
+<Question q="What happens if the primary fails?">Eligible secondaries hold an election, and drivers with retryable writes reconnect to the new primary.</Question>

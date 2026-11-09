@@ -1,0 +1,106 @@
+---
+title: "A/B Testing Foundations"
+summary: "Control, treatment and randomization, why experiments support causal claims, and the anatomy of a trustworthy test."
+level: intermediate
+section: experimentation
+order: 1
+tags: ["A/B testing","randomization","control","treatment","causal inference"]
+requires: ["statistics/hypothesis-testing-logic"]
+related: ["statistics/sampling-and-bias","statistics/experiment-design-and-metrics","statistics/correlation-and-causation"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "NIST: Design of experiments"
+    url: "https://www.itl.nist.gov/div898/handbook/pri/pri.htm"
+  - label: "statsmodels: Statistics"
+    url: "https://www.statsmodels.org/stable/stats.html"
+---
+
+## What it is
+
+An A/B test randomly assigns units such as users to a **control** experience or to a **treatment** and compares an outcome. Randomization makes the groups comparable, so a difference larger than chance can be attributed to the change.
+
+## Why it exists
+
+Before-and-after comparisons confuse a change with seasonality, marketing and news. Users who adopt a feature differ from those who don't, so comparing them measures selection. Randomization balances known and unknown factors in expectation.
+
+## How it works
+
+<LanesViz
+  title="How a user enters an experiment"
+  actors={["User", "Assignment", "Product", "Analysis"]}
+  steps={[
+    { from: 0, to: 1, label: "request", note: "A stable user ID enters the assignment service. Hashing the ID with the experiment name picks a bucket, so a user always gets the same variant and experiments stay independent." },
+    { from: 1, to: 2, label: "variant", note: "The product renders control or treatment." },
+    { from: 2, to: 3, label: "exposure event", note: "Log who actually saw the variant, at the moment they could be affected." },
+    { from: 2, to: 3, label: "outcomes", note: "Join outcomes only after each user's exposure." }
+  ]}
+/>
+
+Choose the **unit of randomization** carefully. Users are the default. Sessions can let one person see both versions. Marketplaces and social products may need cluster or geography randomization, because one user's treatment can affect another, which violates independence.
+
+## Intuition and formula
+
+For any unit, the causal effect is the difference between two outcomes, only one of which can ever be observed. Randomization allows us to estimate the average effect:
+
+<Formula>ATE = E[Y(1)] − E[Y(0)] ≈ ȳ_treatment − ȳ_control</Formula>
+
+## Worked example
+
+A shop tests free shipping over ₹999 versus the existing ₹1,499 threshold. Users are randomized 50/50 by hashed ID. The primary metric is revenue per exposed user. Average order value may fall, but if conversion rises enough, total revenue increases. Exposure begins when a user sees the cart, so people who never reach it don't dilute the result.
+
+## Python
+
+```python
+import hashlib
+
+def assign(user_id: str, experiment: str) -> str:
+    digest = hashlib.sha256(f"{experiment}:{user_id}".encode()).hexdigest()
+    return "treatment" if int(digest[:8], 16) % 2 else "control"
+
+assert assign("u-42", "free-shipping") == assign("u-42", "free-shipping")
+
+groups = [assign(f"u-{i}", "free-shipping") for i in range(20_000)]
+share = groups.count("treatment") / len(groups)
+assert 0.48 < share < 0.52
+```
+
+## SQL
+
+```sql
+SELECT variant, count(*) AS users
+FROM (
+  SELECT CASE WHEN ('x' || substr(md5('exp1:' || g), 1, 8))::bit(32)::bigint % 2 = 0
+              THEN 'control' ELSE 'treatment' END AS variant
+  FROM generate_series(1, 10000) AS g
+) AS a
+GROUP BY variant
+HAVING count(*) BETWEEN 4800 AND 5200
+ORDER BY variant;
+```
+
+## In industry
+
+Large technology companies run thousands of experiments a year. Most ideas don't move metrics in the expected direction, which is why testing matters. Experimentation platforms handle assignment, logging, analysis and guardrails.
+
+## Assumptions and limitations
+
+The stable unit treatment value assumption says one unit's outcome isn't affected by another's assignment, and that fails in networks and marketplaces. Tests also measure short-term effects in the population that was exposed.
+
+## Common mistakes
+
+- Assigning by a user property, such as an even or odd account number from an old process.
+- Letting users switch variants.
+- Analyzing everyone instead of exposed users, which dilutes effects.
+- Excluding users after assignment based on behaviour that the treatment could affect.
+
+## Alternatives
+
+Difference-in-differences, synthetic control, regression discontinuity and matching can estimate effects when randomization is impossible, each with assumptions that need defending. Multi-armed bandits shift traffic to winners, optimizing during the test at some cost to inference.
+
+## Interview questions
+
+<Question q="Why do we randomize?">To make groups comparable on everything, measured or not, so differences can be attributed to the treatment apart from random chance.</Question>
+
+<Question q="What is the risk in analyzing by session when randomizing by user?">Sessions from one user are correlated, so standard errors are understated and false positives rise.</Question>

@@ -1,0 +1,154 @@
+---
+title: "T-SQL and SSMS Essentials"
+summary: "The core of daily SQL Server work: creating tables, querying data, data types, paging, and using SQL Server Management Studio well."
+level: fundamental
+section: foundations
+order: 10
+tags: [t-sql, ssms, select, data-types, identity, offset-fetch, basics]
+related: [sqlserver/joins-apply-and-set-operations, postgresql/schema-types-and-constraints]
+versions: "SQL Server 2025 (17.x) and SSMS 22. Several examples work on older versions."
+tested: "SQL Server 2025 Developer Edition, using temporary tables"
+verified: "2026-11-09"
+docs:
+  - label: "SSMS documentation"
+    url: "https://learn.microsoft.com/en-us/ssms/"
+  - label: "T-SQL: SELECT"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/queries/select-transact-sql"
+  - label: "T-SQL: ORDER BY with OFFSET FETCH"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/queries/select-order-by-clause-transact-sql"
+  - label: "What's new in SQL Server 2025"
+    url: "https://learn.microsoft.com/en-us/sql/sql-server/what-s-new-in-sql-server-2025"
+---
+
+## What it is
+
+T-SQL is Microsoft's dialect of SQL for SQL Server and Azure SQL. SQL Server Management Studio (SSMS) is the primary tool for writing queries and administering servers.
+
+## Why it exists
+
+T-SQL extends standard SQL with variables, control flow, error handling and engine-specific features. SSMS combines an editor, object browser and plan viewer.
+
+## How it works
+
+A script is divided into **batches** by `GO`, which is a tool command rather than T-SQL. Each batch is compiled and sent separately, so a variable doesn't survive past `GO`. Temporary tables starting with `#` last for the session.
+
+| Need | Type | Note |
+| --- | --- | --- |
+| Unicode text | `nvarchar(n)` | Two bytes per character in UCS-2 terms |
+| ASCII-range text | `varchar(n)` | Depends on collation |
+| Exact decimals | `decimal(p,s)` | Use for money |
+| Date and time | `datetime2` | Better precision than `datetime` |
+| With offset | `datetimeoffset` | Stores time-zone offset |
+| Documents | `json` | SQL Server 2025 |
+
+## Syntax and key APIs
+
+```sql
+CREATE TABLE #customers (
+  id int IDENTITY(1,1) PRIMARY KEY,
+  email nvarchar(255) NOT NULL UNIQUE,
+  created_at datetime2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+INSERT #customers (email) VALUES (N'ada@example.com'), (N'bo@example.com');
+
+SELECT COUNT(*) FROM #customers;
+-- output: 2
+```
+
+| SSMS action | Purpose |
+| --- | --- |
+| Query, Include Actual Execution Plan | Show the plan after running |
+| Object Explorer | Browse databases and objects |
+| Query Store reports | Find regressed queries |
+| Activity Monitor | See blocking and expensive queries |
+
+## Simple example
+
+```sql
+DECLARE @pattern nvarchar(10) = N'ada%';
+
+SELECT email FROM #customers WHERE email LIKE @pattern;
+-- output: ada@example.com
+```
+
+## Industry examples
+
+### Page results
+
+`OFFSET` and `FETCH` require `ORDER BY`. Use a unique sort for stable pages.
+
+```sql
+CREATE TABLE #items (id int PRIMARY KEY, name varchar(20));
+INSERT #items VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd');
+
+SELECT name FROM #items
+ORDER BY id
+OFFSET 2 ROWS FETCH NEXT 1 ROWS ONLY;
+-- output: c
+```
+
+### Capture changed rows with OUTPUT
+
+```sql
+UPDATE #items SET name = 'z'
+OUTPUT deleted.name, inserted.name
+WHERE id = 1;
+-- output: a|z
+```
+
+### Use new T-SQL in SQL Server 2025
+
+Native JSON and regular expressions are available, the latter at compatibility level 170.
+
+```sql
+DECLARE @doc json = N'{"name":"Ada"}';
+SELECT JSON_VALUE(@doc, '$.name');
+-- output: Ada
+```
+
+```sql
+SELECT CASE WHEN REGEXP_LIKE('ab12', '^[a-z]+[0-9]+$') THEN 'match' ELSE 'no' END;
+-- output: match
+```
+
+## Patterns and best practices
+
+- Always schema-qualify objects, for example `dbo.Orders`.
+- Use `N''` prefixes for Unicode literals.
+- Prefer `datetime2` and `SYSUTCDATETIME()` for new columns.
+- Use parameters, never string concatenation, in application queries.
+- End statements with semicolons.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Admin on Windows | SSMS | Windows only |
+| Cross-platform scripting | `sqlcmd` | No visual plans |
+| Deep pages | Keyset pagination | Can't jump to a page |
+| Offset pages | `OFFSET FETCH` | Slows with large offsets |
+
+## Common mistakes
+
+**Assuming `GO` is T-SQL.** It's a batch separator for tools, and variables don't cross it.
+
+**Storing user text in `varchar`.** Characters outside the collation can be lost.
+
+**Using `SELECT *` with `INSERT`.** A column change breaks it or shifts values.
+
+**Treating `NULL` with `=`.** Use `IS NULL`.
+
+## Interview questions
+
+<Question q="What does GO do?">
+It's a client-side batch separator. The statements before it are sent to the server as one batch.
+</Question>
+
+<Question q="datetime versus datetime2?">
+`datetime2` has a larger range and higher precision, and is recommended for new work.
+</Question>
+
+<Question q="What is a batch?">
+A group of T-SQL statements sent and compiled together. Local variables exist only within a batch.
+</Question>

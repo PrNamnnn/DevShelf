@@ -1,0 +1,97 @@
+---
+title: "Logistic Regression"
+summary: "Model binary outcomes such as churn, interpret odds ratios and connect probability predictions to decisions."
+level: advanced
+section: regression
+order: 5
+tags: ["logistic regression","odds ratio","churn","classification"]
+requires: ["statistics/multiple-linear-regression"]
+related: ["machine-learning/classification-metrics","machine-learning/roc-pr-and-calibration","statistics/conversion-retention-churn"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "statsmodels: Logit"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.discrete.discrete_model.Logit.html"
+  - label: "scikit-learn: LogisticRegression"
+    url: "https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html"
+---
+
+## What it is
+
+Logistic regression models the probability of a binary outcome. It's linear on the log-odds scale and passes through a logistic function to produce values between 0 and 1.
+
+## Why it exists
+
+A linear model can predict probabilities below 0 or above 1. Logistic regression stays in range and gives interpretable, multiplicative effects.
+
+## How it works
+
+Odds are p/(1 − p), so a probability of 0.75 means odds of 3. A coefficient β adds β to the log-odds per unit increase, which multiplies the odds by exp(β), called the **odds ratio**.
+
+An odds ratio doesn't equal a change in probability, since that change depends on the starting point. Report marginal effects or example predictions.
+
+Fitting uses maximum likelihood. Deviance, AIC and log-loss evaluate fit, and a separate threshold turns a probability into a decision.
+
+## Intuition and formula
+
+<Formula>log(p / (1 − p)) = β₀ + β₁x₁ + … + βₖxₖ</Formula>
+
+<Formula>p = 1 / (1 + exp(−(β₀ + β₁x₁ + …)))</Formula>
+
+## Worked example
+
+A churn simulation fits an intercept of −0.386, tenure of −0.083 and price of +0.031. Each extra month of tenure multiplies churn odds by 0.920, an 8% reduction. Each extra ₹1 of price multiplies odds by 1.031. For a customer with 12 months' tenure paying ₹60, the log-odds are 0.45, so the churn probability is about 61%.
+
+## Python
+
+```python
+import numpy as np
+import pandas as pd
+import statsmodels.formula.api as smf
+
+rng = np.random.default_rng(21)
+n = 3_000
+tenure = rng.integers(1, 60, n)
+price = rng.uniform(20, 100, n)
+p = 1 / (1 + np.exp(-(-0.5 - 0.08 * tenure + 0.03 * price)))
+churn = rng.binomial(1, p)
+data = pd.DataFrame({"churn": churn, "tenure": tenure, "price": price})
+
+model = smf.logit("churn ~ tenure + price", data).fit(disp=0)
+odds = np.exp(model.params)
+assert 0.90 < odds["tenure"] < 0.94
+assert 1.02 < odds["price"] < 1.04
+
+predicted = model.predict(pd.DataFrame({"tenure": [12], "price": [60.0]}))
+assert 0.4 < float(predicted.iloc[0]) < 0.8
+```
+
+## Excel or Power BI
+
+Excel can fit a logistic regression using Solver to maximize a log-likelihood column. In practice, fit the model in Python and report the scores in Excel or Power BI.
+
+## In industry
+
+Credit scoring, churn prediction and conversion modelling rely on it because it's fast, well understood and auditable. It's a strong baseline for complicated models.
+
+## Assumptions and limitations
+
+Linearity in log-odds, independent observations, and limited perfect separation. It can't capture interactions you don't specify.
+
+## Common mistakes
+
+- Reading odds ratios as probability ratios.
+- Using accuracy on imbalanced outcomes.
+- Forgetting to scale before regularized fits.
+- Causal interpretation of coefficients on observational data.
+
+## Alternatives
+
+Gradient-boosted trees for nonlinear patterns, probit models for a normal link, and survival models when timing matters.
+
+## Interview questions
+
+<Question q="What does an odds ratio of 1.5 mean?">A one-unit increase multiplies the odds by 1.5. The change in probability depends on the baseline.</Question>
+
+<Question q="Why not linear regression for churn?">It can produce impossible probabilities and its error assumptions don't fit a binary outcome.</Question>

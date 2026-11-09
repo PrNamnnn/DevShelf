@@ -1,0 +1,122 @@
+---
+title: "Analyzing Conversion Experiments"
+summary: "A complete conversion A/B test from sanity checks through the two-proportion test, confidence interval and business translation."
+level: intermediate
+section: experimentation
+order: 4
+tags: ["conversion","two-proportion test","A/B analysis","guardrails"]
+requires: ["statistics/z-tests","statistics/sample-size-and-duration"]
+related: ["statistics/srm-and-aa-tests","statistics/interpreting-experiments"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "statsmodels: confint_proportions_2indep"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.stats.proportion.confint_proportions_2indep.html"
+  - label: "statsmodels: proportions_ztest"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.stats.proportion.proportions_ztest.html"
+---
+
+## What it is
+
+This lesson walks through the full analysis of a feature experiment with a binary primary metric and a guardrail.
+
+## Why it exists
+
+Getting a p-value is one step of many. Reliable analysis first confirms the experiment ran correctly and afterwards turns the statistical result into a decision.
+
+## How it works
+
+Follow the same sequence every time:
+
+1. Check sample ratio and event logging.
+2. Compute the primary metric per randomized unit.
+3. Run the planned test and compute a confidence interval.
+4. Check guardrails.
+5. Examine secondary metrics to understand the mechanism.
+6. Translate the result into business terms and decide.
+
+## Worked example
+
+**Experiment: guided onboarding.** Users are randomized 50/50, 20,000 per group. Sample ratio is exactly as planned.
+
+| Metric | Control | Treatment | p-value |
+| --- | --- | --- | --- |
+| Activation (primary) | 3,200 (16.0%) | 3,520 (17.6%) | 0.00002 |
+| Support contact (guardrail) | 300 (1.5%) | 340 (1.7%) | 0.11 |
+
+Activation increases by 1.6 points, a 10% relative lift, with an unpooled 95% CI of about 0.87 to 2.33 points, z = 4.28. The guardrail rises by 0.2 points and is not significant, but "not significant" doesn't mean safe. Its 95% CI runs from about −0.05 to +0.45 points, so the team should compare the upper end to its allowed margin. If the margin is +0.5 points, the guardrail passes.
+
+Translation: at 100,000 new users per month, a 1.6-point lift means about 1,600 additional activations, with a plausible range of 870 to 2,330.
+
+## Python
+
+```python
+import numpy as np
+from statsmodels.stats.proportion import proportions_ztest
+
+z, p = proportions_ztest([3_520, 3_200], [20_000, 20_000])
+assert (round(z, 2), round(p, 5)) == (4.28, 0.00002)
+
+def diff_ci(a, b, n):
+    pa, pb = a / n, b / n
+    se = np.sqrt(pa * (1 - pa) / n + pb * (1 - pb) / n)
+    return pa - pb - 1.96 * se, pa - pb + 1.96 * se
+
+low, high = diff_ci(3_520, 3_200, 20_000)
+assert (round(low * 100, 2), round(high * 100, 2)) == (0.87, 2.33)
+
+_, guard_p = proportions_ztest([340, 300], [20_000, 20_000])
+assert round(guard_p, 2) == 0.11
+glow, ghigh = diff_ci(340, 300, 20_000)
+assert ghigh < 0.005
+```
+
+## SQL
+
+```sql
+WITH events(user_id, variant, converted) AS (
+  VALUES (1,'c',0),(2,'c',1),(2,'c',1),(3,'t',1),(4,'t',0),(5,'t',1),(6,'c',0)
+), per_user AS (
+  SELECT user_id, variant, max(converted) AS converted
+  FROM events
+  GROUP BY user_id, variant
+)
+SELECT variant, count(*) AS users, sum(converted) AS conversions,
+       round(avg(converted), 3) AS rate
+FROM per_user
+GROUP BY variant
+ORDER BY variant;
+-- rows: [{"variant":"c","users":3,"conversions":1,"rate":"0.333"},{"variant":"t","users":3,"conversions":2,"rate":"0.667"}]
+```
+
+Aggregating to one row per user first prevents counting repeat events.
+
+## Excel or Power BI
+
+A compact Excel template holds users and conversions per variant, then computes rates, pooled standard error, z with `ABS`, p with `NORM.S.DIST`, and interval bounds. In Power BI, build the same as measures and refresh them from the event model.
+
+## In industry
+
+Automated scorecards produce these tables for every test, but reviewers still inspect exposure logic and whether metric movements tell a coherent story.
+
+## Assumptions and limitations
+
+Results describe the tested users during the tested period. An interval is only valid under the plan that was followed. Secondary metrics are for explanation unless corrected for multiplicity.
+
+## Common mistakes
+
+- Treating a non-significant guardrail as proof of no harm.
+- Using the pooled standard error for the interval.
+- Counting conversion events instead of users.
+- Declaring relative lift without the base rate.
+
+## Alternatives
+
+Logistic regression adjusts for pre-experiment covariates. Bayesian analysis reports the probability that treatment beats control, and an expected loss.
+
+## Interview questions
+
+<Question q="A guardrail didn't move significantly. Is it safe?">Not automatically. Check whether its confidence interval excludes harm beyond the allowed margin.</Question>
+
+<Question q="What do you check before reading results?">Sample ratio, logging health, exposure definition, experiment dates and any overlap with other launches.</Question>

@@ -1,0 +1,104 @@
+---
+title: "Cohort Analysis and Retention Curves"
+summary: "Group users by when they started, read a cohort triangle and identify whether retention is stabilizing."
+level: intermediate
+section: business
+order: 5
+tags: ["cohort analysis","retention curve","triangle"]
+requires: ["statistics/conversion-retention-churn"]
+related: ["statistics/specialized-analyses","statistics/analyzing-continuous-and-retention-metrics","postgresql/aggregates-windows-and-ctes"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "PostgreSQL: Date/Time functions"
+    url: "https://www.postgresql.org/docs/current/functions-datetime.html"
+  - label: "pandas: pivot_table"
+    url: "https://pandas.pydata.org/docs/reference/api/pandas.pivot_table.html"
+---
+
+## What it is
+
+A **cohort** is a group sharing a start event in a time period, such as users who signed up in March. A **retention curve** plots how much of a cohort remains active at each age.
+
+## Why it exists
+
+Aggregate active users mix old and new customers, so rapid acquisition can hide worsening retention. Cohorts separate product changes from growth.
+
+## How it works
+
+Build a triangle with cohorts in rows, age in columns and retained percentage as values. Read it three ways: across a row (how one cohort decays), down a column (whether newer cohorts do better at the same age), and diagonals (a calendar effect such as an outage).
+
+A healthy curve flattens, indicating a retained core. A curve that heads to zero suggests a poor product fit.
+
+## Worked example
+
+| Cohort | Month 0 | Month 1 | Month 2 |
+| --- | --- | --- | --- |
+| Jan | 100% | 40% | 30% |
+| Feb | 100% | 45% | 35% |
+| Mar | 100% | 50% | |
+
+Later cohorts retain better at the same age, so the product is improving. March has no month 2 yet, and it must stay blank, not zero.
+
+## Python
+
+```python
+import pandas as pd
+
+activity = pd.DataFrame({
+    "user": ["a", "a", "b", "b", "c", "d"],
+    "cohort": ["Jan", "Jan", "Jan", "Jan", "Jan", "Feb"],
+    "age": [0, 1, 0, 2, 0, 0],
+})
+counts = activity.pivot_table(index="cohort", columns="age", values="user", aggfunc="nunique")
+retention = counts.div(counts[0], axis=0)
+
+assert round(retention.loc["Jan", 1], 3) == 0.333
+assert pd.isna(retention.loc["Feb", 1])
+```
+
+## SQL
+
+```sql
+WITH a(user_id, activity_month) AS (
+  VALUES (1, 0), (1, 1), (2, 0), (2, 2), (3, 0), (4, 1), (4, 2)
+), c AS (
+  SELECT user_id, min(activity_month) AS cohort FROM a GROUP BY user_id
+)
+SELECT cohort, activity_month - cohort AS age, count(DISTINCT a.user_id) AS users
+FROM a JOIN c USING (user_id)
+WHERE cohort = 0
+GROUP BY cohort, age
+ORDER BY age;
+-- rows: [{"cohort":0,"age":0,"users":3},{"cohort":0,"age":1,"users":1},{"cohort":0,"age":2,"users":1}]
+```
+
+## Excel or Power BI
+
+A Pivot Table with cohort rows and age columns gives a triangle, and conditional formatting makes the heat map. In DAX, disconnected age tables with `CALCULATE` provide cohort matrices.
+
+## In industry
+
+Used by nearly all subscription and consumer apps, usually weekly or monthly, by acquisition channel and plan.
+
+## Assumptions and limitations
+
+Small cohorts are noisy. Recent cohorts are incomplete. Seasonal starts can differ for reasons other than the product.
+
+## Common mistakes
+
+- Filling incomplete cells with zero.
+- Comparing cohorts at different ages.
+- Letting retained users appear in a different cohort.
+- Combining all channels and hiding a change in mix.
+
+## Alternatives
+
+Kaplan-Meier curves handle varying observation windows, and growth accounting focuses on flows rather than cohorts.
+
+## Interview questions
+
+<Question q="What does a flattening retention curve mean?">A stable core of users finds lasting value.</Question>
+
+<Question q="Why can total active users rise while retention worsens?">New signups can outweigh losses for some time, hiding poor retention.</Question>

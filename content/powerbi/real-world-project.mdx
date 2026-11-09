@@ -1,0 +1,82 @@
+---
+title: "A Real-World Sales Analytics Project"
+summary: "Take a project from business question to a shared, secured and refreshed report, reusing the whole book."
+level: advanced
+section: production
+order: 3
+tags: ["project","end to end","requirements"]
+requires: ["powerbi/performance-and-deployment","powerbi/row-level-security"]
+related: ["statistics/kpis-and-north-star","statistics/storytelling-and-uncertainty","excel/dashboards-and-business-analysis"]
+versions: "Power BI as documented in November 2026"
+tested: "Design exercise. DAX logic hand-checked"
+verified: "2026-11-09"
+docs:
+  - label: "Star schema in Power BI"
+    url: "https://learn.microsoft.com/en-us/power-bi/guidance/star-schema"
+  - label: "Optimization guide"
+    url: "https://learn.microsoft.com/en-us/power-bi/guidance/power-bi-optimization"
+---
+
+## What it is
+
+An end-to-end blueprint for a sales performance report covering requirements, model, measures, layout, security and rollout.
+
+## Why it exists
+
+Individual skills don't guarantee a trustworthy product. This shows how the decisions fit together.
+
+## How it works
+
+<StepFlow
+  title="Project stages"
+  nodes={["Requirements", "Model", "Measures", "Report", "Secure", "Operate"]}
+  steps={[
+    { note: "Interview users. Write the KPI definitions and the decisions the report will support.", active: [0] },
+    { note: "Build a star schema: Sales grain is one order line, with Date, Product, Customer and Region dimensions.", active: [1] },
+    { note: "Create base measures, then time intelligence and targets. Test totals against finance.", active: [2] },
+    { note: "Design an overview, drivers page and drill-through for accounts.", active: [3] },
+    { note: "Apply dynamic RLS through a region security table and test each role.", active: [4] },
+    { note: "Set refresh, alerts, ownership and a deployment pipeline.", active: [5] }
+  ]}
+/>
+
+## Syntax and key APIs
+
+```text
+Revenue = SUMX ( Sales, Sales[Units] * Sales[Unit Price] )
+Revenue LY = CALCULATE ( [Revenue], SAMEPERIODLASTYEAR ( DimDate[Date] ) )
+Revenue YoY % = DIVIDE ( [Revenue] - [Revenue LY], [Revenue LY] )
+Target Attainment = DIVIDE ( [Revenue], [Target] )
+```
+
+## Simple example
+
+Acceptance test: the report's FY total must match the general ledger to within an agreed tolerance, and a regional manager test account must see only their region.
+
+## Industry examples
+
+Common follow-up projects are finance P&L, HR attrition, supply chain service level and marketing funnel reporting, which use the same pattern with different facts.
+
+## Patterns and best practices
+
+- Write a data dictionary with the model.
+- Reconcile before reviewing the visuals.
+- Gather feedback on a prototype quickly.
+- Track usage metrics after launch.
+
+## Alternatives and trade-offs
+
+A small team may not need a full pipeline. A monthly Excel pack may be enough when a report has few users.
+
+## Common mistakes
+
+- Starting with visuals.
+- No named owner.
+- No reconciliation to a trusted source.
+- Skipping end-user testing.
+
+## Interview questions
+
+<Question q="How do you validate a Power BI report?">Reconcile totals to a trusted source, spot-check filters and time logic, and test security roles.</Question>
+
+<Question q="What goes into a report's handover?">Ownership, data dictionary, refresh schedule, known limits and a support route.</Question>

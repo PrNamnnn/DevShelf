@@ -1,0 +1,284 @@
+---
+title: "Reading EXPLAIN ANALYZE"
+summary: "How to read a PostgreSQL query plan, find where the time really goes, and decide whether the fix is an index, better statistics or a rewrite."
+level: advanced
+section: performance
+order: 20
+tags: [explain, explain-analyze, query-plans, indexes, performance, statistics, buffers, joins]
+related: [express/middleware-and-error-handling]
+versions: "PostgreSQL 18 output format. Version differences are noted below. PostgreSQL 19 was at release candidate stage when checked."
+tested: "PostgreSQL 18.6 through PGlite (WebAssembly, single user). Real servers can choose different plans and timings."
+verified: "2026-11-09"
+docs:
+  - label: "PostgreSQL: Using EXPLAIN"
+    url: "https://www.postgresql.org/docs/current/using-explain.html"
+  - label: "PostgreSQL: EXPLAIN command"
+    url: "https://www.postgresql.org/docs/current/sql-explain.html"
+  - label: "PostgreSQL: Statistics used by the planner"
+    url: "https://www.postgresql.org/docs/current/planner-stats.html"
+  - label: "PostgreSQL: Planner cost constants"
+    url: "https://www.postgresql.org/docs/current/runtime-config-query.html#RUNTIME-CONFIG-QUERY-CONSTANTS"
+  - label: "PostgreSQL: Executor"
+    url: "https://www.postgresql.org/docs/current/executor.html"
+  - label: "PostgreSQL: auto_explain"
+    url: "https://www.postgresql.org/docs/current/auto-explain.html"
+  - label: "PostgreSQL 18 release notes"
+    url: "https://www.postgresql.org/docs/18/release-18.html"
+---
+
+## What it is
+
+`EXPLAIN` prints the plan PostgreSQL chose for a statement, with estimated costs. `EXPLAIN ANALYZE` also **executes** the statement and adds what actually happened, node by node.
+
+A plan is a tree. Leaf nodes read tables or indexes, and upper nodes join, sort, aggregate or limit the rows coming from their children.
+
+## Why it exists
+
+SQL says what you want, not how to get it. The planner compares many possible strategies and picks the one with the lowest estimated cost. When a query is slow, the plan shows you which strategy it chose and where its estimates were wrong, so you don't have to guess at indexes.
+
+## How it works
+
+The planner uses table statistics gathered by `ANALYZE` to estimate how many rows each step produces. It converts those into cost using settings such as `seq_page_cost`.
+
+The cost units are arbitrary, but you can reproduce them. The sample table has 1,870 pages and 200,000 rows, and a sequential scan with one filter was estimated at 4370:
+
+```text
+(1870 pages × seq_page_cost 1.0)         = 1870
+(200000 rows × cpu_tuple_cost 0.01)      = 2000
+(200000 rows × cpu_operator_cost 0.0025) =  500
+                                     total 4370
+```
+
+The executor runs the tree on demand. Each node asks its children for rows as it needs them, which is why a `Limit` can stop a scan early.
+
+These three plans come from a real run on 200,000 orders. Each bar shows a node's self time, its own total minus its children's.
+
+<ExplainPlanViz />
+
+### Reading one line
+
+```text
+Seq Scan on orders  (cost=0.00..4370.00 rows=10 width=42)
+                    (actual time=1.002..24.490 rows=10.00 loops=1)
+```
+
+| Field | Meaning |
+| --- | --- |
+| `cost=0.00..` | Estimated startup cost, before the first row can be returned |
+| `..4370.00` | Estimated total cost if the node runs to completion |
+| `rows=10` | Estimated rows **emitted** by this node, not rows scanned |
+| `width=42` | Estimated average output row size, in bytes |
+| `actual time` | Real milliseconds to the first row and to the last row |
+| `rows=10.00` | Actual rows per loop |
+| `loops=1` | How many times this node ran |
+
+Costs and buffer counts are cumulative, so a parent includes its children. For the true work of a node, subtract the children.
+
+**Actual time and rows are averages per loop.** Multiply by `loops` for the total. In this inner side of a nested loop, 10 rows per loop across 3 loops means 30 rows.
+
+```text
+->  Bitmap Heap Scan on orders o  (cost=4.37..42.30 rows=10 width=12)
+                                   (actual time=0.036..0.056 rows=10.00 loops=3)
+```
+
+## Syntax and key APIs
+
+```sql
+EXPLAIN SELECT ...;                     -- plan only, does not run it
+EXPLAIN ANALYZE SELECT ...;             -- runs it and measures
+EXPLAIN (ANALYZE, VERBOSE, SETTINGS, FORMAT JSON) SELECT ...;
+```
+
+| Option | Purpose | Version note |
+| --- | --- | --- |
+| `BUFFERS` | Page access counts | Automatic with `ANALYZE` since 18. Add it explicitly on older versions |
+| `SETTINGS` | Non-default planner settings | Since 12 |
+| `GENERIC_PLAN` | Plan a query with `$1` placeholders | Since 16. Can't combine with `ANALYZE` |
+| `MEMORY` | Planner memory use | Since 17 |
+| `SERIALIZE` | Cost of converting output for the client | Since 17. Requires `ANALYZE` |
+| `TIMING OFF` | Row counts with less overhead | Requires `ANALYZE` |
+| `FORMAT` | `TEXT`, `XML`, `JSON` or `YAML` | |
+
+<Callout type="version">
+PostgreSQL 18 added automatic `BUFFERS`, fractional row counts such as `rows=10.00`, and the `Index Searches` line. That count is a total across loops, unlike the per-loop rows and time. The PostgreSQL 19 draft release notes add an `IO` option for asynchronous I/O activity.
+</Callout>
+
+**Reading buffers:** `shared hit` pages were already in PostgreSQL's cache, and `read` pages had to be fetched from outside it. `dirtied` pages were changed by this query. `written` pages were evicted by this backend during the query.
+
+### Node types
+
+| Node | What it does | Good fit |
+| --- | --- | --- |
+| Seq Scan | Reads the whole table | Large share of the table, or a small table |
+| Index Scan | Walks the index, then fetches rows in index order | Few rows, or index order satisfies `ORDER BY` |
+| Index Only Scan | Answers from the index alone | Covered columns on recently vacuumed tables |
+| Bitmap Heap Scan | Collects row locations, then reads pages in physical order | Medium selectivity |
+| Nested Loop | Runs the inner side once per outer row | Few outer rows with an indexed inner side |
+| Hash Join | Builds a hash table on one input and probes it | Large unsorted inputs with equality joins |
+| Merge Join | Merges two inputs sorted on the join key | Inputs already sorted |
+
+## Simple example
+
+Before an index, the database reads every page to find 10 rows.
+
+```sql
+EXPLAIN ANALYZE SELECT * FROM orders WHERE customer_id = 42;
+```
+
+```text
+Seq Scan on orders  (cost=0.00..4370.00 rows=10 width=42) (actual time=1.002..24.490 rows=10.00 loops=1)
+  Filter: (customer_id = 42)
+  Rows Removed by Filter: 199990
+  Buffers: shared hit=1870
+Execution Time: 24.798 ms
+```
+
+`Rows Removed by Filter: 199990` is the clue. Add an index, run `ANALYZE`, and repeat.
+
+```sql
+CREATE INDEX orders_customer_idx ON orders (customer_id);
+ANALYZE orders;
+```
+
+```text
+Bitmap Heap Scan on orders  (cost=4.37..42.30 rows=10 width=42) (actual time=0.077..0.116 rows=10.00 loops=1)
+  Recheck Cond: (customer_id = 42)
+  Heap Blocks: exact=10
+  Buffers: shared hit=10 read=2
+  ->  Bitmap Index Scan on orders_customer_idx  (cost=0.00..4.37 rows=10 width=0) (actual time=0.049..0.051 rows=10.00 loops=1)
+        Index Cond: (customer_id = 42)
+        Index Searches: 1
+        Buffers: shared read=2
+Execution Time: 0.172 ms
+```
+
+Pages touched fell from 1,870 to 12. Compare buffers as well as time, since time depends on what happens to be cached.
+
+## Industry examples
+
+### Remove a sort with a composite index
+
+A "latest failed orders" query scanned the table and sorted it. Putting the equality column first and the sort column second gives the executor rows in the requested order, so `LIMIT` can stop after five. Execution fell from 35.107 ms to 0.110 ms in this run.
+
+```sql
+CREATE INDEX orders_status_created_idx ON orders (status, created_at DESC);
+
+SELECT id, total FROM orders
+WHERE status = 'failed'
+ORDER BY created_at DESC
+LIMIT 5;
+```
+
+### Fix a bad estimate on correlated columns
+
+The planner assumes that conditions are independent. Here `city` determines `zip`, so it multiplied two selectivities and estimated 19 rows when there were 2,000. A wrong estimate like this can pick a bad join later in a larger query.
+
+```sql
+EXPLAIN ANALYZE SELECT count(*) FROM orders
+WHERE city = 'city7' AND zip = 'zip7';
+-- Seq Scan ... rows=19 ... actual ... rows=2000.00
+
+CREATE STATISTICS orders_city_zip (dependencies, mcv) ON city, zip FROM orders;
+ANALYZE orders;
+-- Seq Scan ... rows=2000 ... actual ... rows=2000.00
+```
+
+`CREATE STATISTICS` only records the definition. The data appears after the next `ANALYZE`.
+
+### Serve a query from the index alone
+
+`INCLUDE` adds payload columns to the index. After `VACUUM` updates the visibility map, the heap isn't needed.
+
+```sql
+CREATE INDEX orders_created_inc ON orders (created_at) INCLUDE (total);
+VACUUM orders;
+```
+
+```text
+Index Only Scan using orders_created_inc on orders  (cost=0.42..25.64 rows=661 width=14) (actual time=0.264..1.363 rows=667.00 loops=1)
+  Heap Fetches: 0
+```
+
+A high `Heap Fetches` count means the visibility map is stale, and the benefit is shrinking.
+
+### Measure a write without keeping it
+
+`ANALYZE` really runs the statement, so wrap data changes in a transaction.
+
+```sql
+BEGIN;
+EXPLAIN ANALYZE UPDATE orders SET status = 'paid' WHERE id = 10;
+ROLLBACK;
+```
+
+## Patterns and best practices
+
+Use this order when reading any plan:
+
+1. Compare estimated and actual rows, starting from the leaf nodes. A large mismatch means statistics come first.
+2. Find the node with the largest self time, remembering to multiply by `loops`.
+3. Look for `Rows Removed by Filter` that is large compared with the rows kept.
+4. Check whether a `Sort` or hash spills to disk, shown as `Sort Method: external merge` or `Batches` above 1.
+5. Check `Buffers` to see how much data the query touches.
+
+| Symptom | Likely cause | First action |
+| --- | --- | --- |
+| Estimates far from actual | Stale or insufficient statistics | `ANALYZE`, a higher statistics target, or `CREATE STATISTICS` |
+| Many rows removed by filter | Missing or unusable index | Index the filter columns |
+| Nested Loop with huge `loops` | Outer row count was underestimated | Fix the estimate before forcing a join type |
+| Sort under a `Limit` | Index doesn't provide the order | Composite index matching filter and sort |
+| Index exists but isn't used | Expression hides the column, or the query matches many rows | Rewrite the predicate or add an expression index |
+
+Test on realistic data volumes. The docs warn that results on a toy-sized table can't be assumed to apply to large tables.
+
+## Alternatives and trade-offs
+
+| Tool | Use it for | Limit |
+| --- | --- | --- |
+| `EXPLAIN` | Fast and safe plan check | Shows only estimates |
+| `EXPLAIN ANALYZE` | Truth about one execution | Runs the query and adds timing overhead |
+| `auto_explain` | Capturing plans of slow production queries | Logging and measurement overhead |
+| `pg_stat_statements` | Finding which queries cost the most overall | Aggregates only, no plans |
+
+Every index speeds up some reads but adds write cost and storage, so confirm that it's used before keeping it.
+
+## Common mistakes
+
+**Running `EXPLAIN ANALYZE` on a write outside a transaction.** Its side effects happen as usual.
+
+**Calling every Seq Scan a bug.** If a query needs most of a table, sequential reading is the right plan. The join example above correctly scans all customers.
+
+**Reading rows as a total when `loops` is above 1.** The displayed rows and time are per loop.
+
+**Treating a `LIMIT` gap as a misestimate.** Child estimates assume a full run. This one shows an estimate of 159,584 rows where only 3 were needed.
+
+```text
+Limit  (cost=0.00..0.08 rows=3 width=42) (actual time=0.040..0.044 rows=3.00 loops=1)
+  ->  Seq Scan on orders  (cost=0.00..4370.00 rows=159584 width=42) (actual time=0.037..0.039 rows=3.00 loops=1)
+```
+
+**Hiding the column behind an expression.** `customer_id + 0 = 42` can't use the index on `customer_id`. This fell back to a Seq Scan, with a default estimate of 1,000 rows.
+
+**Assuming the total covers the client's wait.** Execution Time excludes network transfer. Output conversion is only measured with `SERIALIZE`.
+
+## Interview questions
+
+<Question q="What is the difference between EXPLAIN and EXPLAIN ANALYZE?">
+`EXPLAIN` shows the chosen plan and estimates without running the statement. `EXPLAIN ANALYZE` runs it and adds actual time, rows and loops, so it has real side effects on data-changing statements.
+</Question>
+
+<Question q="What do the two cost numbers mean?">
+The first is the estimated cost before the node can return its first row. The second is the estimated total if it runs to completion. Both include child nodes and are in arbitrary planner units.
+</Question>
+
+<Question q="Why might PostgreSQL ignore an index?">
+The query may match too much of the table, statistics may be misleading, the table may be small, or an expression or type mismatch may prevent the index from being used.
+</Question>
+
+<Question q="When would you choose a hash join over a nested loop?">
+The planner chooses, but a hash join generally suits large inputs with equality conditions. A nested loop suits a small outer side with an indexed inner side.
+</Question>
+
+<Question q="What is an index-only scan, and what can defeat it?">
+It answers from the index without fetching table rows, when all needed columns are in the index and the visibility map marks the pages all-visible. Heavily updated tables that aren't vacuumed lose this benefit.
+</Question>

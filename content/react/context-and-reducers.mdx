@@ -1,0 +1,164 @@
+---
+title: "State Management: Reducers, Context and Stores"
+summary: "When state outgrows useState, how reducers organize it, what context really solves, and when to reach for an external store."
+level: intermediate
+section: architecture
+order: 10
+tags: [useReducer, context, state-management, useSyncExternalStore, custom-hooks]
+related: [react/state-and-rendering, react/performance-and-memoization]
+versions: "React 19 allows rendering Context directly as a provider."
+tested: "Reducer logic follows pure functions; JSX snippets were not all executed. Provider-rendering behaviour run on React 19.3.1 with jsdom."
+verified: "2026-11-09"
+docs:
+  - label: "React: Extracting state logic into a reducer"
+    url: "https://react.dev/learn/extracting-state-logic-into-a-reducer"
+  - label: "React: Passing data deeply with context"
+    url: "https://react.dev/learn/passing-data-deeply-with-context"
+  - label: "React: useSyncExternalStore"
+    url: "https://react.dev/reference/react/useSyncExternalStore"
+  - label: "React: Reusing logic with custom Hooks"
+    url: "https://react.dev/learn/reusing-logic-with-custom-hooks"
+---
+
+## What it is
+
+A **reducer** gathers state transitions into one pure function that receives the state and an action. **Context** provides a value to a subtree without passing props at each level. A **custom Hook** reuses stateful logic.
+
+## Why it exists
+
+When many handlers update related state, the rules scatter. Reducers centralize them and are easy to test. Context removes prop drilling for values like theme or current user.
+
+## How it works
+
+`dispatch(action)` queues an action. During the next render, React runs the reducer to compute the new state. Context is a delivery mechanism, not a store. When a provider's value changes by `Object.is`, every component reading that context re-renders.
+
+Custom Hooks share logic but not state. Each call has its own independent state.
+
+## Syntax and key APIs
+
+```jsx
+const [state, dispatch] = useReducer(reducer, initialState);
+
+const ThemeContext = createContext("light");
+<ThemeContext value={theme}>{children}</ThemeContext>
+const theme = useContext(ThemeContext);
+```
+
+## Simple example
+
+```js
+import assert from "node:assert";
+
+function cart(state, action) {
+  switch (action.type) {
+    case "add":
+      return { ...state, items: [...state.items, action.item] };
+    case "clear":
+      return { ...state, items: [] };
+    default:
+      throw new Error(`Unknown action ${action.type}`);
+  }
+}
+
+const initial = { items: [] };
+const after = cart(initial, { type: "add", item: "book" });
+
+assert.deepEqual(after.items, ["book"]);
+assert.deepEqual(initial.items, []);
+```
+
+## Industry examples
+
+### Pair a reducer with context
+
+Splitting state and dispatch keeps components that only dispatch from re-rendering when state changes.
+
+```jsx
+const CartState = createContext(null);
+const CartDispatch = createContext(null);
+
+export function CartProvider({ children }) {
+  const [state, dispatch] = useReducer(cart, { items: [] });
+  return (
+    <CartState value={state}>
+      <CartDispatch value={dispatch}>{children}</CartDispatch>
+    </CartState>
+  );
+}
+
+export function useCart() {
+  const value = useContext(CartState);
+  if (!value) throw new Error("useCart must be used inside CartProvider");
+  return value;
+}
+```
+
+### Subscribe to an external store
+
+`useSyncExternalStore` is the correct way to read a source outside React. Server rendering requires a third argument.
+
+```jsx
+function subscribe(callback) {
+  window.addEventListener("online", callback);
+  window.addEventListener("offline", callback);
+  return () => {
+    window.removeEventListener("online", callback);
+    window.removeEventListener("offline", callback);
+  };
+}
+
+function useOnline() {
+  return useSyncExternalStore(subscribe, () => navigator.onLine, () => true);
+}
+```
+
+### Extract a custom Hook
+
+```jsx
+function useLocalToggle(initial = false) {
+  const [on, setOn] = useState(initial);
+  const toggle = useCallback(() => setOn((value) => !value), []);
+  return [on, toggle];
+}
+```
+
+## Patterns and best practices
+
+- Start with local state and lift it only when needed.
+- Keep reducers pure and throw on unknown actions.
+- Split contexts by how often values change.
+- Memoize an object context value, or let the compiler do it, to avoid needless updates.
+
+## Alternatives and trade-offs
+
+| Tool | Best for | Trade-off |
+| --- | --- | --- |
+| `useState` | Local values | Scattered rules at scale |
+| `useReducer` | Complex local transitions | More ceremony |
+| Context | Low-frequency shared values | Every consumer re-renders on change |
+| External store library | High-frequency shared state, selectors | Dependency |
+| Server-state library | Remote data caching | Another layer to learn |
+
+## Common mistakes
+
+**Using context for rapidly changing data.** Every consumer re-renders on each change.
+
+**Mutating state in a reducer.** Always return a new object.
+
+**Performing side effects in a reducer.** Reducers can run twice in Strict Mode and must stay pure.
+
+**Creating a new context value object on every render.** Consumers re-render even when nothing meaningful changed.
+
+## Interview questions
+
+<Question q="Is Context a state management library?">
+No. It transports a value down the tree. You combine it with `useState` or `useReducer` to manage state.
+</Question>
+
+<Question q="useState or useReducer?">
+`useState` for independent simple values. `useReducer` when updates depend on several values or transitions need to be explicit and testable.
+</Question>
+
+<Question q="Do custom Hooks share state?">
+No. They share logic. Each component that calls the Hook gets its own state.
+</Question>

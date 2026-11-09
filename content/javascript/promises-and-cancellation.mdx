@@ -1,0 +1,239 @@
+---
+title: "Promises, Async Patterns and Cancellation"
+summary: "Choosing the right promise combinator, limiting concurrency, and cancelling work reliably with AbortController."
+level: advanced
+section: async
+order: 20
+tags: [promises, async, await, abortcontroller, abortsignal, concurrency, promise-all, retries]
+related: [javascript/event-loop, javascript/dom-events-and-patterns]
+versions: "AbortSignal.timeout and AbortSignal.any are Baseline since 2024. Promise.withResolvers since March 2024."
+tested: "Node.js 24.17.0"
+verified: "2026-11-09"
+docs:
+  - label: "MDN: Promise.all"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/all"
+  - label: "MDN: Promise.allSettled"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/allSettled"
+  - label: "MDN: AbortController"
+    url: "https://developer.mozilla.org/en-US/docs/Web/API/AbortController"
+  - label: "MDN: AbortSignal.timeout"
+    url: "https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static"
+  - label: "MDN: AbortSignal.any"
+    url: "https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/any_static"
+---
+
+## What it is
+
+A promise represents a future result in one of three states: pending, fulfilled or rejected. `async` and `await` are syntax over promises. `AbortController` is the standard way to signal that work should stop.
+
+## Why it exists
+
+Promises make asynchronous steps composable and route errors through one path. Cancellation exists because a slow request whose result no longer matters still wastes resources and can overwrite newer data.
+
+## How it works
+
+Each `.then` returns a new promise, so a chain passes values and errors along. An `await` pauses only the current async function and resumes in a microtask.
+
+An `AbortController` owns an `AbortSignal`. APIs such as `fetch` listen to the signal and reject when it fires. Aborting doesn't kill arbitrary code, so your own loops have to check the signal.
+
+<LanesViz
+  title="Awaiting a fetch that gets cancelled"
+  actors={["Your code", "Promise", "Network"]}
+  steps={[
+    { from: 0, to: 2, label: "fetch(url, { signal })", note: "The request starts and a pending promise is returned at once." },
+    { from: 2, to: 1, label: "pending", note: "Your async function pauses at await, freeing the thread." },
+    { from: 0, to: 2, label: "controller.abort()", note: "Newer input makes this request irrelevant, so it's aborted." },
+    { from: 2, to: 1, label: "reject(AbortError)", note: "The promise rejects with the signal's reason." },
+    { from: 1, to: 0, label: "catch runs as microtask", note: "Your code resumes in a microtask and can ignore AbortError specifically." },
+  ]}
+/>
+
+| Combinator | Settles when | Result |
+| --- | --- | --- |
+| `Promise.all` | All fulfil, or first rejection | Values in input order |
+| `Promise.allSettled` | All settle | Status objects |
+| `Promise.any` | First fulfilment | Value, or `AggregateError` if all reject |
+| `Promise.race` | First to settle | That outcome |
+
+## Syntax and key APIs
+
+```javascript
+const controller = new AbortController();
+fetch(url, { signal: controller.signal });
+controller.abort();
+
+AbortSignal.timeout(5000);
+AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]);
+
+const { promise, resolve, reject } = Promise.withResolvers();
+```
+
+## Simple example
+
+```js
+import assert from "node:assert";
+
+const values = await Promise.all([Promise.resolve(1), 2]);
+assert.deepEqual(values, [1, 2]);
+
+const results = await Promise.allSettled([Promise.resolve(1), Promise.reject(new Error("no"))]);
+assert.deepEqual(results.map((r) => r.status), ["fulfilled", "rejected"]);
+```
+
+## Industry examples
+
+### Limit concurrency
+
+`Promise.all(items.map(work))` starts everything at once and can overwhelm a service. Workers share one iterator, so each item is taken exactly once.
+
+```js
+import assert from "node:assert";
+
+async function mapLimit(items, limit, work) {
+  const results = new Array(items.length);
+  const entries = items.entries();
+
+  async function worker() {
+    for (const [index, item] of entries) {
+      results[index] = await work(item);
+    }
+  }
+
+  await Promise.all(Array.from({ length: limit }, worker));
+  return results;
+}
+
+let active = 0;
+let peak = 0;
+
+const out = await mapLimit([1, 2, 3, 4, 5], 2, async (n) => {
+  active++;
+  peak = Math.max(peak, active);
+  await new Promise((r) => setTimeout(r, 5));
+  active--;
+  return n * 2;
+});
+
+assert.deepEqual(out, [2, 4, 6, 8, 10]);
+assert.equal(peak, 2);
+```
+
+### Combine user cancellation and a timeout
+
+```js
+import assert from "node:assert";
+
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    }, { once: true });
+  });
+}
+
+const user = new AbortController();
+const signal = AbortSignal.any([user.signal, AbortSignal.timeout(10)]);
+
+await assert.rejects(sleep(1000, signal), { name: "TimeoutError" });
+```
+
+### Ignore stale responses
+
+Only the newest search should be allowed to finish.
+
+```js
+import assert from "node:assert";
+
+function latestOnly(task) {
+  let controller;
+  return (input) => {
+    controller?.abort();
+    controller = new AbortController();
+    return task(input, controller.signal);
+  };
+}
+
+const search = latestOnly((query, signal) =>
+  new Promise((resolve, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason));
+    setTimeout(() => resolve(query), 5);
+  }),
+);
+
+const first = search("a");
+const second = search("ab");
+
+await assert.rejects(first, { name: "AbortError" });
+assert.equal(await second, "ab");
+```
+
+### Retry with backoff
+
+```js
+import assert from "node:assert";
+
+async function retry(fn, attempts, baseMs = 1) {
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (i + 1 >= attempts) throw error;
+      await new Promise((r) => setTimeout(r, baseMs * 2 ** i));
+    }
+  }
+}
+
+let calls = 0;
+const value = await retry(async () => {
+  if (++calls < 3) throw new Error("try again");
+  return "ok";
+}, 3);
+
+assert.equal(value, "ok");
+assert.equal(calls, 3);
+```
+
+## Patterns and best practices
+
+- Return or await every promise so that errors have a path.
+- Pass a signal down through every layer that does I/O.
+- Check `error.name` to tell aborts and timeouts from real failures.
+- Use `allSettled` when partial success is acceptable.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| All required | `Promise.all` | One failure loses the combined result |
+| Partial results | `Promise.allSettled` | You must inspect each result |
+| Fastest mirror | `Promise.any` | Others keep running unless aborted |
+| Streams of values | Async iterators | More complex than one promise |
+
+`Promise.all` doesn't stop the remaining operations when one rejects. Abort them explicitly if they shouldn't continue.
+
+## Common mistakes
+
+**Awaiting in sequence by accident.** Two independent `await`s run one after the other. Start both and use `Promise.all`.
+
+**Passing an uncancellable timeout.** `AbortSignal.timeout` can't be cancelled. Use `AbortController` with `setTimeout` if you need to clear it.
+
+**Forgetting a rejection handler.** An unhandled rejection terminates a Node process by default.
+
+**Wrapping an existing promise in `new Promise`.** Return the original promise instead.
+
+## Interview questions
+
+<Question q="What is the difference between Promise.all and allSettled?">
+`all` rejects on the first rejection. `allSettled` always waits for every input and reports each status.
+</Question>
+
+<Question q="Does Promise.race cancel the losers?">
+No. They keep running unless you cancel them, for example with an `AbortController`.
+</Question>
+
+<Question q="How would you cancel a fetch?">
+Pass `controller.signal` in the options and call `controller.abort()`. The promise rejects with an `AbortError`.
+</Question>

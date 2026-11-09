@@ -1,0 +1,173 @@
+---
+title: "Project Structure and Testing"
+summary: "Separating the app from the server, organizing by layer or feature, and testing routes with supertest."
+level: intermediate
+section: production
+order: 10
+tags: [architecture, layers, testing, supertest, dependency-injection, node-test]
+related: [express/routing-requests-and-responses, express/production-operations]
+versions: "Express 5 and the Node.js built-in test runner."
+tested: "Express 5.3.0, supertest and node:test on Node.js 24.17.0"
+verified: "2026-11-09"
+docs:
+  - label: "Supertest"
+    url: "https://github.com/ladjs/supertest"
+  - label: "Node.js: Test runner"
+    url: "https://nodejs.org/api/test.html"
+  - label: "Express 5 API: Router"
+    url: "https://expressjs.com/en/5x/api/router/"
+---
+
+## What it is
+
+Structure decides where code lives, so that changes stay local. HTTP-level tests exercise routes, middleware and error handling together.
+
+## Why it exists
+
+Express imposes no structure, so handlers easily accumulate SQL and business rules until they're hard to test or reuse.
+
+## How it works
+
+Three separations do most of the work:
+
+| Layer | Knows about | Doesn't know about |
+| --- | --- | --- |
+| Routes | HTTP, validation | SQL |
+| Services | Business rules | `req`, `res` |
+| Repositories | Database | HTTP |
+
+Export a function that builds the app, and start listening in a separate file. Tests can then run the app without a real port.
+
+## Syntax and key APIs
+
+```text
+src/
+  app.js          creates and returns the Express app
+  server.js       calls app.listen
+  orders/
+    orders.routes.js
+    orders.service.js
+    orders.repo.js
+```
+
+```javascript
+const response = await request(app)
+  .post("/orders")
+  .set("Authorization", "Bearer token")
+  .send({ sku: "a" });
+```
+
+## Simple example
+
+```js
+import assert from "node:assert";
+import express from "express";
+import request from "supertest";
+
+function createApp() {
+  const app = express();
+  app.get("/health", (req, res) => res.json({ ok: true }));
+  return app;
+}
+
+const response = await request(createApp()).get("/health").expect(200);
+assert.equal(response.body.ok, true);
+```
+
+## Industry examples
+
+### Inject dependencies for tests
+
+Passing the repository as an argument lets tests use a fake without any mocking library.
+
+```js
+import assert from "node:assert";
+import express from "express";
+import request from "supertest";
+
+function createOrderService(repo) {
+  return {
+    async place(sku) {
+      if (await repo.isDiscontinued(sku)) throw Object.assign(new Error("Unavailable"), { status: 409 });
+      return repo.insert(sku);
+    },
+  };
+}
+
+function createApp({ orders }) {
+  const app = express();
+  app.use(express.json());
+  app.post("/orders", async (req, res) => {
+    res.status(201).json(await orders.place(req.body.sku));
+  });
+  app.use((err, req, res, next) => {
+    res.status(err.status ?? 500).json({ error: err.message });
+  });
+  return app;
+}
+
+const fakeRepo = {
+  isDiscontinued: async (sku) => sku === "old",
+  insert: async (sku) => ({ id: 1, sku }),
+};
+
+const app = createApp({ orders: createOrderService(fakeRepo) });
+
+assert.equal((await request(app).post("/orders").send({ sku: "new" })).status, 201);
+assert.equal((await request(app).post("/orders").send({ sku: "old" })).status, 409);
+```
+
+### Use the built-in test runner
+
+```js
+import assert from "node:assert";
+import { test } from "node:test";
+import express from "express";
+import request from "supertest";
+
+const app = express();
+app.get("/boom", async () => {
+  throw new Error("failure");
+});
+
+test("async failures reach the error handler", async () => {
+  const response = await request(app).get("/boom");
+  assert.equal(response.status, 500);
+});
+```
+
+## Patterns and best practices
+
+- Organize by feature once an app has more than a few resources.
+- Keep services free of Express objects.
+- Test the error paths: 401, 404, 422 and 500.
+- Use a real database in integration tests for query behaviour.
+
+## Alternatives and trade-offs
+
+| Test type | Catches | Cost |
+| --- | --- | --- |
+| Service unit test | Business rules | Fast, misses wiring |
+| HTTP test with fakes | Routing, validation, errors | Fast, misses SQL |
+| Integration with database | Real queries | Slower, needs setup |
+| End-to-end | Whole system | Slowest, most brittle |
+
+## Common mistakes
+
+**Calling `app.listen` during import.** Tests inherit a real port and can hang.
+
+**Passing `req` into services.** Business logic becomes tied to HTTP.
+
+**Forgetting to handle errors in `.end()`.** With supertest's callback form, a failed `.expect` goes to the callback rather than throwing. Prefer `await`.
+
+**Testing only success responses.** Most production bugs live on error paths.
+
+## Interview questions
+
+<Question q="Why separate app.js and server.js?">
+So tests and other tools can import the configured app without opening a port.
+</Question>
+
+<Question q="How would you test a route that uses a database?">
+Inject a fake repository for fast route tests, and add integration tests against a real test database for the queries themselves.
+</Question>

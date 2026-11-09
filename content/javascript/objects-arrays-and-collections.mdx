@@ -1,0 +1,187 @@
+---
+title: "Objects, Arrays and Keyed Collections"
+summary: "Modern array and object tools, when Map and Set beat plain objects, deep copies, and memory-safe metadata with WeakMap."
+level: intermediate
+section: objects
+order: 30
+tags: [arrays, objects, map, set, weakmap, weakref, structuredclone, destructuring, toSorted, groupBy]
+related: [javascript/values-and-types, javascript/prototypes-and-classes]
+versions: "toSorted is Baseline since July 2023, and Object.groupBy since March 2024."
+tested: "Node.js 24.17.0"
+verified: "2026-11-09"
+docs:
+  - label: "MDN: Array"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array"
+  - label: "MDN: Map"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map"
+  - label: "MDN: WeakMap"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakMap"
+  - label: "MDN: WeakRef"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakRef"
+  - label: "MDN: Object.groupBy"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/groupBy"
+  - label: "MDN: structuredClone"
+    url: "https://developer.mozilla.org/en-US/docs/Web/API/Window/structuredClone"
+---
+
+## What it is
+
+Arrays and objects are the everyday containers. `Map` and `Set` are built for keyed lookups. `WeakMap` attaches data to an object without keeping that object alive.
+
+## Why it exists
+
+Plain objects are good records but awkward dictionaries: keys are strings or symbols and they inherit prototype names. Specialized collections make intent clear and avoid those problems.
+
+## How it works
+
+`Map` keeps insertion order and allows any key. Keys and `Set` members use SameValueZero, so objects compare by reference and `NaN` matches itself.
+
+A `WeakMap` holds its keys weakly. Once nothing else references a key object, the entry can be garbage collected. Since entries could vanish at any time, you can't iterate a `WeakMap` or read its size.
+
+## Syntax and key APIs
+
+| Goal | Modern tool | Mutates? |
+| --- | --- | --- |
+| Sort | `toSorted(cmp)` | No |
+| Reverse | `toReversed()` | No |
+| Replace at index | `with(i, v)` | No |
+| Sort in place | `sort(cmp)` | Yes |
+| Group | `Object.groupBy`, `Map.groupBy` | No |
+| Deep copy | `structuredClone(x)` | No |
+
+```javascript
+const { id, ...rest } = user;
+const [first, ...others] = items;
+const merged = { ...defaults, ...overrides };
+```
+
+## Simple example
+
+```js
+import assert from "node:assert";
+
+const prices = [30, 4, 100];
+
+assert.deepEqual(prices.toSorted((a, b) => a - b), [4, 30, 100]);
+assert.deepEqual(prices, [30, 4, 100]);
+assert.deepEqual(prices.toSorted(), [100, 30, 4]);
+```
+
+The last line is the classic trap: without a comparator, elements are compared as strings.
+
+## Industry examples
+
+### Group records
+
+```js
+import assert from "node:assert";
+
+const orders = [
+  { id: 1, status: "paid" },
+  { id: 2, status: "open" },
+  { id: 3, status: "paid" },
+];
+
+const groups = Object.groupBy(orders, (order) => order.status);
+
+assert.equal(groups.paid.length, 2);
+assert.equal(Object.getPrototypeOf(groups), null);
+```
+
+### Deduplicate while keeping order
+
+```js
+import assert from "node:assert";
+
+assert.deepEqual([...new Set([3, 1, 3, 2])], [3, 1, 2]);
+
+const byId = new Map([{ id: 1, v: "a" }, { id: 1, v: "b" }].map((x) => [x.id, x]));
+assert.equal(byId.get(1).v, "b");
+```
+
+### Attach metadata without a leak
+
+Storing DOM-node or request data in a `Map` keeps it alive forever. A `WeakMap` lets it go with the key.
+
+```js
+import assert from "node:assert";
+
+const metadata = new WeakMap();
+
+function track(request) {
+  metadata.set(request, { startedAt: 1 });
+}
+
+const request = {};
+track(request);
+assert.equal(metadata.get(request).startedAt, 1);
+assert.throws(() => metadata.set("text", 1), TypeError);
+```
+
+### Deep copy safely
+
+```js
+import assert from "node:assert";
+
+const original = { when: new Date(0), nested: { n: 1 } };
+original.self = original;
+
+const copy = structuredClone(original);
+copy.nested.n = 2;
+
+assert.equal(original.nested.n, 1);
+assert.ok(copy.when instanceof Date);
+assert.equal(copy.self, copy);
+assert.throws(() => structuredClone({ fn() {} }), /could not be cloned/);
+```
+
+## Patterns and best practices
+
+- Use immutable array methods for UI and shared state.
+- Use `Map` for dynamic keys and frequent additions or removals.
+- Use `WeakMap` for per-object caches.
+- Use `structuredClone` instead of a `JSON.stringify` round trip, which loses dates and fails on cycles.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Fixed-shape record | Object | Inherited keys, string keys only |
+| Dynamic dictionary | `Map` | Not directly JSON-serializable |
+| Unique values | `Set` | No indexed access |
+| Metadata on objects | `WeakMap` | No iteration |
+
+`WeakRef` exists too, but MDN says it's best avoided if possible because garbage-collection timing isn't guaranteed.
+
+## Common mistakes
+
+**Sorting numbers without a comparator.** The default order is by string.
+
+**Thinking spread is deep.** Nested objects are still shared.
+
+```js
+import assert from "node:assert";
+
+const a = { nested: { n: 1 } };
+const b = { ...a };
+b.nested.n = 2;
+assert.equal(a.nested.n, 2);
+```
+
+**Treating `sort` as non-mutating.** It reorders the original array in place.
+
+**Using a primitive as a `WeakMap` key.** Only objects and non-registered symbols are allowed.
+
+## Interview questions
+
+<Question q="When would you use a Map instead of an object?">
+When keys are dynamic or not strings, when insertion order and size matter, or when frequent additions and removals are expected.
+</Question>
+
+<Question q="Why can't a WeakMap be iterated?">
+Entries can disappear when a key is garbage collected, so iteration would expose collection timing.
+</Question>
+
+<Question q="What does structuredClone not support?">
+It throws a `DataCloneError` on non-serializable values such as functions, and it doesn't copy private class fields.
+</Question>

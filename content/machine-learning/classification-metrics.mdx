@@ -1,0 +1,101 @@
+---
+title: "Confusion Matrix, Precision, Recall and F1"
+summary: "Measure classifiers in terms of the errors that matter, with an interactive threshold explorer."
+level: intermediate
+section: evaluation
+order: 1
+tags: ["confusion matrix","accuracy","precision","recall","F1","specificity"]
+requires: ["machine-learning/ml-foundations"]
+related: ["machine-learning/roc-pr-and-calibration","machine-learning/imbalance-and-cost-sensitive-learning","statistics/probability-and-bayes"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Metrics and scoring"
+    url: "https://scikit-learn.org/stable/modules/model_evaluation.html"
+---
+
+## What it is
+
+A **confusion matrix** counts correct and incorrect predictions by actual class. Other metrics are derived from it.
+
+| Metric | Formula | Question |
+| --- | --- | --- |
+| Accuracy | (TP+TN)/all | Share correct |
+| Precision | TP/(TP+FP) | When we alert, are we right? |
+| Recall | TP/(TP+FN) | Of real positives, how many caught? |
+| Specificity | TN/(TN+FP) | Of real negatives, how many cleared? |
+| F1 | 2PR/(P+R) | Balance of the two |
+
+## Why it exists
+
+Accuracy hides failures on rare classes. Different mistakes also have different business costs.
+
+## How it works
+
+<ThresholdExplorer />
+
+Raising the threshold generally increases precision and lowers recall.
+
+## Intuition and formula
+
+<Formula>F1 = 2 · precision · recall / (precision + recall)</Formula>
+
+The harmonic mean punishes imbalance between the two values.
+
+## Worked example
+
+Of 1,000 customers, 100 churn. A model has TP = 80, FP = 40, FN = 20 and TN = 860. Accuracy is 94%, precision is 66.7%, recall is 80%, specificity is 95.6%, and F1 is 0.727.
+
+## Python
+
+```python
+import numpy as np
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
+
+y_true = np.r_[np.ones(100), np.zeros(900)]
+y_pred = np.r_[np.ones(80), np.zeros(20), np.ones(40), np.zeros(860)]
+
+tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+assert (tp, fp, fn, tn) == (80, 40, 20, 860)
+assert accuracy_score(y_true, y_pred) == 0.94
+assert round(precision_score(y_true, y_pred), 3) == 0.667
+assert recall_score(y_true, y_pred) == 0.8
+assert round(f1_score(y_true, y_pred), 3) == 0.727
+assert round(tn / (tn + fp), 3) == 0.956
+```
+
+## SQL
+
+```sql
+SELECT count(*) FILTER (WHERE actual AND predicted) AS tp,
+       count(*) FILTER (WHERE NOT actual AND predicted) AS fp,
+       count(*) FILTER (WHERE actual AND NOT predicted) AS fn
+FROM (VALUES (true, true), (true, false), (false, true), (false, false)) AS t(actual, predicted);
+-- rows: [{"tp":1,"fp":1,"fn":1}]
+```
+
+## In industry
+
+Fraud teams track precision at capacity, medical screening emphasizes recall, and macro-averaged F1 treats each class equally.
+
+## Assumptions and limitations
+
+Metrics depend on prevalence and threshold. A precision figure from a balanced test set doesn't apply at real-world prevalence.
+
+## Common mistakes
+
+- Reporting accuracy on imbalanced data.
+- Mixing up which class is positive.
+- Using F1 when costs are clearly unequal.
+- Tuning thresholds on test data.
+
+## Alternatives
+
+Cost-weighted metrics and precision at top-k match operational limits better.
+
+## Interview questions
+
+<Question q="Precision or recall for fraud blocking?">It depends on costs, usually balancing missed fraud against blocking genuine customers.</Question>
+
+<Question q="Why is accuracy misleading on rare events?">Always predicting the majority class can achieve a high score with zero value.</Question>

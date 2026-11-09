@@ -1,0 +1,82 @@
+---
+title: "ETL, ELT, Batch and Streaming"
+summary: "How data moves from source to analysis, and how to build idempotent pipelines."
+level: fundamental
+section: foundations
+order: 1
+tags: ["ETL","ELT","data pipelines","batch","streaming","idempotency"]
+related: ["data-engineering/warehouses-lakes-and-lakehouses","excel/power-query-and-data-model","mongodb/aggregation-pipeline"]
+versions: "PostgreSQL 18 for SQL examples"
+tested: "SQL example executed on PGlite (PostgreSQL 18)"
+verified: "2026-11-09"
+docs:
+  - label: "dbt: Introduction"
+    url: "https://docs.getdbt.com/docs/introduction"
+  - label: "Apache Spark: Structured Streaming"
+    url: "https://spark.apache.org/docs/latest/streaming/index.html"
+---
+
+## What it is
+
+A **data pipeline** moves and transforms data. **ETL** transforms before loading. **ELT** loads raw data and transforms it within the warehouse. **Batch** processes bounded chunks, and **streaming** processes events continuously.
+
+## Why it exists
+
+Operational systems aren't designed for analytics. Pipelines make correct data available for reports and models.
+
+## How it works
+
+| | Batch | Streaming |
+| --- | --- | --- |
+| Latency | Minutes to hours | Seconds |
+| Complexity | Lower | Higher |
+| Correctness | Easier | Needs windows, watermarks, duplicates |
+
+Pipelines must be **idempotent**, so re-running a load doesn't change the correct result. Approaches include overwriting a partition, or merging by key. **Change data capture** reads database changes from the log with a low effect on the source.
+
+## Syntax and key APIs
+
+An idempotent load typically uses `MERGE` or `INSERT ... ON CONFLICT`.
+
+## Simple example
+
+```sql
+CREATE TEMP TABLE daily_sales (day date PRIMARY KEY, revenue numeric);
+
+INSERT INTO daily_sales VALUES ('2026-01-01', 100)
+ON CONFLICT (day) DO UPDATE SET revenue = EXCLUDED.revenue;
+
+INSERT INTO daily_sales VALUES ('2026-01-01', 125)
+ON CONFLICT (day) DO UPDATE SET revenue = EXCLUDED.revenue;
+
+SELECT count(*) AS rows, sum(revenue) AS revenue FROM daily_sales;
+-- rows: [{"rows":1,"revenue":"125"}]
+```
+
+## Industry examples
+
+ELT with cloud warehouses and dbt is standard for analytics. Streaming is used for fraud and live operations.
+
+## Patterns and best practices
+
+- Keep raw data immutable.
+- Make runs replayable by date.
+- Separate staging from published data.
+- Track lineage.
+
+## Alternatives and trade-offs
+
+Micro-batching provides near-real-time data with batch simplicity. Do not choose streaming unless a decision needs it.
+
+## Common mistakes
+
+- Append-only loads that duplicate on retry.
+- Using wall-clock time rather than event time.
+- Transforming with no raw copy.
+- Hidden dependencies between jobs.
+
+## Interview questions
+
+<Question q="ETL vs ELT?">ETL transforms before loading. ELT loads first and uses the warehouse to transform.</Question>
+
+<Question q="What is idempotency?">Running an operation multiple times has the same effect as running it once.</Question>

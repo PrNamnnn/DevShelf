@@ -1,0 +1,81 @@
+---
+title: "Atlas, Security and Production Patterns"
+summary: "Run MongoDB in Atlas, secure it, monitor performance and plan backups."
+level: advanced
+section: production
+order: 2
+tags: ["Atlas","security","backup","monitoring","change streams"]
+requires: ["mongodb/replication-and-sharding"]
+related: ["mongodb/python-node-and-mongoose","express/validation-and-security","express/production-operations"]
+versions: "Documentation for MongoDB 9.0 and Atlas as of November 2026"
+tested: "Checked against MongoDB documentation. Atlas wasn't used"
+verified: "2026-11-09"
+docs:
+  - label: "MongoDB Atlas"
+    url: "https://www.mongodb.com/docs/atlas/"
+  - label: "MongoDB: Security"
+    url: "https://www.mongodb.com/docs/manual/security/"
+  - label: "MongoDB: Change streams"
+    url: "https://www.mongodb.com/docs/manual/changeStreams/"
+---
+
+## What it is
+
+**Atlas** is MongoDB's managed service, available on AWS, Azure and Google Cloud. Production readiness means secured access, tested backups, monitoring and capacity plans.
+
+## Why it exists
+
+Operating a replicated, secured database by hand is demanding. A misconfigured instance exposed to the internet is a recurring source of data breaches.
+
+## How it works
+
+Security layers:
+
+| Layer | Control |
+| --- | --- |
+| Network | IP access list, private endpoints, VPC peering |
+| Authentication | SCRAM, X.509, OIDC |
+| Authorization | Role-based access with least privilege |
+| Encryption | TLS in transit, encryption at rest, field-level or Queryable Encryption |
+| Audit | Database auditing |
+
+Watch operation latency, replication lag, connections, cache usage and slow queries. **Change streams** let applications react to committed changes.
+
+## Syntax and key APIs
+
+```text
+db.createUser({ user: "reporting", pwd: passwordPrompt(), roles: [{ role: "read", db: "shop" }] })
+db.orders.watch([{ $match: { operationType: "insert" } }])
+```
+
+## Simple example
+
+A production checklist: a private endpoint, one least-privilege user per service, `retryWrites=true`, `w=majority`, automated backups with a tested restore, slow-query alerts and index review before releases.
+
+## Industry examples
+
+Teams stream change events into Kafka or a warehouse for analytics, keeping application databases free from reporting load.
+
+## Patterns and best practices
+
+- Never expose a database to `0.0.0.0/0`.
+- Rotate credentials.
+- Test restores on a schedule.
+- Track schema and index changes in version control.
+
+## Alternatives and trade-offs
+
+Self-hosting gives control and takes operational effort. Managed services cost more and remove much of the risk.
+
+## Common mistakes
+
+- Using an admin user in application code.
+- Backups never tested.
+- Treating a replica as a backup.
+- Reporting queries on the primary.
+
+## Interview questions
+
+<Question q="How would you secure a MongoDB deployment?">Restrict network access, require authentication and TLS, grant least privilege, encrypt sensitive data and audit access.</Question>
+
+<Question q="What are change streams used for?">Reacting to committed data changes, such as syncing search or analytics systems.</Question>

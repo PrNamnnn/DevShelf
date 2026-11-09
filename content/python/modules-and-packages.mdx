@@ -1,0 +1,166 @@
+---
+title: "Modules, Packages and the Import System"
+summary: "What import really does, how sys.path and sys.modules work, project layout, and managing environments."
+level: intermediate
+section: modules
+order: 10
+tags: [import, modules, packages, sys.path, venv, pyproject, circular-imports, __init__]
+requires: [python/execution-model]
+related: [python/standard-library-essentials]
+versions: "Implicit namespace packages need Python 3.3+. tomllib needs 3.11+. Lazy imports arrive in 3.15."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python reference: The import system"
+    url: "https://docs.python.org/3/reference/import.html"
+  - label: "Python tutorial: Modules"
+    url: "https://docs.python.org/3/tutorial/modules.html"
+  - label: "Python library: venv"
+    url: "https://docs.python.org/3/library/venv.html"
+  - label: "Python Packaging User Guide: pyproject.toml"
+    url: "https://packaging.python.org/en/latest/guides/writing-pyproject-toml/"
+---
+
+## What it is
+
+A **module** is a file of Python code. A **package** is a module with a `__path__`, usually a directory with `__init__.py`.
+
+## Why it exists
+
+Modules provide namespaces and reuse. Packages organize many modules into a hierarchy that can be installed.
+
+## How it works
+
+<StepFlow
+  title="import shop.cart"
+  nodes={["check sys.modules", "find via sys.path", "create module object", "add to sys.modules", "run module code", "bind name"]}
+  steps={[
+    { active: [0], note: "Already imported? Python reuses it, so module code runs only once per process." },
+    { active: [1], note: "Otherwise finders search for it. shop is imported first, then shop.cart." },
+    { active: [2], note: "An empty module object is created from the located file." },
+    { active: [3], note: "It's registered before it runs, which is how circular imports partially work." },
+    { active: [4], note: "The module's top-level statements run." },
+    { active: [5], note: "The name shop is bound in the importing namespace." },
+  ]}
+/>
+
+## Syntax and key APIs
+
+```py
+import package.module as alias
+from package.module import name
+from . import sibling               # relative, inside a package
+__all__ = ["public_name"]
+```
+
+| Tool | Purpose |
+| --- | --- |
+| `python -m venv .venv` | Isolated environment |
+| `pip install -e .` | Editable install |
+| `pyproject.toml` | Project metadata and build |
+| `importlib.import_module(name)` | Import dynamically |
+
+## Simple example
+
+```python
+import sys, tempfile, importlib
+from pathlib import Path
+
+with tempfile.TemporaryDirectory() as folder:
+    package = Path(folder) / "shop"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "cart.py").write_text("LOADS = []\nLOADS.append(1)\ndef total(): return len(LOADS)\n")
+
+    sys.path.insert(0, folder)
+    first = importlib.import_module("shop.cart")
+    second = importlib.import_module("shop.cart")
+
+    assert first is second
+    assert first.total() == 1
+    assert "shop.cart" in sys.modules
+    sys.path.pop(0)
+```
+
+## Industry examples
+
+### A standard project layout
+
+The `src` layout makes sure tests run against the installed package.
+
+```text
+myapp/
+  pyproject.toml
+  src/
+    myapp/
+      __init__.py
+      __main__.py
+      core.py
+  tests/
+    test_core.py
+```
+
+```toml
+[project]
+name = "myapp"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["httpx>=0.27"]
+
+[project.scripts]
+myapp = "myapp.core:main"
+```
+
+### Break a circular import
+
+Move the shared code to a third module, or import inside the function that needs it.
+
+```py
+def render(order):
+    from myapp.templates import invoice
+    return invoice(order)
+```
+
+### Load plugins by name
+
+```python
+import importlib
+
+module = importlib.import_module("json")
+assert module.loads("[1]") == [1]
+```
+
+## Patterns and best practices
+
+- Use one virtual environment per project.
+- Use absolute imports across packages.
+- Keep `__init__.py` small, since it runs on import.
+- Pin dependencies through a lock file for applications.
+
+## Alternatives and trade-offs
+
+| Tool | Strength | Trade-off |
+| --- | --- | --- |
+| `venv` and `pip` | Standard | Manual locking |
+| uv | Fast, integrated locking | Third-party |
+| Poetry | Integrated workflow | Its own conventions |
+
+## Common mistakes
+
+**Naming a file after a library.** `email.py` in your project shadows the standard `email` package.
+
+**Installing into the system Python.** Projects then conflict. Use a virtual environment.
+
+**Heavy work at import time.** Every importer pays for it.
+
+**`from module import *`.** It hides where names come from.
+
+## Interview questions
+
+<Question q="Why does a module's code only run once?">
+After the first import it's cached in `sys.modules`, and later imports return that object.
+</Question>
+
+<Question q="What causes a circular import error?">
+Two modules import each other, so one sees the other partially initialized and its names are missing.
+</Question>

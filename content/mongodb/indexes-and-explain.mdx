@@ -1,0 +1,107 @@
+---
+title: "Indexes, the ESR Guideline and explain()"
+summary: "Build compound indexes in Equality, Sort, Range order, and read execution statistics to confirm a query uses them."
+level: intermediate
+section: querying
+order: 2
+tags: ["indexes","compound index","ESR","explain","query planner"]
+requires: ["mongodb/crud-and-query-operators"]
+related: ["mongodb/aggregation-pipeline","postgresql/indexing-strategies","sqlserver/indexes-and-execution-plans"]
+versions: "Documentation for MongoDB 9.0. Examples executed on MongoDB 8.0.12"
+tested: "JavaScript examples executed against a temporary MongoDB 8.0.12 replica set"
+verified: "2026-11-09"
+docs:
+  - label: "MongoDB: Compound indexes"
+    url: "https://www.mongodb.com/docs/manual/core/indexes/index-types/index-compound/"
+  - label: "MongoDB: ESR guideline"
+    url: "https://www.mongodb.com/docs/manual/tutorial/equality-sort-range-guideline/"
+  - label: "MongoDB: cursor.explain"
+    url: "https://www.mongodb.com/docs/manual/reference/method/cursor.explain/"
+  - label: "MongoDB: Explain results"
+    url: "https://www.mongodb.com/docs/manual/reference/explain-results/"
+---
+
+## What it is
+
+An **index** is a B-tree structure that finds documents without scanning the whole collection. A **compound index** covers several fields in a defined order, up to 32. `explain()` reveals what the database actually did.
+
+## Why it exists
+
+A collection scan grows with data size. A suitable index makes a query's cost depend on how many results it needs.
+
+## How it works
+
+Use the **Equality, Sort, Range** guideline when ordering fields: equality first, then the sort, then range filters. If a range is very selective, putting it before the sort may be better. Always measure.
+
+A compound index supports its **prefixes**. An index on `{a:1, b:1}` serves queries on `a` and on `a, b`, and not on `b` alone.
+
+Key explain fields include the winning plan (`IXSCAN` or `COLLSCAN`, and `SORT` for in-memory sorting), `nReturned`, `totalKeysExamined` and `totalDocsExamined`. A healthy query examines about as many documents as it returns.
+
+Verbosity modes are `queryPlanner`, `executionStats` and `allPlansExecution`.
+
+## Syntax and key APIs
+
+```text
+db.orders.createIndex({ status: 1, createdAt: -1, total: 1 })
+db.orders.find({ status: "paid", total: { $gt: 100 } }).sort({ createdAt: -1 }).explain("executionStats")
+```
+
+## Simple example
+
+```js
+import assert from "node:assert/strict";
+import { MongoClient } from "mongodb";
+
+const client = new MongoClient(process.env.MONGODB_URI);
+const db = client.db("shelf_indexes");
+await db.dropDatabase();
+const orders = db.collection("orders");
+
+await orders.insertMany(Array.from({ length: 2000 }, (_, i) => ({
+  status: i % 10 === 0 ? "paid" : "open",
+  createdAt: i,
+  total: i % 500,
+})));
+
+const query = () => orders.find({ status: "paid", total: { $gt: 400 } }).sort({ createdAt: -1 });
+const before = await query().explain("executionStats");
+assert.equal(before.executionStats.totalDocsExamined, 2000);
+
+await orders.createIndex({ status: 1, createdAt: -1, total: 1 });
+const after = await query().explain("executionStats");
+const plan = JSON.stringify(after.queryPlanner.winningPlan);
+assert.ok(plan.includes("IXSCAN"));
+assert.ok(!plan.includes('"SORT"'));
+assert.ok(after.executionStats.totalDocsExamined < 200);
+
+await db.dropDatabase();
+await client.close();
+```
+
+## Industry examples
+
+Teams review slow query logs and Atlas Performance Advisor to design indexes around real workloads. Partial indexes keep only the rows of interest, such as active orders.
+
+## Patterns and best practices
+
+- Build indexes from query patterns, and remove unused ones.
+- Use unique indexes for true business keys.
+- Use covered queries when you can.
+- Set up TTL indexes for expiring data.
+
+## Alternatives and trade-offs
+
+Each index costs write performance and memory. Atlas Search suits text search better than regular indexes do.
+
+## Common mistakes
+
+- Ordering compound fields by intuition.
+- Indexing low-selectivity fields alone.
+- Ignoring in-memory `SORT` stages.
+- Too many overlapping indexes.
+
+## Interview questions
+
+<Question q="Explain the ESR guideline.">Place equality fields first, then sort fields, then range fields, so the index can provide both selection and order.</Question>
+
+<Question q="What does a large gap between docs examined and returned mean?">The index isn't selective for that query.</Question>

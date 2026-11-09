@@ -1,0 +1,96 @@
+---
+title: "Student's t, Chi-Square and F Distributions"
+summary: "The three sampling distributions behind most classical tests, and what degrees of freedom actually mean."
+level: intermediate
+section: probability
+order: 4
+tags: ["t distribution","chi-square distribution","F distribution","degrees of freedom"]
+requires: ["statistics/continuous-distributions"]
+related: ["statistics/t-tests","statistics/chi-square-tests","statistics/anova-and-post-hoc"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "SciPy: t"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.t.html"
+  - label: "SciPy: chi2"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.chi2.html"
+  - label: "SciPy: f"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.f.html"
+---
+
+## What it is
+
+These three distributions describe test statistics under the null hypothesis. They're built from normal variables.
+
+| Distribution | Built from | Used by |
+| --- | --- | --- |
+| Student's t | Normal ÷ √(chi-square ÷ df) | t-tests, regression coefficients |
+| Chi-square | Sum of k squared standard normals | Count tables, variance tests |
+| F | Ratio of two chi-squares, each ÷ df | ANOVA, regression F-test |
+
+## Why it exists
+
+When the population SD is unknown, replacing it with a sample estimate adds uncertainty. William Gosset derived the t-distribution, publishing under the pseudonym "Student", to account for exactly this with small samples.
+
+## How it works
+
+<DistributionExplorer only={["t", "chi2", "f"]} title="Sampling distributions" />
+
+**Degrees of freedom** count the independent pieces of information left after estimating parameters. With df small, t has heavy tails. As df grows it approaches the standard normal. Chi-square and F are non-negative and right-skewed, and they're typically tested using the upper tail.
+
+Relationships worth remembering: the square of a t variable with v df follows F(1, v), and chi-square with 1 df is a squared standard normal.
+
+## Intuition and formula
+
+<Formula>t = Z / √(χ²ᵥ / v)</Formula>
+
+<Formula>F = (χ²_a / a) / (χ²_b / b)</Formula>
+
+## Worked example
+
+The two-sided 5% critical values vary with df: normal 1.96, t with 29 df 2.045, t with 9 df 2.262. Small samples require more evidence. A chi-square critical value is 3.84 for df = 1 and 7.81 for df = 3. In a one-way ANOVA with 3 groups and 15 observations, the 5% F critical value with (2, 12) df is 3.89.
+
+## Python
+
+```python
+from scipy import stats
+
+assert round(stats.t.ppf(0.975, 9), 3) == 2.262
+assert round(stats.t.ppf(0.975, 29), 3) == 2.045
+assert round(stats.chi2.ppf(0.95, 1), 2) == 3.84
+assert round(stats.chi2.ppf(0.95, 3), 2) == 7.81
+assert round(stats.f.ppf(0.95, 2, 12), 2) == 3.89
+
+# t squared equals F(1, v) at the matching tail.
+assert round(stats.t.ppf(0.975, 12) ** 2, 6) == round(stats.f.ppf(0.95, 1, 12), 6)
+```
+
+## Excel or Power BI
+
+`T.INV.2T(0.05, 9)`, `CHISQ.INV.RT(0.05, 1)` and `F.INV.RT(0.05, 2, 12)` return critical values. `T.DIST.2T`, `CHISQ.DIST.RT` and `F.DIST.RT` return p-values.
+
+## In industry
+
+You rarely consult these directly, since software reports them, but they explain why small experiments need bigger effects and why regressions report t and F statistics.
+
+## Assumptions and limitations
+
+Exact results depend on normal errors and independence. Larger samples relax normality through the Central Limit Theorem, though not independence.
+
+## Common mistakes
+
+- Using the wrong degrees of freedom.
+- Assuming t and z differ meaningfully at large sample sizes.
+- Applying a two-sided value to a one-sided question.
+- Treating chi-square's upper-tail test as directional.
+
+## Alternatives
+
+Permutation tests and the bootstrap build the reference distribution directly from the data.
+
+## Interview questions
+
+<Question q="Why does the t-distribution have heavier tails than normal?">Because the standard deviation is estimated, adding uncertainty that's largest with small samples.</Question>
+
+<Question q="What are degrees of freedom?">The number of independent values remaining after estimating the parameters that constrain the data.</Question>

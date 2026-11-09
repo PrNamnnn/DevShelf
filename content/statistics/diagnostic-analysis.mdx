@@ -1,0 +1,111 @@
+---
+title: "Diagnostic Analysis and Root Cause"
+summary: "Find out why a metric moved through drill-down, segmentation, contribution and variance analysis."
+level: intermediate
+section: analysis-types
+order: 5
+tags: ["root cause","drill-down","contribution analysis","variance analysis"]
+requires: ["statistics/exploratory-data-analysis"]
+related: ["statistics/funnel-analysis","statistics/growth-accounting-and-decomposition","powerbi/report-interactions"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "pandas: Reshaping and pivot tables"
+    url: "https://pandas.pydata.org/docs/user_guide/reshaping.html"
+  - label: "NIST: Handbook"
+    url: "https://www.itl.nist.gov/div898/handbook/"
+---
+
+## What it is
+
+Diagnostic analysis explains why something happened. It starts from an observed change and narrows the possible causes until the remaining explanation can be tested.
+
+## Why it exists
+
+"Revenue fell 5%" prompts no specific action. "Revenue fell because Android checkout failures rose after version 8.2 in two regions" does.
+
+## How it works
+
+Work in this order:
+
+1. **Confirm it's real.** Check pipelines, definition changes, tracking outages, holidays and day-of-week effects.
+2. **Decompose the metric** into its factors, such as traffic × conversion × average order value.
+3. **Segment.** Cut by platform, region, channel, plan and customer age to locate the change.
+4. **Compute contribution.** A segment's contribution is its own change divided by the total change.
+5. **Check timing and events.** Line the change up with releases, campaigns and outages.
+6. **Test the explanation.** Run a holdout, an experiment, or a natural-experiment comparison.
+
+Mix shift is a frequent trap. An overall rate can fall even when each segment improves, simply because low-rate segments grew.
+
+## Worked example
+
+Total orders fell from 10,000 to 9,500, a change of −500.
+
+| Segment | Before | After | Change | Contribution |
+| --- | --- | --- | --- | --- |
+| iOS | 4,000 | 4,050 | +50 | −10% |
+| Android | 5,000 | 4,400 | −600 | 120% |
+| Web | 1,000 | 1,050 | +50 | −10% |
+
+Android explains 120% of the decline, partly offset by small gains elsewhere. Next you'd split Android by app version and funnel step.
+
+## Python
+
+```python
+import pandas as pd
+
+orders = pd.DataFrame(
+    {"before": [4_000, 5_000, 1_000], "after": [4_050, 4_400, 1_050]},
+    index=["iOS", "Android", "Web"],
+)
+orders["change"] = orders["after"] - orders["before"]
+orders["contribution"] = orders["change"] / orders["change"].sum()
+
+assert orders["change"].sum() == -500
+assert orders.loc["Android", "contribution"] == 1.2
+```
+
+## SQL
+
+```sql
+WITH o AS (
+  SELECT * FROM (VALUES ('iOS', 4000, 4050), ('Android', 5000, 4400), ('Web', 1000, 1050))
+    AS t(segment, before_n, after_n)
+)
+SELECT segment,
+       after_n - before_n AS change,
+       round((after_n - before_n)::numeric / sum(after_n - before_n) OVER (), 2) AS contribution
+FROM o
+ORDER BY contribution DESC;
+-- rows: [{"segment":"Android","change":-600,"contribution":"1.20"},{"segment":"iOS","change":50,"contribution":"-0.10"},{"segment":"Web","change":50,"contribution":"-0.10"}]
+```
+
+## Excel or Power BI
+
+Pivot Tables with drill-down and a `Difference From` calculation handle most of this. Power BI's decomposition tree and Key Influencers visuals help find candidates, and drill-through pages let users move from the summary to the detail.
+
+## In industry
+
+Metric review meetings use exactly this routine. Good teams keep a shared log of releases, campaigns and data incidents so that a metric change can be linked to events quickly.
+
+## Assumptions and limitations
+
+Segmentation finds where a change happened and doesn't by itself prove why. Slicing many ways creates false positives, and contribution percentages can look odd when positive and negative changes offset each other.
+
+## Common mistakes
+
+- Skipping the data-validity check.
+- Stopping at the first segment that looks bad.
+- Ignoring mix shift.
+- Reporting a coincident event as the cause.
+
+## Alternatives
+
+Formal causal methods, including difference-in-differences and interrupted time series, estimate the effect of a known event. Controlled experiments are the strongest option whenever they're feasible.
+
+## Interview questions
+
+<Question q="Daily active users dropped 10% yesterday. Walk through your approach.">Confirm the data first, compare with the same weekday, segment by platform, version, geography and acquisition source, check recent releases and outages, quantify the contribution, then propose a test of the leading explanation.</Question>
+
+<Question q="What is mix shift?">A change in the aggregate caused by groups changing proportion, even if each group's own rate is steady.</Question>

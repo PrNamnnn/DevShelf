@@ -1,0 +1,159 @@
+---
+title: "Chat Models and Messages"
+summary: "The common interface over LLM providers, message roles, invoking and streaming, and testing without calling a model."
+level: fundamental
+section: foundations
+order: 10
+tags: [chat-models, messages, init_chat_model, invoke, stream, batch, testing, basics]
+related: [langchain/prompts-and-runnables, langchain/structured-output]
+versions: "LangChain v1 needs Python 3.10+."
+tested: "langchain 1.4.9 and langchain-core 1.7.6 with fake models. No real provider was called."
+verified: "2026-11-09"
+docs:
+  - label: "LangChain: Overview"
+    url: "https://docs.langchain.com/oss/python/langchain/overview"
+  - label: "LangChain: Models"
+    url: "https://docs.langchain.com/oss/python/langchain/models"
+  - label: "LangChain: Messages"
+    url: "https://docs.langchain.com/oss/python/langchain/messages"
+  - label: "LangChain: v1 migration guide"
+    url: "https://docs.langchain.com/oss/python/migrate/langchain-v1"
+---
+
+## What it is
+
+LangChain provides one interface over many LLM providers. A chat model takes a list of **messages** and returns an `AIMessage`.
+
+## Why it exists
+
+Each provider has a different SDK and response format. A common interface makes models swappable, and shared components such as agents and tools can work with any of them.
+
+## How it works
+
+A conversation is a list of typed messages. Models are stateless, so history must be sent on every call.
+
+| Message | Role |
+| --- | --- |
+| `SystemMessage` | Instructions |
+| `HumanMessage` | User input |
+| `AIMessage` | Model output, including tool calls |
+| `ToolMessage` | Result of a tool call, linked by `tool_call_id` |
+
+Message `content` can be a string, a provider-specific list, or standard blocks through the `content_blocks` property.
+
+## Syntax and key APIs
+
+```py
+from langchain.chat_models import init_chat_model
+
+model = init_chat_model("claude-sonnet-4-6", temperature=0, timeout=30, max_retries=2)
+
+model.invoke("Hello")
+model.stream("Hello")
+model.batch(["One", "Two"], config={"max_concurrency": 5})
+```
+
+The first argument can be a model name or a `"provider:model"` string. Each provider needs its integration package and API key.
+
+<Callout type="version">
+LangChain v1 moved `LLMChain`, `ConversationChain`, older retrievers and the hub into `langchain-classic`. Use `langchain.messages` and `langchain.chat_models` in new code.
+</Callout>
+
+## Simple example
+
+A fake model keeps tests fast, free and deterministic.
+
+```python
+from langchain.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+
+model = GenericFakeChatModel(messages=iter([AIMessage(content="Paris")]))
+
+reply = model.invoke([
+    SystemMessage(content="Answer in one word."),
+    HumanMessage(content="Capital of France?"),
+])
+
+assert isinstance(reply, AIMessage)
+assert reply.content == "Paris"
+```
+
+## Industry examples
+
+### Stream tokens to a client
+
+```python
+from langchain.messages import AIMessage
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+
+model = GenericFakeChatModel(messages=iter([AIMessage(content="Hello there friend")]))
+
+chunks = [chunk.content for chunk in model.stream("Hi")]
+
+assert len(chunks) > 1
+assert "".join(chunks) == "Hello there friend"
+```
+
+### Manage conversation history yourself
+
+The model remembers nothing between calls.
+
+```python
+from langchain.messages import AIMessage, HumanMessage
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+model = FakeListChatModel(responses=["Hi Ada", "Your name is Ada"])
+
+history = [HumanMessage(content="I am Ada")]
+history.append(model.invoke(history))
+history.append(HumanMessage(content="What is my name?"))
+history.append(model.invoke(history))
+
+assert [type(m).__name__ for m in history] == ["HumanMessage", "AIMessage", "HumanMessage", "AIMessage"]
+```
+
+### Set production limits
+
+```py
+model = init_chat_model(
+    "provider:model-name",
+    timeout=30,
+    max_retries=3,
+    max_tokens=1000,
+)
+```
+
+## Patterns and best practices
+
+- Configure a timeout and retries on every model.
+- Inject the model as a dependency so that tests can use a fake.
+- Set `max_concurrency` for batch jobs to respect rate limits.
+- Trim or summarize long histories to control cost.
+
+## Alternatives and trade-offs
+
+| Option | Good for | Trade-off |
+| --- | --- | --- |
+| LangChain model interface | Switching providers, agents | Abstraction layer |
+| Provider SDK directly | One provider, newest features | Rewrite to switch |
+| LangGraph | Custom stateful workflows | Lower level |
+
+## Common mistakes
+
+**Assuming the model has memory.** You, or a checkpointer, must supply history.
+
+**Assuming `content` is always a string.** It can be a list of blocks. Use `content_blocks` or the `.text` property for a normalized view.
+
+**Importing `LLMChain` from `langchain`.** It moved to `langchain-classic` in v1.
+
+**Passing untrusted serialized data to `load()`.** The docs warn against it.
+
+## Interview questions
+
+<Question q="Why does LangChain have message types?">
+They represent the conversation's roles in a provider-neutral form, including tool calls and tool results.
+</Question>
+
+<Question q="How do you test LangChain code without an API?">
+Inject a fake chat model such as `GenericFakeChatModel`, which returns scripted responses.
+</Question>

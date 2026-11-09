@@ -1,0 +1,90 @@
+---
+title: "AR, MA, ARIMA and SARIMA"
+summary: "Combine autoregression, differencing and moving-average terms, add seasonality, and select orders."
+level: advanced
+section: time-series
+order: 4
+tags: ["ARIMA","SARIMA","autoregression","moving average models"]
+requires: ["statistics/stationarity-and-autocorrelation"]
+related: ["statistics/forecast-evaluation","statistics/exponential-smoothing"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "statsmodels: ARIMA"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.tsa.arima.model.ARIMA.html"
+  - label: "statsmodels: SARIMAX"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.tsa.statespace.sarimax.SARIMAX.html"
+---
+
+## What it is
+
+ARIMA(p, d, q) combines **autoregressive** terms using past values, **integration** through d differences, and **moving-average** terms using past errors. SARIMA adds seasonal counterparts written as (P, D, Q, s).
+
+## Why it exists
+
+These models capture the autocorrelation structure of a series explicitly, and provide forecasts with intervals.
+
+## How it works
+
+Use the following workflow: plot the series, stabilize variance if needed, difference to reach stationarity, use ACF and PACF for candidate orders, fit the candidates, compare by AIC, inspect residuals with a Ljung-Box test, and validate on a time-based holdout.
+
+Moving-average terms here aren't the same as a moving-average smoother. They model the effect of past forecast errors.
+
+## Intuition and formula
+
+<Formula>yₜ = c + φ₁yₜ₋₁ + … + φₚyₜ₋ₚ + εₜ + θ₁εₜ₋₁ + … + θ_qεₜ₋q</Formula>
+
+This is applied after differencing d times.
+
+## Worked example
+
+A SARIMA(0,1,1)(0,1,1,12), called the "airline model", fits the training portion of the monthly sales series with an AIC of 629.4. On the 12-month test window its MAE is 7.24 and MAPE 1.95%, matching Holt-Winters in this simulation. When a simpler model performs equally well, choose the simpler one.
+
+## Python
+
+```python
+import numpy as np
+import pandas as pd
+from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+
+rng = np.random.default_rng(11)
+n = 120
+idx = pd.date_range("2016-01-01", periods=n, freq="MS")
+y = pd.Series(200 + 1.5 * np.arange(n) + 25 * np.sin(2 * np.pi * np.arange(n) / 12) + rng.normal(0, 6, n), index=idx)
+train, test = y[:-12], y[-12:]
+
+fit = SARIMAX(train, order=(0, 1, 1), seasonal_order=(0, 1, 1, 12)).fit(disp=0)
+forecast = fit.get_forecast(12)
+assert round((test - forecast.predicted_mean).abs().mean(), 2) == 7.24
+assert forecast.conf_int().shape == (12, 2)
+
+ljung = acorr_ljungbox(fit.resid.iloc[13:], lags=[12])
+assert float(ljung["lb_pvalue"].iloc[0]) > 0.01
+```
+
+## In industry
+
+Used for well-behaved demand and financial series. Large-scale forecasting increasingly uses global machine-learning models, with ARIMA kept as an interpretable benchmark.
+
+## Assumptions and limitations
+
+Linear structure, residuals resembling white noise, and stationarity after differencing. Each series needs its own model, so it's labor-intensive at scale without automation.
+
+## Common mistakes
+
+- Choosing orders only by AIC, with no residual check.
+- Over-parameterizing short series.
+- Treating a forecast's confidence interval as if it covered structural change.
+- Using test data to select orders.
+
+## Alternatives
+
+Exponential smoothing for simplicity, ARIMAX with external regressors, and tree or neural models over many related series.
+
+## Interview questions
+
+<Question q="What do p, d and q mean?">Number of autoregressive lags, number of differences, and number of moving-average lags.</Question>
+
+<Question q="How do you know the model has captured the structure?">Residuals resemble white noise, confirmed with an ACF plot and a Ljung-Box test.</Question>

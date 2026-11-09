@@ -1,0 +1,88 @@
+---
+title: "dbt and Analytics Engineering"
+summary: "Version SQL transformations, test them and document lineage inside the warehouse."
+level: intermediate
+section: processing
+order: 3
+tags: ["dbt","analytics engineering","SQL transformation","tests"]
+requires: ["data-engineering/etl-elt-and-pipelines"]
+related: ["data-engineering/data-validation-and-observability","statistics/kpis-and-north-star"]
+versions: "dbt documentation as of November 2026"
+tested: "dbt wasn't run here. Model syntax checked against dbt documentation"
+verified: "2026-11-09"
+docs:
+  - label: "dbt: Introduction"
+    url: "https://docs.getdbt.com/docs/introduction"
+  - label: "dbt: Models"
+    url: "https://docs.getdbt.com/docs/build/models"
+  - label: "dbt: Data tests"
+    url: "https://docs.getdbt.com/docs/build/data-tests"
+---
+
+## What it is
+
+**dbt** compiles templated `SELECT` statements into warehouse tables and views, with dependencies, testing and documentation. This practice is called analytics engineering.
+
+## Why it exists
+
+SQL transformations were often unversioned, untested and tangled. dbt applies software practices to them.
+
+## How it works
+
+Each model is one `select`. `ref()` declares dependencies, from which dbt builds a DAG. Materializations include view, table, incremental and ephemeral.
+
+Layers commonly go staging, intermediate and marts.
+
+## Syntax and key APIs
+
+```text
+-- models/marts/fct_daily_revenue.sql
+{{ config(materialized="incremental", unique_key="day") }}
+
+select day, sum(amount) as revenue
+from {{ ref("stg_orders") }}
+{% if is_incremental() %}
+where day >= (select max(day) from {{ this }})
+{% endif %}
+group by day
+```
+
+```yaml
+models:
+  - name: fct_daily_revenue
+    columns:
+      - name: day
+        data_tests: [unique, not_null]
+```
+
+## Simple example
+
+Running `dbt build` runs models and tests in dependency order. A failing test stops downstream models, stopping bad data before it reaches a dashboard.
+
+## Industry examples
+
+Most modern warehouse teams keep a dbt project in Git, reviewing pull requests before changes reach production.
+
+## Patterns and best practices
+
+- One source-conformed staging model per source table.
+- Define metrics once.
+- Run tests in CI against a separate schema.
+- Add descriptions to mart models.
+
+## Alternatives and trade-offs
+
+Stored procedures work without a new tool, and SQLMesh is a similar newer option.
+
+## Common mistakes
+
+- Complex logic in one giant model.
+- Hard-coded table names instead of `ref`.
+- Incremental models with no late-data handling.
+- Tests only on the final layer.
+
+## Interview questions
+
+<Question q="What does ref() do?">It resolves a model's location and records the dependency.</Question>
+
+<Question q="When would you use an incremental model?">When rebuilding a large table would be too slow or too expensive.</Question>

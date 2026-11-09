@@ -1,0 +1,77 @@
+---
+title: "Data Validation and Observability"
+summary: "Stop bad data with tests and find problems with freshness, volume, schema and distribution monitoring."
+level: intermediate
+section: processing
+order: 4
+tags: ["data validation","data observability","data contracts","freshness"]
+requires: ["data-engineering/etl-elt-and-pipelines"]
+related: ["statistics/inconsistent-data-and-validation","statistics/data-quality-and-leakage","mlops/monitoring-drift-and-retraining"]
+versions: "PostgreSQL 18 for SQL examples"
+tested: "SQL example executed on PGlite (PostgreSQL 18)"
+verified: "2026-11-09"
+docs:
+  - label: "dbt: Data tests"
+    url: "https://docs.getdbt.com/docs/build/data-tests"
+  - label: "Great Expectations documentation"
+    url: "https://docs.greatexpectations.io/docs/"
+---
+
+## What it is
+
+**Validation** checks that data meets rules before use. **Observability** monitors data health over time. A **data contract** is an agreement between the producer and consumer about schema and quality.
+
+## Why it exists
+
+Pipelines often "succeed" while delivering wrong data, and consumers shouldn't be the ones to find out.
+
+## How it works
+
+Monitor the five usual signals: freshness, volume, schema, distribution and lineage.
+
+Types of tests include unique keys, non-null, accepted values, relationships, row-count ranges and reconciliation to the source. Blocking checks stop a pipeline, and warning checks alert only.
+
+## Syntax and key APIs
+
+```sql
+WITH runs(day, row_count) AS (
+  VALUES (DATE '2026-01-01', 1000), (DATE '2026-01-02', 1040), (DATE '2026-01-03', 300)
+), checks AS (
+  SELECT day, row_count, avg(row_count) OVER (ORDER BY day ROWS BETWEEN 2 PRECEDING AND 1 PRECEDING) AS baseline
+  FROM runs
+)
+SELECT day, row_count < 0.5 * baseline AS volume_alert FROM checks ORDER BY day DESC LIMIT 1;
+-- rows: [{"day":"2026-01-03T00:00:00.000Z","volume_alert":true}]
+```
+
+## Simple example
+
+A nightly job compares yesterday's order count against recent history. A sudden fall blocks publishing and alerts the owner, rather than sending executives a false revenue drop.
+
+## Industry examples
+
+Teams combine dbt tests, Great Expectations or Soda, along with lineage to find every downstream dashboard affected by an incident.
+
+## Patterns and best practices
+
+- Test at source and at published layers.
+- Give each dataset an owner.
+- Tune thresholds to avoid alert fatigue.
+- Write incident reviews.
+
+## Alternatives and trade-offs
+
+Automatic anomaly tools catch unknown problems but can be noisy. Written rules are precise but only find what you anticipated.
+
+## Common mistakes
+
+- Testing only row counts.
+- No owner for alerts.
+- Silent schema changes upstream.
+- Testing after data has already been published.
+
+## Interview questions
+
+<Question q="Data testing vs observability?">Tests assert known rules. Observability detects unexpected changes across health signals.</Question>
+
+<Question q="What belongs in a data contract?">Schema, semantics, quality guarantees, ownership and change process.</Question>

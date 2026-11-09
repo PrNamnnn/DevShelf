@@ -1,0 +1,152 @@
+---
+title: "Rendering Strategies and the Request Lifecycle"
+summary: "What is built ahead of time, what streams at request time, and how a navigation differs from a first load."
+level: advanced
+section: rendering
+order: 20
+tags: [rendering, ssr, ssg, streaming, suspense, partial-prerendering, prefetching, lifecycle]
+related: [nextjs/server-and-client-components, nextjs/data-fetching-and-caching, react/concurrent-features-and-actions]
+versions: "Next.js 16. Cache Components makes Partial Prerendering the default in the App Router."
+tested: "Built on Next.js 16.4.5 with cacheComponents enabled. Streaming timing wasn't measured."
+verified: "2026-11-09"
+docs:
+  - label: "Next.js: Caching"
+    url: "https://nextjs.org/docs/app/getting-started/caching"
+  - label: "Next.js: Fetching data"
+    url: "https://nextjs.org/docs/app/getting-started/fetching-data"
+  - label: "Next.js: cacheComponents"
+    url: "https://nextjs.org/docs/app/api-reference/config/next-config-js/cacheComponents"
+  - label: "Next.js: loading.js"
+    url: "https://nextjs.org/docs/app/api-reference/file-conventions/loading"
+---
+
+## What it is
+
+Next.js decides per component how content is produced: prerendered at build, cached at runtime, or streamed for each request.
+
+## Why it exists
+
+A page is rarely all static or all dynamic. A product page may have a fixed description and a personalized cart. Treating each part separately gets a fast first paint without making everything stale.
+
+## How it works
+
+With Cache Components, the tree is prerendered to a static shell, and each `<Suspense>` boundary around runtime data becomes a hole that streams in.
+
+<StepFlow
+  title="A request for a partly dynamic page"
+  nodes={["build: static shell", "proxy.ts (optional)", "serve shell", "render dynamic parts", "stream into Suspense", "hydrate"]}
+  steps={[
+    { active: [0], note: "At build, everything not depending on request data becomes the static shell, including fallbacks." },
+    { active: [1], note: "At request time, the proxy can redirect or rewrite before routing." },
+    { active: [2], note: "The shell is sent immediately, so the user sees layout and fallbacks." },
+    { active: [3], note: "Components that read cookies, headers or uncached data run on the server." },
+    { active: [4], note: "Their output streams over the same response and replaces each fallback." },
+    { active: [5], note: "Client Components become interactive." },
+  ]}
+/>
+
+Later navigations don't reload the document. The client fetches the RSC Payload and keeps shared layouts. Partial prefetching fetches each route's shell by default.
+
+## Syntax and key APIs
+
+| What makes it dynamic | Handling |
+| --- | --- |
+| `cookies()`, `headers()` | Wrap in `Suspense` |
+| `searchParams`, runtime `params` | Wrap in `Suspense` |
+| Uncached fetch | `Suspense` or `use cache` |
+| `Math.random()`, `Date.now()` | `await connection()` with `Suspense`, or `use cache` |
+
+## Simple example
+
+```tsx
+import { Suspense } from "react";
+import { cookies } from "next/headers";
+
+async function Greeting() {
+  const name = (await cookies()).get("name")?.value ?? "guest";
+  return <p>Hello, {name}</p>;
+}
+
+export default function Page() {
+  return (
+    <main>
+      <h1>Static heading</h1>
+      <Suspense fallback={<p>Loading greeting…</p>}>
+        <Greeting />
+      </Suspense>
+    </main>
+  );
+}
+```
+
+## Industry examples
+
+### Stream sections independently
+
+```tsx
+<Suspense fallback={<ChartSkeleton />}>
+  <RevenueChart />
+</Suspense>
+<Suspense fallback={<TableSkeleton />}>
+  <LatestOrders />
+</Suspense>
+```
+
+### Force a request-time value
+
+```tsx
+import { connection } from "next/server";
+
+async function RequestId() {
+  await connection();
+  return <p>{crypto.randomUUID()}</p>;
+}
+```
+
+### Prefetch dynamic links on purpose
+
+```tsx
+<Link href={`/reports/${id}`} prefetch={true}>Open report</Link>
+```
+
+## Patterns and best practices
+
+- Keep the shell meaningful, using skeletons with stable dimensions.
+- Place Suspense close to the dynamic component.
+- Avoid request-time data in layouts unless it's behind its own boundary.
+- Remember a 404 streamed after a 200 shell gets a `noindex` meta tag.
+
+## Alternatives and trade-offs
+
+| Strategy | Good for | Trade-off |
+| --- | --- | --- |
+| Fully prerendered | Marketing and docs | Needs rebuild or revalidation |
+| Cached with revalidation | Catalogs | Bounded staleness |
+| Streaming dynamic | Personalized content | Server work per request |
+| Client fetching | Highly interactive widgets | More JavaScript and spinners |
+
+Bots that need metadata in `<head>` are rendered dynamically at request time.
+
+## Common mistakes
+
+**Placing runtime data in a layout under Cache Components.** That's a build-time error without its own `Suspense`.
+
+**Relying on `runtime = 'edge'` with Cache Components.** It requires the Node.js runtime.
+
+**Treating a loading spinner as the whole answer.** A top-level boundary hides the shell's benefit. Use smaller boundaries.
+
+**Expecting `loading.tsx` to cover its own layout.** It wraps the page and nested layouts, not the same segment's layout.
+
+## Interview questions
+
+<Question q="What is Partial Prerendering?">
+Serving a prerendered static shell and streaming dynamic content into Suspense holes in the same response.
+</Question>
+
+<Question q="SSR versus streaming?">
+Traditional SSR waits to send a complete page. Streaming sends the shell first, then each section as it's ready.
+</Question>
+
+<Question q="What happens on a client-side navigation?">
+The router fetches the new route's RSC Payload, keeps shared layouts, and updates only what changed.
+</Question>

@@ -1,0 +1,87 @@
+---
+title: "Airflow and Orchestration"
+summary: "Model pipelines as DAGs, handle dependencies, retries and backfills."
+level: advanced
+section: processing
+order: 2
+tags: ["Apache Airflow","orchestration","DAG","retries","backfill"]
+requires: ["data-engineering/etl-elt-and-pipelines"]
+related: ["mlops/feature-stores-and-pipelines","data-engineering/data-validation-and-observability"]
+versions: "Apache Airflow 3.4 documentation"
+tested: "Airflow wasn't run here. DAG fragment checked against Airflow documentation"
+verified: "2026-11-09"
+docs:
+  - label: "Airflow: DAGs"
+    url: "https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dags.html"
+  - label: "Airflow: Best practices"
+    url: "https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html"
+---
+
+## What it is
+
+**Orchestration** schedules and coordinates work. **Airflow** defines pipelines as Python **DAGs**, which are directed acyclic graphs of tasks.
+
+## Why it exists
+
+Real pipelines have dependencies, failures and retries, and they need history. Cron can't express or monitor these.
+
+## How it works
+
+The scheduler creates a **Dag Run** for each data interval. Tasks run when upstream tasks satisfy their trigger rule, by default `all_success`. Tasks should be idempotent, use the logical date rather than the current time, and pass only small metadata through XCom.
+
+A **backfill** runs past intervals, which is safe only if tasks are idempotent.
+
+## Syntax and key APIs
+
+```py
+from airflow.sdk import dag, task
+from datetime import datetime
+
+@dag(schedule="@daily", start_date=datetime(2026, 1, 1), catchup=False)
+def sales_pipeline():
+    @task(retries=3)
+    def extract(ds=None):
+        return f"s3://raw/{ds}/orders.parquet"
+
+    @task
+    def load(path: str):
+        print(path)
+
+    load(extract())
+
+sales_pipeline()
+```
+
+Classic operator style uses `extract >> transform >> load`.
+
+## Simple example
+
+A daily pipeline: wait for files, load to staging, run dbt models, run data tests and publish. If tests fail, the publish step doesn't run, and yesterday's trusted data remains.
+
+## Industry examples
+
+Teams orchestrate Spark jobs, dbt runs and ML training, with alerts sent to on-call channels.
+
+## Patterns and best practices
+
+- Keep business logic out of DAG files.
+- Set retries with backoff and timeouts.
+- Don't do heavy work at the top level of a DAG file.
+- Alert on SLA misses.
+
+## Alternatives and trade-offs
+
+Dagster emphasizes data assets. Prefect is Python-native. Managed schedulers may suffice for simple needs.
+
+## Common mistakes
+
+- Using `now()` instead of the logical date.
+- Passing large data via XCom.
+- Tasks that aren't idempotent.
+- Unexpected catchup on deploy.
+
+## Interview questions
+
+<Question q="What makes a DAG task safe to retry?">It's idempotent and uses the logical date to target a fixed partition.</Question>
+
+<Question q="What is backfilling?">Running a pipeline for past intervals.</Question>

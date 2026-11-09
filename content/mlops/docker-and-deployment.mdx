@@ -1,0 +1,84 @@
+---
+title: "Docker, CI/CD and Cloud Deployment"
+summary: "Package models in containers, automate tests and releases, and reason about cloud options."
+level: intermediate
+section: serving
+order: 2
+tags: ["Docker","CI/CD","cloud deployment","containers"]
+requires: ["mlops/model-serving-and-inference"]
+related: ["nextjs/deployment-and-environment","express/production-operations"]
+versions: "Docker documentation as of November 2026"
+tested: "Not executed because the Docker daemon wasn't running. Checked against Docker documentation"
+verified: "2026-11-09"
+docs:
+  - label: "Docker overview"
+    url: "https://docs.docker.com/get-started/docker-overview/"
+  - label: "Dockerfile best practices"
+    url: "https://docs.docker.com/build/building/best-practices/"
+---
+
+## What it is
+
+A Docker **image** is an immutable package of an application with dependencies. A **container** is a running instance. **CI/CD** automates testing and release.
+
+## Why it exists
+
+"Works on my machine" is especially common in ML because of native libraries and exact package versions.
+
+## How it works
+
+Images are built in layers, and unchanged layers are cached, so install dependencies before copying frequently changed code. Multi-stage builds keep final images small.
+
+A CI pipeline for ML runs unit tests, data checks and quality gates, builds an image and deploys through staging.
+
+Cloud options range from serverless containers and managed Kubernetes to managed ML endpoints.
+
+## Syntax and key APIs
+
+```text
+FROM python:3.14-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app/ ./app
+USER 1000
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+```bash
+docker build -t churn-api:1.4.0 .
+docker run --rm -p 8000:8000 churn-api:1.4.0
+```
+
+## Simple example
+
+A GitHub Actions workflow runs tests on each pull request, builds an image tagged by commit SHA on merge, pushes it to a registry, and deploys to staging with a smoke test before production.
+
+## Industry examples
+
+Teams keep large model files in object storage or a registry, and mount or download them at startup rather than baking them into each image.
+
+## Patterns and best practices
+
+- Run as a non-root user.
+- Pin base image tags.
+- Add a health endpoint.
+- Keep secrets out of images.
+
+## Alternatives and trade-offs
+
+Managed endpoints remove infrastructure work but offer less control. Kubernetes is powerful and has real operating cost.
+
+## Common mistakes
+
+- Copying the entire repository before installing dependencies.
+- Using the `latest` tag in production.
+- Baking in credentials.
+- Forgetting to size memory for model loading.
+
+## Interview questions
+
+<Question q="Image vs container?">An image is an immutable template. A container is a running instance of it.</Question>
+
+<Question q="Why order Dockerfile steps carefully?">Caching reuses layers until something changes, so stable steps should come first.</Question>

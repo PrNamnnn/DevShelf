@@ -1,0 +1,90 @@
+---
+title: "Interpreting Results and Making Decisions"
+summary: "Practical versus statistical significance, novelty and seasonality, inconclusive results and a decision framework for shipping."
+level: advanced
+section: experimentation
+order: 10
+tags: ["practical significance","novelty effect","seasonality","decision making"]
+requires: ["statistics/analyzing-ab-tests"]
+related: ["statistics/errors-power-and-effect-size","statistics/storytelling-and-uncertainty","statistics/peeking-and-sequential-testing"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "NIST: Interpretation"
+    url: "https://www.itl.nist.gov/div898/handbook/prc/section1/prc131.htm"
+---
+
+## What it is
+
+Interpretation turns numbers into an action, taking the magnitude, uncertainty, cost and external validity of a result into account.
+
+## Why it exists
+
+A significant result can be commercially meaningless, and a non-significant one can still suggest a worthwhile bet. The decision depends on more than a threshold.
+
+## How it works
+
+Compare the confidence interval to the practical threshold, the smallest effect worth shipping:
+
+| Interval vs. zero and threshold | Conclusion |
+| --- | --- |
+| Entirely above the threshold | Ship |
+| Above zero, overlaps the threshold | Real, may be too small |
+| Includes zero and the threshold | Inconclusive, needs more data |
+| Near zero and below the threshold | Confidently not worthwhile |
+| Entirely below zero | Harmful, don't ship |
+
+**Novelty effects** make new features popular at first, and **change aversion** makes them unpopular at first. Plot the treatment effect by day since exposure. **Seasonality** limits generalization: a Diwali-week test may not describe February.
+
+## Worked example
+
+A pricing badge lifts conversion by 0.4 points with a 95% CI of 0.2 to 0.6. Significance is clear. The team's break-even threshold, after engineering and support costs, is 0.3 points. The interval overlaps it, so the expected value is positive, with some risk of landing below break-even. With a low-cost, reversible change, the team ships and continues to monitor. With an expensive rewrite, they'd run longer first.
+
+A daily effect series starts at +5% and decays toward +1% by week three, so the first week's result overstates the long-run value.
+
+## Python
+
+```python
+def classify(low: float, high: float, practical: float) -> str:
+    if high < 0:
+        return "harmful"
+    if low >= practical:
+        return "ship"
+    if low > 0:
+        return "real but may be too small"
+    if high < practical:
+        return "not worthwhile"
+    return "inconclusive"
+
+assert classify(0.2, 0.6, 0.3) == "real but may be too small"
+assert classify(0.4, 0.9, 0.3) == "ship"
+assert classify(-0.2, 0.7, 0.3) == "inconclusive"
+assert classify(-0.1, 0.2, 0.3) == "not worthwhile"
+assert classify(-0.9, -0.2, 0.3) == "harmful"
+```
+
+## In industry
+
+Teams frequently keep a small long-term holdout that doesn't receive shipped features, and measure cumulative impact. Experiment archives help calibrate how often large wins replicate.
+
+## Assumptions and limitations
+
+Decision thresholds depend upon cost estimates. Reversibility, strategy and ethics are outside what a statistic can determine. Long-term effects may differ from those measured.
+
+## Common mistakes
+
+- Equating significance with importance.
+- Calling every inconclusive test a failure.
+- Generalizing from a promotional period.
+- Ignoring the winner's curse when forecasting the impact of launch.
+
+## Alternatives
+
+Bayesian expected-loss rules connect uncertainty directly to cost. Staged rollouts provide additional evidence before full exposure.
+
+## Interview questions
+
+<Question q="Is a statistically significant result always worth launching?">No. Compare the effect and its interval with the costs and with the smallest effect that matters.</Question>
+
+<Question q="How do you detect a novelty effect?">Plot the treatment effect by days since first exposure and see whether it decays, or compare new and existing users.</Question>

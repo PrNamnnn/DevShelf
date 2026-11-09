@@ -1,0 +1,153 @@
+---
+title: "Numbers, Strings and Type Conversion"
+summary: "Core data types, operators, input and output, f-strings, and converting between types without surprises."
+level: fundamental
+order: 30
+section: fundamentals
+tags: [int, float, decimal, strings, f-strings, operators, input, print, type-conversion, truthiness]
+requires: [python/variables-and-memory]
+related: [python/conditionals-and-loops, python/standard-library-essentials]
+versions: "All current Python 3 versions."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python library: Built-in types"
+    url: "https://docs.python.org/3/library/stdtypes.html"
+  - label: "Python tutorial: Input and output"
+    url: "https://docs.python.org/3/tutorial/inputoutput.html"
+  - label: "Python library: decimal"
+    url: "https://docs.python.org/3/library/decimal.html"
+---
+
+## What it is
+
+Python's basic types are `int`, `float`, `bool`, `str` and `None`. Operators combine them, and constructors such as `int()` convert between them.
+
+## Why it exists
+
+Python doesn't silently coerce a string to a number, so type errors surface early. You convert explicitly at the edges of a program, where text becomes data.
+
+## How it works
+
+`int` has arbitrary precision. `float` is a 64-bit binary float, so many decimals are approximations. `bool` is a subclass of `int`.
+
+Every object has a **truth value**. Zero, empty containers, `None` and `False` are false, and most other things are true.
+
+| Operator | Meaning | Example |
+| --- | --- | --- |
+| `/` | True division | `7 / 2 == 3.5` |
+| `//` | Floor division | `-7 // 2 == -4` |
+| `%` | Remainder | `-7 % 2 == 1` |
+| `**` | Power | `2 ** 10 == 1024` |
+| `and`, `or` | Return an operand | `0 or 5 == 5` |
+| `a < b < c` | Chained comparison | `1 < 2 < 3` |
+
+## Syntax and key APIs
+
+```py
+name = input("Name: ")          # always returns a string
+print("a", "b", sep="-", end="\n")
+f"{value:.2f} {count:>5} {ratio:.1%} {value=}"
+"a,b".split(",")   ",".join(items)   text.strip()
+text.startswith("x")   text.replace("a", "b")
+```
+
+Strings are immutable sequences of Unicode code points.
+
+## Simple example
+
+```python
+price = 1234.5
+assert f"{price:,.2f}" == "1,234.50"
+assert f"{0.25:.0%}" == "25%"
+
+count = 3
+assert f"{count=}" == "count=3"
+
+assert int("42") + 1 == 43
+assert str(42) + "1" == "421"
+assert int(3.9) == 3
+assert round(2.5) == 2
+```
+
+`round` uses banker's rounding, so ties go to the nearest even number.
+
+## Industry examples
+
+### Use Decimal for money
+
+```python
+from decimal import Decimal, ROUND_HALF_UP
+
+assert 0.1 + 0.2 != 0.3
+assert Decimal("0.1") + Decimal("0.2") == Decimal("0.3")
+
+total = Decimal("19.995").quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+assert total == Decimal("20.00")
+```
+
+Build a `Decimal` from a string, because a float argument carries its binary error with it.
+
+### Validate conversions
+
+```python
+def parse_age(raw):
+    try:
+        age = int(raw)
+    except ValueError:
+        return None
+    return age if 0 <= age < 150 else None
+
+assert parse_age("30") == 30
+assert parse_age("x") is None
+assert parse_age("999") is None
+```
+
+### Normalize text
+
+```python
+assert "  Hello World ".strip().casefold() == "hello world"
+assert "a-b_c".replace("-", " ").replace("_", " ").split() == ["a", "b", "c"]
+assert "São".encode("utf-8") == b"S\xc3\xa3o"
+```
+
+## Patterns and best practices
+
+- Convert input at the boundary, then use real types inside.
+- Build strings with `join`, not repeated `+`.
+- Use `casefold` for case-insensitive comparison.
+- Compare floats with `math.isclose`.
+
+## Alternatives and trade-offs
+
+| Need | Type | Trade-off |
+| --- | --- | --- |
+| Whole numbers | `int` | Slower than machine integers |
+| Measurements | `float` | Approximate |
+| Money | `Decimal` | Slower |
+| Exact ratios | `Fraction` | Slower, can grow large |
+
+## Common mistakes
+
+**Comparing floats with `==`.** Use `math.isclose`.
+
+**Forgetting `input` returns a string.** `input() + 1` raises `TypeError`.
+
+**Reading `and`/`or` as booleans.** They return one of their operands.
+
+```python
+assert (0 or "default") == "default"
+assert ("" and "x") == ""
+```
+
+**`bool("False")` expecting false.** Any non-empty string is true.
+
+## Interview questions
+
+<Question q="Why is 0.1 + 0.2 not 0.3?">
+Those decimals have no exact binary representation, so floats store close approximations and the small errors show up in the sum.
+</Question>
+
+<Question q="What is the difference between / and //?">
+`/` always gives a float. `//` floors the result toward negative infinity.
+</Question>

@@ -1,0 +1,107 @@
+---
+title: "Simple Linear Regression"
+summary: "Fit a line by least squares, interpret slope and intercept, and quantify uncertainty with an interactive fitting exercise."
+level: intermediate
+section: regression
+order: 2
+tags: ["linear regression","least squares","slope","residuals","R squared"]
+requires: ["statistics/correlation-and-causation"]
+related: ["statistics/multiple-linear-regression","statistics/regression-diagnostics","machine-learning/ml-foundations"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "statsmodels: OLS"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.regression.linear_model.OLS.html"
+  - label: "scikit-learn: Linear models"
+    url: "https://scikit-learn.org/stable/modules/linear_model.html"
+---
+
+## What it is
+
+Simple linear regression models a numeric outcome as a straight-line function of one predictor. **Ordinary least squares** chooses the line that minimizes the sum of squared residuals.
+
+## Why it exists
+
+Correlation states how strongly variables move together. Regression states how much the outcome changes per unit of predictor, gives predictions with uncertainty, and extends to many variables.
+
+## How it works
+
+<RegressionViz />
+
+Try to reach the least-squares error by hand, then press the fit button. Squaring penalizes large misses heavily, and it gives a closed-form solution.
+
+**Interpretation:** the slope is the expected change in y per one-unit increase in x. The intercept is the expected y at x = 0, which may have no real meaning if x never gets near zero.
+
+## Intuition and formula
+
+<Formula>ŷ = β₀ + β₁x</Formula>
+
+<Formula>β₁ = cov(x, y) / var(x), β₀ = ȳ − β₁x̄</Formula>
+
+<Formula>R² = 1 − SS_res / SS_tot</Formula>
+
+R² is the share of variance in y explained by the model. In simple regression, it equals r².
+
+## Worked example
+
+Regressing revenue on ad spend (₹k) gives ŷ = 15.63 + 2.013x. Each extra ₹1k of spend is associated with ₹2.01k more revenue, with a 95% CI of 1.85 to 2.18. R² is 0.990. At ₹30k spend, the prediction is ₹76.03k. Associated is the correct word, since observational data doesn't establish that spend caused the revenue.
+
+## Python
+
+```python
+import numpy as np
+import statsmodels.api as sm
+
+spend = np.array([10, 14, 18, 22, 25, 30, 34, 38, 42, 47.0])
+revenue = np.array([38, 44, 50, 62, 64, 72, 86, 90, 104, 110.0])
+
+model = sm.OLS(revenue, sm.add_constant(spend)).fit()
+intercept, slope = model.params
+low, high = model.conf_int()[1]
+
+assert (round(intercept, 2), round(slope, 3)) == (15.63, 2.013)
+assert (round(low, 2), round(high, 2)) == (1.85, 2.18)
+assert round(model.rsquared, 3) == 0.990
+assert round(intercept + slope * 30, 2) == 76.03
+```
+
+## SQL
+
+```sql
+SELECT round(regr_intercept(r, s)::numeric, 2) AS intercept,
+       round(regr_slope(r, s)::numeric, 3) AS slope,
+       round(regr_r2(r, s)::numeric, 3) AS r2
+FROM unnest(ARRAY[10,14,18,22,25,30,34,38,42,47]::float8[],
+            ARRAY[38,44,50,62,64,72,86,90,104,110]::float8[]) AS t(s, r);
+-- rows: [{"intercept":"15.63","slope":"2.013","r2":"0.990"}]
+```
+
+## Excel or Power BI
+
+`SLOPE`, `INTERCEPT`, `RSQ` and `FORECAST.LINEAR` cover the basics, and `LINEST` returns standard errors. The Analytics pane in Power BI adds a trend line to scatter charts.
+
+## In industry
+
+Used for quick driver estimates, benchmarks for machine-learning models, and any setting where explanation matters as much as accuracy.
+
+## Assumptions and limitations
+
+Linearity, independent errors, constant variance and approximately normal errors for small-sample inference. Predicting outside the data's range is extrapolation, and it's unreliable.
+
+## Common mistakes
+
+- Using high R² as proof of a good or causal model.
+- Interpreting a meaningless intercept.
+- Extrapolating.
+- Skipping residual plots.
+
+## Alternatives
+
+Robust regression for outliers, polynomial or spline terms for curves, and Theil-Sen estimators for a median-based slope.
+
+## Interview questions
+
+<Question q="What does OLS minimize?">The sum of squared differences between observed and fitted values.</Question>
+
+<Question q="Can a high R² model be bad?">Yes. It may violate assumptions, be overfit, reflect a shared trend, or fail on new data.</Question>

@@ -1,0 +1,184 @@
+---
+title: "Middleware and Guardrails"
+summary: "Hooking into the agent loop to enforce limits, redact data, require approval and block unsafe behaviour."
+level: advanced
+section: agents
+order: 20
+tags: [middleware, guardrails, pii, human-in-the-loop, wrap_tool_call, before_model, safety]
+requires: [langchain/tools-and-agents]
+related: [langchain/production-ai-engineering, langchain/memory-and-langgraph]
+versions: "LangChain v1."
+tested: "langchain 1.4.9 with a scripted fake model. No real provider was called."
+verified: "2026-11-09"
+docs:
+  - label: "LangChain: Middleware overview"
+    url: "https://docs.langchain.com/oss/python/langchain/middleware/overview"
+  - label: "LangChain: Custom middleware"
+    url: "https://docs.langchain.com/oss/python/langchain/middleware/custom"
+  - label: "LangChain: Guardrails"
+    url: "https://docs.langchain.com/oss/python/langchain/guardrails"
+---
+
+## What it is
+
+Middleware runs code at points in the agent loop. Guardrails use it to validate input and output and to control tool use.
+
+## Why it exists
+
+Prompts alone can't enforce policy. Code around the model can block, redact or pause, regardless of what the model says.
+
+## How it works
+
+Node-style hooks run at points in the loop. Wrap-style hooks surround a call and can run it zero, one or several times.
+
+<StepFlow
+  title="Hooks around one agent run"
+  nodes={["before_agent", "before_model", "wrap_model_call", "after_model", "wrap_tool_call", "after_agent"]}
+  steps={[
+    { active: [0], note: "Runs once per invocation. A good place for an input filter." },
+    { active: [1], note: "Runs before each model call, for example to trim history." },
+    { active: [2], note: "Surrounds the call, which allows retries and model switching." },
+    { active: [3], note: "Inspects the response before tools run." },
+    { active: [4], note: "Surrounds each tool execution, for approval or error handling." },
+    { active: [5], note: "Runs once at the end, for an output check." },
+  ]}
+/>
+
+`before_*` hooks run first to last, `after_*` hooks last to first, and `wrap_*` hooks nest like function calls.
+
+## Syntax and key APIs
+
+```py
+from langchain.agents.middleware import (
+    AgentMiddleware, before_model, wrap_tool_call,
+    PIIMiddleware, HumanInTheLoopMiddleware, ModelRetryMiddleware,
+)
+```
+
+| Guardrail type | Example | Trade-off |
+| --- | --- | --- |
+| Deterministic | Regex, allow-lists | Fast, may miss nuance |
+| Model-based | Classifier or LLM check | Semantic, costs more |
+
+## Simple example
+
+```python
+from langchain.agents import create_agent
+from langchain.agents.middleware import before_model
+from langchain.messages import AIMessage
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+
+class Scripted(GenericFakeChatModel):
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+calls = []
+
+@before_model
+def count_calls(state, runtime):
+    calls.append(len(state["messages"]))
+    return None
+
+agent = create_agent(
+    Scripted(messages=iter([AIMessage(content="hi")])),
+    tools=[],
+    middleware=[count_calls],
+)
+
+agent.invoke({"messages": [{"role": "user", "content": "hello"}]})
+assert calls == [1]
+```
+
+## Industry examples
+
+### Convert tool errors to model feedback
+
+```python
+from langchain.agents import create_agent
+from langchain.agents.middleware import wrap_tool_call
+from langchain.messages import AIMessage, ToolMessage
+from langchain.tools import tool
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+
+class Scripted(GenericFakeChatModel):
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+@tool
+def lookup(sku: str) -> str:
+    """Look up a SKU."""
+    raise ValueError("database offline")
+
+@wrap_tool_call
+def soft_fail(request, handler):
+    try:
+        return handler(request)
+    except ValueError as error:
+        return ToolMessage(content=f"Tool failed: {error}", tool_call_id=request.tool_call["id"])
+
+script = iter([
+    AIMessage(content="", tool_calls=[{"name": "lookup", "args": {"sku": "a"}, "id": "1", "type": "tool_call"}]),
+    AIMessage(content="Sorry, try later."),
+])
+
+agent = create_agent(Scripted(messages=script), tools=[lookup], middleware=[soft_fail])
+result = agent.invoke({"messages": [{"role": "user", "content": "find a"}]})
+
+assert any(isinstance(m, ToolMessage) and "offline" in m.content for m in result["messages"])
+assert result["messages"][-1].content == "Sorry, try later."
+```
+
+### Redact personal data
+
+```py
+agent = create_agent(
+    model,
+    tools=[],
+    middleware=[PIIMiddleware("email", strategy="redact", apply_to_input=True)],
+)
+```
+
+### Pause for a human
+
+This needs a checkpointer and a `thread_id`, and resumes with a decision.
+
+```py
+from langgraph.types import Command
+
+agent.invoke(Command(resume={"decisions": [{"type": "approve"}]}), config)
+```
+
+## Patterns and best practices
+
+- Layer cheap deterministic checks before model-based ones.
+- Enforce permissions in tools, not prompts.
+- Require approval for irreversible actions.
+- Log guardrail decisions.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Simple rule | Decorator hook | One concern each |
+| Stateful logic | `AgentMiddleware` class | More code |
+| Full custom flow | LangGraph | More wiring |
+
+## Common mistakes
+
+**Relying on a system prompt for security.** It can be overridden by injection.
+
+**Checking only input.** Unsafe output and tool actions need checks too.
+
+**Human-in-the-loop without a checkpointer.** There's nothing to resume.
+
+**Assuming hooks order doesn't matter.** They run in list order.
+
+## Interview questions
+
+<Question q="Deterministic versus model-based guardrails?">
+Deterministic checks are fast and predictable but literal. Model-based ones understand meaning but add latency and cost.
+</Question>
+
+<Question q="What can wrap_tool_call do?">
+Run the tool zero, one or more times, change results, and catch errors.
+</Question>

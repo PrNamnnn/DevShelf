@@ -1,0 +1,93 @@
+---
+title: "Sample Ratio Mismatch and A/A Tests"
+summary: "Detect broken experiments before reading results using SRM checks and A/A validation."
+level: advanced
+section: experimentation
+order: 8
+tags: ["SRM","A/A test","experiment validity","instrumentation"]
+requires: ["statistics/chi-square-tests","statistics/ab-testing-foundations"]
+related: ["statistics/analyzing-ab-tests","statistics/data-quality-and-leakage"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "SciPy: chisquare"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.chisquare.html"
+---
+
+## What it is
+
+**Sample ratio mismatch (SRM)** means the observed split differs from the designed split by more than chance allows. An **A/A test** assigns users to two identical experiences to verify that the system reports no differences more often than it should.
+
+## Why it exists
+
+An SRM signals a fault, such as a redirect that loses treatment users or a bot filter that treats variants differently. It usually indicates selection bias, so the results can't be trusted, however good they look.
+
+## How it works
+
+SRM uses a chi-square goodness-of-fit test on assignment counts. Teams generally apply a strict threshold such as p under 0.001, because the check runs on every experiment and false alarms have a cost.
+
+Common causes are: treatment crashes that prevent logging, redirects, delayed exposure logging, bot filtering affected by the variant, and users re-assigned as a result of old cookies.
+
+Run many A/A tests against historical data. About 5% should be significant at α = 0.05, and p-values should look uniform. Patterns of deviation point to issues like wrong variance formulas or units that aren't independent.
+
+## Intuition and formula
+
+<Formula>χ² = Σ (Observed − Expected)² / Expected, df = variants − 1</Formula>
+
+## Worked example
+
+A 50/50 test yields 50,550 and 49,450 users. A gap of 550 from expected looks tiny at about 0.5%, yet χ² = 12.1 and p = 0.0005. Don't read the metrics. Compare logging by browser and platform, look at when the mismatch began, and fix it before re-running.
+
+## Python
+
+```python
+import numpy as np
+from scipy import stats
+
+srm = stats.chisquare([50_550, 49_450], [50_000, 50_000])
+assert round(srm.statistic, 1) == 12.1
+assert round(srm.pvalue, 4) == 0.0005
+
+rng = np.random.default_rng(0)
+data = rng.normal(0, 1, (2_000, 2, 200))
+pvalues = stats.ttest_ind(data[:, 0], data[:, 1], axis=1).pvalue
+assert 0.03 < np.mean(pvalues < 0.05) < 0.07
+```
+
+## SQL
+
+```sql
+WITH c(variant, observed) AS (VALUES ('c', 50550.0), ('t', 49450.0))
+SELECT round(sum((observed - 50000) ^ 2 / 50000), 1) AS chi_square FROM c;
+-- rows: [{"chi_square":"12.1"}]
+```
+
+## Excel or Power BI
+
+`=CHISQ.TEST(observed_range, expected_range)` gives an SRM p-value in one formula. In Power BI, surface variant counts and an SRM flag at the top of the report page.
+
+## In industry
+
+Mature platforms check SRM automatically and hide results when it fails. SRM is reported to appear in a meaningful number of real experiments.
+
+## Assumptions and limitations
+
+SRM only checks counts, so a balanced test can still be wrong. Very large experiments can flag trivial imbalance, hence strict thresholds and investigation.
+
+## Common mistakes
+
+- Reading results despite an SRM.
+- "Correcting" by reweighting or dropping users, which doesn't remove the bias.
+- Running the check only overall, and not by segment or day.
+- Using A/A tests only once.
+
+## Alternatives
+
+Monitoring event-delivery rates and pre-experiment metric balance catches related problems. Replaying the assignment function on historical data is a cheap A/A test.
+
+## Interview questions
+
+<Question q="Why is SRM serious even when small?">It implies users are being selectively lost, so the groups may no longer be comparable.</Question>
+
+<Question q="What should the p-value distribution look like across many A/A tests?">Approximately uniform between 0 and 1.</Question>

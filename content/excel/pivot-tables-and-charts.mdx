@@ -1,0 +1,79 @@
+---
+title: "Pivot Tables and Pivot Charts"
+summary: "Summarize large tables interactively, group dates and values, and use calculated fields responsibly."
+level: intermediate
+section: analysis
+order: 1
+tags: ["Pivot Tables","Pivot Charts","slicers","grouping"]
+requires: ["excel/tables-validation-and-formatting"]
+related: ["statistics/central-tendency","statistics/bivariate-analysis","excel/power-query-and-data-model"]
+versions: "Excel 2016 onward"
+tested: "Procedures checked against Microsoft documentation. Pivot layouts weren't automated"
+verified: "2026-11-09"
+docs:
+  - label: "Excel: Create a PivotTable"
+    url: "https://support.microsoft.com/en-us/office/create-a-pivottable-to-analyze-worksheet-data-a9a84538-bfe9-40a9-a8e9-f99134456576"
+  - label: "Excel: Create a PivotChart"
+    url: "https://support.microsoft.com/en-us/office/create-a-pivotchart-c1b1e057-6990-4c38-b52b-8255538e7b1c"
+  - label: "Excel: GETPIVOTDATA"
+    url: "https://support.microsoft.com/en-us/office/getpivotdata-function-8c083b99-a922-4ca0-af5e-3af55960761f"
+---
+
+## What it is
+
+A **Pivot Table** interactively summarizes a table by arranging fields into Rows, Columns, Values and Filters. A **Pivot Chart** visualizes that summary.
+
+## Why it exists
+
+It offers grouping, totals and drill-down without formulas, and it's one of the fastest ways to explore data.
+
+## How it works
+
+Pivots read from a cached copy of the source, so you must **Refresh** to see changes. Drag a numeric field into Values to aggregate it. Value Field Settings change the function and the "Show Values As" option, including % of Row Total, Difference From and Running Total. Right-click a date to group it by month, quarter and year.
+
+Double-clicking any total opens the underlying rows in a new sheet, which is handy for auditing.
+
+## Syntax and key APIs
+
+| Area | Sample field | Result |
+| --- | --- | --- |
+| Rows | Region | One row per region |
+| Columns | Product | Cross-tab |
+| Values | Sum of Units | The measure |
+| Filters | Date | Report-level filter |
+
+```text
+=GETPIVOTDATA("Units",$A$3,"Region","North")
+```
+
+## Simple example
+
+Rows: Region. Values: Sum of Units. North is 13, South is 17, East is 8, for a grand total of 38. Change Show Values As to % of Grand Total to convert these to shares. Moving Product to Columns creates a bivariate cross-tab.
+
+## Industry examples
+
+Finance teams use pivots for variance by cost center, and retail teams use them for sales by store and category with slicers. A pivot built with the Data Model can compute distinct counts.
+
+## Patterns and best practices
+
+- Base pivots on an Excel Table so that the source expands.
+- Set "Refresh data when opening the file".
+- Add slicers and connect them across several pivots with Report Connections.
+- Put complex ratios in Data Model measures.
+
+## Alternatives and trade-offs
+
+`SUMIFS` offers a fixed layout, and Power BI scales to larger audiences and models. Calculated fields operate on sums, so a calculated price × quantity on totals can be wrong unless each row is computed first.
+
+## Common mistakes
+
+- Forgetting to refresh.
+- Source data with blank headers or mixed types.
+- Averaging an already-averaged field.
+- Calculated fields computing on totals rather than rows.
+
+## Interview questions
+
+<Question q="Why doesn't a pivot update automatically?">It's built from a cache that updates only on refresh.</Question>
+
+<Question q="How do you get a distinct count?">Add the data to the Data Model and choose Distinct Count, or use a measure.</Question>

@@ -1,0 +1,99 @@
+---
+title: "KPI Design, Metric Definitions and North Star"
+summary: "Design metrics that lead to good decisions, define them precisely and connect them in a metric tree."
+level: fundamental
+section: business
+order: 1
+tags: ["KPI","North Star","metric definition","metric tree"]
+requires: ["statistics/asking-analytical-questions"]
+related: ["powerbi/dax-fundamentals-and-context","statistics/experiment-design-and-metrics","statistics/dashboards-and-misleading-visuals"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "Microsoft: Create KPI visuals"
+    url: "https://learn.microsoft.com/en-us/power-bi/visuals/power-bi-visualization-kpi"
+  - label: "pandas: Group by"
+    url: "https://pandas.pydata.org/docs/user_guide/groupby.html"
+---
+
+## What it is
+
+A **KPI** is a measure tied to an objective. A **North Star metric** expresses the core value a product delivers and predicts long-term success. A **metric tree** breaks it into drivers that specific teams can influence.
+
+## Why it exists
+
+Whatever is measured gets managed, including in unintended ways. A precise definition stops two teams reporting different "active users".
+
+## How it works
+
+A complete metric definition includes name, purpose, formula, grain, population, time window, filters, data source, owner and known caveats.
+
+| Good metric | Poor metric |
+| --- | --- |
+| Actionable | Vanity counts that only go up |
+| Comparable over time | Definition changes silently |
+| Hard to game alone | Easy to inflate |
+| Understandable | Requires a paragraph of explanation |
+
+**Lagging** metrics, such as revenue, confirm results. **Leading** metrics, such as activation, can predict them. Pair each target with a counter-metric, like speed with quality.
+
+A metric tree for an online store: weekly orders = active shoppers × orders per shopper; active shoppers = returning + new; and so on.
+
+## Worked example
+
+"Active user" becomes: *a distinct registered, non-employee account that completes at least one core action (order, save, search-with-click) within a rolling 7-day window, by UTC date, sourced from `fct_events`.* A login no longer counts, which removes bot and session-refresh noise.
+
+## Python
+
+```python
+import pandas as pd
+
+events = pd.DataFrame({
+    "user": ["a", "a", "b", "c", "staff"],
+    "action": ["order", "login", "login", "save", "order"],
+    "employee": [False, False, False, False, True],
+})
+CORE = {"order", "save", "search_click"}
+active = events[events["action"].isin(CORE) & ~events["employee"]]["user"].nunique()
+assert active == 2
+```
+
+## SQL
+
+```sql
+SELECT count(DISTINCT user_id) AS wau
+FROM (VALUES ('a','order',false), ('a','login',false), ('b','login',false),
+             ('c','save',false), ('s','order',true)) AS e(user_id, action, is_staff)
+WHERE action IN ('order', 'save') AND NOT is_staff;
+-- rows: [{"wau":2}]
+```
+
+## Excel or Power BI
+
+Excel KPI tiles reference a single named calculation. Power BI measures centralize definitions, and a certified shared semantic model keeps them consistent across reports.
+
+## In industry
+
+Companies build metric catalogs or semantic layers to define a metric once. North Star examples often focus on value received, such as nights booked in a marketplace.
+
+## Assumptions and limitations
+
+No single metric captures everything, and proxies stop working when they become targets, as expressed by Goodhart's law.
+
+## Common mistakes
+
+- Using cumulative totals as success.
+- Changing a definition without restating history.
+- Having too many KPIs.
+- Rewarding one metric with no counter-metric.
+
+## Alternatives
+
+Balanced scorecards spread focus across perspectives, and OKRs connect metric targets to initiatives.
+
+## Interview questions
+
+<Question q="What makes a good North Star metric?">It reflects value delivered to customers, predicts sustainable revenue and can be influenced by product teams.</Question>
+
+<Question q="What is Goodhart's law?">When a measure becomes a target, it ceases to be a good measure.</Question>

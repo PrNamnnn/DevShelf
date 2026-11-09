@@ -1,0 +1,109 @@
+---
+title: "CUPED and Variance Reduction"
+summary: "Use pre-experiment data to shrink variance, reach significance with fewer users and keep the estimate unbiased."
+level: advanced
+section: experimentation
+order: 9
+tags: ["CUPED","variance reduction","covariate adjustment"]
+requires: ["statistics/analyzing-continuous-and-retention-metrics"]
+related: ["statistics/multiple-linear-regression","statistics/sample-size-and-duration"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "NumPy: cov"
+    url: "https://numpy.org/doc/stable/reference/generated/numpy.cov.html"
+  - label: "SciPy: ttest_ind"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.ttest_ind.html"
+---
+
+## What it is
+
+**CUPED** (Controlled-experiment Using Pre-Experiment Data) adjusts each user's metric using their behaviour before the experiment began. It removes predictable variation without changing the expected treatment effect.
+
+## Why it exists
+
+Heavy spenders and light spenders differ for reasons unrelated to any test, and this noise dominates variance. Subtracting the part you can predict from pre-period data increases sensitivity for free.
+
+## How it works
+
+1. Pick a covariate X measured before exposure, often the same metric from a previous period.
+2. Estimate θ as the regression slope of Y on X.
+3. Compute Y_adj = Y − θ(X − X̄).
+4. Analyze Y_adj with the usual test.
+
+Because X comes before assignment, randomization makes its expected value equal across groups, and the adjustment doesn't bias the treatment effect. Variance falls by a factor of 1 − ρ², where ρ is the correlation of X and Y.
+
+Users without pre-period history can be given the average of X, so they aren't dropped.
+
+## Intuition and formula
+
+<Formula>θ = Cov(X, Y) / Var(X)</Formula>
+
+<Formula>Var(Y_adj) = Var(Y) (1 − ρ²)</Formula>
+
+## Worked example
+
+In a simulation of 5,000 users with a true effect of +2, spending has a ρ² of 0.84 with pre-period spend. Variance falls from 2,978 to 470, an 84% reduction. The unadjusted test estimates +0.94, p = 0.54. The adjusted test estimates +2.32, p = 0.00015. The same data now detects the effect, which would otherwise have needed about six times as many users.
+
+## Python
+
+```python
+import numpy as np
+from scipy import stats
+
+rng = np.random.default_rng(3)
+n = 5_000
+pre = rng.gamma(2, 50, n)
+post = pre * 0.7 + rng.gamma(2, 15, n)
+treated = rng.integers(0, 2, n)
+post = post + treated * 2
+
+theta = np.cov(pre, post)[0, 1] / pre.var(ddof=1)
+adjusted = post - theta * (pre - pre.mean())
+
+reduction = 1 - adjusted.var(ddof=1) / post.var(ddof=1)
+assert round(reduction, 2) == 0.84
+assert round(reduction, 3) == round(np.corrcoef(pre, post)[0, 1] ** 2, 3)
+
+raw = stats.ttest_ind(post[treated == 1], post[treated == 0], equal_var=False)
+cuped = stats.ttest_ind(adjusted[treated == 1], adjusted[treated == 0], equal_var=False)
+assert raw.pvalue > 0.05 > cuped.pvalue
+```
+
+## SQL
+
+```sql
+WITH d(pre, post) AS (VALUES (10.0, 12.0), (20.0, 21.0), (30.0, 33.0), (40.0, 41.0)),
+s AS (SELECT regr_slope(post, pre) AS theta, avg(pre) AS pre_mean FROM d)
+SELECT round(avg(post - theta * (pre - pre_mean))::numeric, 2) AS adjusted_mean
+FROM d, s;
+-- rows: [{"adjusted_mean":"26.75"}]
+```
+
+The adjusted mean equals the raw mean of 26.75, because the correction has an average of zero.
+
+## In industry
+
+CUPED and its extensions are common in large platforms, and machine-learning predictions built from pre-period features can replace a single covariate.
+
+## Assumptions and limitations
+
+Benefit depends on how predictive X is, so it helps little for new users. The covariate must never be affected by treatment.
+
+## Common mistakes
+
+- Using data from after the exposure began.
+- Estimating θ separately per group in a way that introduces bias.
+- Dropping users who have no history.
+- Claiming that the sample size can be reduced without validating the reduction on past data.
+
+## Alternatives
+
+Regression adjustment with several covariates is closely related, stratified randomization balances covariates at assignment, and winsorizing reduces tail-driven variance.
+
+## Interview questions
+
+<Question q="Why doesn't CUPED bias the result?">The covariate is measured before randomization, so its expected value is the same in both groups and the adjustment averages out across them.</Question>
+
+<Question q="How much variance does CUPED remove?">A fraction of ρ², where ρ is the correlation between the covariate and the outcome.</Question>

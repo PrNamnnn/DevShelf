@@ -1,0 +1,90 @@
+---
+title: "Predictive and Prescriptive Analysis"
+summary: "The difference between forecasting what will happen and optimizing what to do, with what-if analysis and a simple linear program."
+level: intermediate
+section: analysis-types
+order: 6
+tags: ["predictive","prescriptive","optimization","scenario analysis","what-if"]
+requires: ["statistics/diagnostic-analysis"]
+related: ["machine-learning/ml-foundations","statistics/forecast-evaluation","statistics/logistic-regression","excel/dashboards-and-business-analysis"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "SciPy: linprog"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linprog.html"
+  - label: "scikit-learn: Supervised learning"
+    url: "https://scikit-learn.org/stable/supervised_learning.html"
+---
+
+## What it is
+
+**Predictive analysis** estimates unknown or future values: regression for quantities, classification for categories, forecasting for time. Churn and credit-risk scoring are common examples. **Prescriptive analysis** recommends an action, using optimization, simulation, what-if and scenario modelling, and decision analysis under constraints.
+
+## Why it exists
+
+Knowing a customer is likely to churn is only useful if someone knows what to do. Prescriptive work connects predictions to actions, costs and limited resources.
+
+## How it works
+
+Prediction learns from history and asks how accurate it is on new cases. Prescription adds a decision layer: decision variables, an objective to maximize or minimize, and constraints.
+
+| Technique | Answers |
+| --- | --- |
+| What-if analysis | What happens if one input changes? |
+| Scenario analysis | What happens under coherent futures such as a recession? |
+| Monte Carlo simulation | What's the distribution of outcomes given uncertain inputs? |
+| Linear programming | What's the best allocation under linear constraints? |
+| Recommendation system | Which item suits this user? |
+
+Scenarios are more useful than one-variable sensitivities when assumptions move together.
+
+## Worked example
+
+A factory makes products A and B, earning ₹3 and ₹5 per unit. Line 1 has 4 hours and only A uses it. Line 2 has 12 hours and B uses 2 per unit. Line 3 has 18 hours, with A using 3 and B using 2. Maximizing profit gives A = 2 and B = 6 for a profit of ₹36. The binding lines tell you where extra capacity pays off.
+
+## Python
+
+```python
+from scipy.optimize import linprog
+
+# linprog minimizes, so the profits are negated.
+result = linprog(
+    c=[-3, -5],
+    A_ub=[[1, 0], [0, 2], [3, 2]],
+    b_ub=[4, 12, 18],
+    bounds=[(0, None), (0, None)],
+)
+assert result.success
+assert [round(v, 6) for v in result.x] == [2, 6]
+assert round(-result.fun, 6) == 36
+```
+
+## Excel or Power BI
+
+Excel's What-If Analysis offers Goal Seek, Data Tables and Scenario Manager, and the Solver add-in handles linear programs. Power BI's numeric range parameters let report users adjust assumptions through a slicer.
+
+## In industry
+
+Airlines price with optimization, logistics firms route with it, and marketing teams allocate budget using response curves. A churn model becomes useful when it's combined with the cost of an offer and each customer's expected value.
+
+## Assumptions and limitations
+
+Predictions assume the future resembles the training data. Predicting risk doesn't identify who can be persuaded, since uplift modelling needs experimental data. Optimizers will exploit any errors in the inputs, so results should be checked for plausibility.
+
+## Common mistakes
+
+- Using a churn score as if it were the effect of an intervention.
+- Presenting one forecast number without a range.
+- Optimizing a proxy that ignores long-term effects.
+- Leaving real-world constraints out of the model.
+
+## Alternatives
+
+Rules and heuristics are simple to explain and sometimes close to optimal. Multi-armed bandits learn the best action while serving traffic. Uplift models directly estimate which customers respond to an action.
+
+## Interview questions
+
+<Question q="How does prescriptive analytics differ from predictive?">Predictive estimates an outcome. Prescriptive chooses an action, given objectives and constraints, and frequently consumes predictions as inputs.</Question>
+
+<Question q="Why target persuadable customers instead of high churn risk?">Some high-risk customers will leave regardless and others would stay anyway. Value comes from the ones whose behaviour the action changes.</Question>

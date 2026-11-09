@@ -1,0 +1,110 @@
+---
+title: "Types of Data and Measurement Scales"
+summary: "Structured, semi-structured and unstructured data, and the nominal, ordinal, interval and ratio scales that decide which statistics are valid."
+level: fundamental
+section: foundations
+order: 3
+tags: ["data types","nominal","ordinal","interval","ratio"]
+requires: ["statistics/what-is-data-analysis"]
+related: ["statistics/central-tendency","statistics/encoding-categoricals","mongodb/documents-bson-and-collections"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "pandas: Categorical data"
+    url: "https://pandas.pydata.org/docs/user_guide/categorical.html"
+  - label: "NIST: Handbook"
+    url: "https://www.itl.nist.gov/div898/handbook/"
+---
+
+## What it is
+
+Data can be classified by its **structure** and by its **measurement scale**.
+
+Structured data fits rows and columns, like an orders table. Semi-structured data carries its own labels but varies between records, like JSON events. Unstructured data has no predefined model, like support emails, images or call audio.
+
+Variables are categorical or numerical. Numerical variables may be discrete (counts of items) or continuous (delivery time). Stevens's four scales refine this:
+
+| Scale | Meaning | Example | Valid summary |
+| --- | --- | --- | --- |
+| Nominal | Unordered labels | Payment method, city | Mode, counts |
+| Ordinal | Ordered, unequal gaps | Rating 1 to 5, plan tier | Median, percentiles |
+| Interval | Equal gaps, arbitrary zero | Temperature in °C, calendar year | Mean, differences |
+| Ratio | Equal gaps, true zero | Revenue, age, duration | Mean, ratios, geometric mean |
+
+## Why it exists
+
+The scale limits which operations mean anything. A postcode's average is computable and meaningless. 20°C isn't twice as hot as 10°C because zero is arbitrary, while ₹200 really is twice ₹100. Test selection and encoding both begin with this classification.
+
+## How it works
+
+Ask three questions in order. Does order exist? If not, it's nominal. Are the gaps equal? If not, it's ordinal. Is zero a real absence? If yes, it's ratio, otherwise interval.
+
+Storage type doesn't determine scale. A `customer_id` stored as an integer is nominal, and a survey answer stored as the text `"Agree"` is ordinal.
+
+## Worked example
+
+An e-commerce order table contains:
+
+- `order_id`: nominal identifier, never averaged.
+- `status`: nominal.
+- `satisfaction` from 1 to 5: ordinal, so report the median and share of 4s and 5s.
+- `order_date`: interval, because differences are meaningful and year 0 isn't an absence of time.
+- `amount`: ratio, discrete in paise but treated as continuous.
+- `items`: ratio count.
+
+## Python
+
+```python
+import pandas as pd
+
+orders = pd.DataFrame({
+    "customer_id": [101, 102, 103],
+    "plan": ["basic", "pro", "basic"],
+    "satisfaction": ["low", "high", "medium"],
+    "amount": [499.0, 1299.0, 799.0],
+})
+orders["customer_id"] = orders["customer_id"].astype("string")
+orders["plan"] = orders["plan"].astype("category")
+orders["satisfaction"] = pd.Categorical(
+    orders["satisfaction"], categories=["low", "medium", "high"], ordered=True
+)
+
+assert orders["satisfaction"].max() == "high"
+assert "customer_id" not in orders.select_dtypes("number").columns
+```
+
+## SQL
+
+```sql
+SELECT plan, count(*) AS orders, sum(amount) AS revenue
+FROM (VALUES ('basic', 499.0), ('pro', 1299.0), ('basic', 799.0)) AS o(plan, amount)
+GROUP BY plan
+ORDER BY plan;
+-- rows: [{"plan":"basic","orders":2,"revenue":"1298.0"},{"plan":"pro","orders":1,"revenue":"1299.0"}]
+```
+
+## In industry
+
+Column types are a contract between systems. Warehouses, feature stores and BI tools rely on them, and Power BI's automatic summing of a numeric year column is a classic symptom of a scale error.
+
+## Assumptions and limitations
+
+Scales are a guide, not a law. Practitioners often average 5-point ratings for monitoring, and that can be useful when spacing is roughly equal, but it should be a stated choice. Likert means can hide polarized responses.
+
+## Common mistakes
+
+- Averaging IDs, ZIP codes or category codes.
+- Reading ratios from interval data.
+- Encoding nominal categories as 1, 2, 3 for a linear model, which invents an order.
+- Treating a discrete count with few values as continuous without checking.
+
+## Alternatives
+
+Practical analytics often uses simpler labels, such as dimension and measure in Power BI, or categorical and numeric in pandas. These work day to day, while the four-scale view is what you need when choosing a statistical test.
+
+## Interview questions
+
+<Question q="Is a 1 to 5 rating ordinal or interval?">Strictly ordinal, since the distance between ratings isn't known to be equal. It's sometimes treated as interval for convenience, which is an assumption to state and check.</Question>
+
+<Question q="Why is temperature in Celsius interval but Kelvin ratio?">Zero Celsius is an arbitrary reference, while zero Kelvin means no thermal energy, so ratios are only meaningful in Kelvin.</Question>

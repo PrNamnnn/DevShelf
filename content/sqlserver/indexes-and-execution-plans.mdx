@@ -1,0 +1,160 @@
+---
+title: "Indexes and Execution Plans"
+summary: "Clustered versus nonclustered storage, key lookups, covering and filtered indexes, and reading a plan with real I/O numbers."
+level: advanced
+section: performance
+order: 10
+tags: [indexes, clustered, nonclustered, covering-index, filtered-index, key-lookup, execution-plans, sargable, statistics-io]
+related: ["sqlserver/performance-and-query-store", "postgresql/explain-analyze", "mongodb/indexes-and-explain"]
+versions: "SQL Server 2025 (17.x). json and vector columns can't be index keys."
+tested: "SQL Server 2025 Developer Edition with 200,000 rows in a temporary table. Numbers vary by data and environment."
+verified: "2026-11-09"
+docs:
+  - label: "SQL Server: Index design guide"
+    url: "https://learn.microsoft.com/en-us/sql/relational-databases/sql-server-index-design-guide"
+  - label: "SQL Server: Display an actual execution plan"
+    url: "https://learn.microsoft.com/en-us/sql/relational-databases/performance/display-an-actual-execution-plan"
+  - label: "T-SQL: SET STATISTICS IO"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/statements/set-statistics-io-transact-sql"
+  - label: "SQL Server: Showplan operators"
+    url: "https://learn.microsoft.com/en-us/sql/relational-databases/showplan-logical-and-physical-operators-reference"
+---
+
+## What it is
+
+The **clustered index** stores a table's rows in key order, and there can be only one. A **nonclustered index** is a separate structure holding a subset of columns and a pointer back to the row.
+
+## Why it exists
+
+Microsoft's guidance is that, with few exceptions, every table should have a clustered index. Nonclustered indexes then make specific queries fast by reading far fewer pages.
+
+## How it works
+
+On a clustered table, a nonclustered index's row locator is the **clustered key**. If a query needs columns the index doesn't have, SQL Server performs a **key lookup** into the clustered index for each row.
+
+<StepFlow
+  title="One query, three indexes (200,000 rows)"
+  code={["SELECT id, total FROM #orders WHERE customer_id = 42;"]}
+  nodes={["no index: scan", "index: seek + key lookups", "covering index: seek only"]}
+  steps={[
+    { active: [0], note: "With no index on customer_id, every page of the clustered index is read to find 10 rows.", state: { "logical reads": "6,072" } },
+    { active: [1], note: "An index on customer_id finds the rows, but total isn't in it. Each of the 10 rows requires a lookup.", state: { "logical reads": "32" } },
+    { active: [2], note: "With INCLUDE (total), the index answers the query itself. There's a single Index Seek.", state: { "logical reads": "3" } },
+  ]}
+/>
+
+A good clustered key is narrow, unique, ever-increasing and immutable. Key columns are limited to 16 and 900 bytes.
+
+## Syntax and key APIs
+
+```sql
+CREATE TABLE #orders (
+  id int NOT NULL PRIMARY KEY CLUSTERED,
+  customer_id int NOT NULL,
+  status varchar(10) NOT NULL,
+  total decimal(10,2) NOT NULL
+);
+
+CREATE NONCLUSTERED INDEX ix_customer ON #orders (customer_id) INCLUDE (total);
+CREATE NONCLUSTERED INDEX ix_failed ON #orders (customer_id) WHERE status = 'failed';
+```
+
+In SSMS, use **Query, Include Actual Execution Plan**. For I/O:
+
+```plsql
+SET STATISTICS IO ON;
+```
+
+**Logical reads** are pages read from cache, and are the most stable measure to compare.
+
+## Simple example
+
+The scan, lookup and covering numbers in the diagram came from this shape of query.
+
+```sql
+INSERT #orders VALUES (1, 42, 'paid', 9.99), (2, 7, 'failed', 5.00);
+
+SELECT id, total FROM #orders WHERE customer_id = 42;
+-- output: 1|9.99
+```
+
+The plan for the version needing a lookup, from the 200,000-row test:
+
+```text
+Nested Loops(Inner Join, OUTER REFERENCES:([#orders].[id]))
+  Index Seek(... SEEK:([#orders].[customer_id]=(42)) ORDERED FORWARD)
+  Clustered Index Seek(... SEEK:([#orders].[id]=[#orders].[id]) LOOKUP ORDERED FORWARD)
+```
+
+## Industry examples
+
+### Cover a frequent query
+
+Put filter and join columns in the key, and returned columns in `INCLUDE`, where they don't affect the key size limit.
+
+```plsql
+CREATE INDEX ix_orders_customer ON dbo.Orders (CustomerId, CreatedAt DESC)
+INCLUDE (Total, Status);
+```
+
+### Index a small subset
+
+Filtered indexes support simple comparison predicates. Keep conversions off the left side of the filter.
+
+```plsql
+CREATE INDEX ix_open ON dbo.Orders (CreatedAt) WHERE Status = 'open';
+```
+
+### Keep predicates SARGable
+
+A function or calculation on the column prevents a seek. In the test, `customer_id + 0 = 42` became an **Index Scan**.
+
+```plsql
+-- Scan:
+WHERE YEAR(CreatedAt) = 2026
+
+-- Seek:
+WHERE CreatedAt >= '2026-01-01' AND CreatedAt < '2027-01-01'
+```
+
+## Patterns and best practices
+
+- Choose a clustered key that's narrow and unique.
+- Add `INCLUDE` for frequently returned columns only.
+- Check for implicit conversions in plans, especially `nvarchar` against `varchar`.
+- Compare logical reads before and after a change.
+
+## Alternatives and trade-offs
+
+| Option | Benefit | Cost |
+| --- | --- | --- |
+| Key lookup | Smaller index | Cost grows per row |
+| Covering index | Fewest reads | Larger, slower writes |
+| Filtered index | Tiny, focused | Limited predicates |
+| Columnstore | Analytics | Not for point lookups |
+
+## Common mistakes
+
+**A wide clustered key.** It's copied into every nonclustered index.
+
+**Clustering on a random GUID.** New rows land throughout the index and cause page splits.
+
+**Adding every missing-index suggestion.** They overlap and increase write costs.
+
+**Putting non-filter columns in the key.** Use `INCLUDE` instead.
+
+**Creating a filtered index from `sqlcmd` without `-I`.** `sqlcmd` defaults `QUOTED_IDENTIFIER` to off, and the statement fails with error 1934. SSMS has it on.
+
+## Interview questions
+
+<Question q="Clustered versus nonclustered?">
+A clustered index is the table's row storage, sorted by key. A nonclustered index is a separate structure pointing back to the rows.
+</Question>
+
+<Question q="What is a key lookup?">
+A fetch from the clustered index for columns missing from the nonclustered index. Including those columns removes it.
+</Question>
+
+<Question q="What does SARGable mean?">
+A predicate that can use an index seek, typically because the indexed column isn't wrapped in a function or expression.
+</Question>

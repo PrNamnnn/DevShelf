@@ -1,0 +1,126 @@
+---
+title: "One-Sample, Independent, Welch and Paired t-Tests"
+summary: "Compare means when the standard deviation must be estimated, and pick the correct t-test for your design."
+level: intermediate
+section: tests
+order: 2
+tags: ["t-test","Welch","paired test","Student's t"]
+requires: ["statistics/choosing-the-right-test","statistics/t-chi-square-f-distributions"]
+related: ["statistics/anova-and-post-hoc","statistics/non-parametric-tests","statistics/analyzing-continuous-and-retention-metrics"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "SciPy: ttest_ind"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.ttest_ind.html"
+  - label: "SciPy: ttest_rel"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.ttest_rel.html"
+  - label: "SciPy: ttest_1samp"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.ttest_1samp.html"
+---
+
+## What it is
+
+t-tests compare means when σ is unknown. The four common variants are:
+
+| Test | Question | H₀ |
+| --- | --- | --- |
+| One-sample | Does the mean equal a target? | μ = μ₀ |
+| Independent (Student) | Do two groups' means differ, assuming equal variances? | μ₁ = μ₂ |
+| Welch | Same, without equal variances | μ₁ = μ₂ |
+| Paired | Is the mean within-subject difference zero? | μ_d = 0 |
+
+## Why it exists
+
+The sample SD adds uncertainty, and the t-distribution accounts for that. Welch's version protects against unequal variances, which are common in practice.
+
+## How it works
+
+**When to use:** comparing means of a numeric outcome. **Data type:** interval or ratio. **Assumptions:** independence, and an approximately normal sampling distribution of the mean (paired differences for the paired test). Student's version also assumes equal variances.
+
+**H₁:** means differ, or the direction specified in advance. **P-value:** the chance of a t at least this extreme under H₀. **Business meaning:** report the mean difference and interval in real units.
+
+**Paired designs** remove between-subject variation and are typically much more powerful, but they need a real pairing, such as the same user before and after, and they must watch for trends in time.
+
+## Intuition and formula
+
+<Formula>t = (x̄₁ − x̄₂) / √(s₁²/n₁ + s₂²/n₂)</Formula>
+
+Welch's degrees of freedom come from the Welch-Satterthwaite formula and are usually not whole numbers.
+
+<Formula>t = d̄ / (s_d / √n)</Formula>
+
+## Worked example
+
+Delivery times under carriers A and B (n = 10 each): means 27.2 and 32.1, SDs 2.94 and 2.60. Welch's t = −3.95, df = 17.74, p = 0.00096. The mean difference is −4.9 days, 95% CI −7.51 to −2.29. Cohen's d is 1.77. Carrier A is meaningfully faster.
+
+Paired: 8 agents' scores before and after training show a mean gain of 3.75 points, t = 4.25, df = 7, p = 0.0038.
+
+One-sample: 8 runs average 12.5 with s = 0.529 against a target of 12, so t = 2.67, p = 0.032.
+
+## Python
+
+```python
+import numpy as np
+from scipy import stats
+
+a = np.array([24, 27, 30, 22, 29, 31, 26, 28, 25, 30])
+b = np.array([31, 29, 35, 33, 28, 36, 32, 30, 34, 33])
+result = stats.ttest_ind(a, b, equal_var=False)
+ci = result.confidence_interval()
+assert (round(result.statistic, 2), round(result.df, 2)) == (-3.95, 17.74)
+assert round(result.pvalue, 5) == 0.00096
+assert (round(ci.low, 2), round(ci.high, 2)) == (-7.51, -2.29)
+
+before = np.array([62, 70, 55, 68, 74, 59, 66, 71])
+after = np.array([66, 75, 58, 70, 80, 63, 65, 78])
+paired = stats.ttest_rel(after, before)
+assert round(paired.statistic, 2) == 4.25
+
+one = stats.ttest_1samp([12.1, 11.8, 13.2, 12.9, 12.4, 13.0, 11.9, 12.7], 12)
+assert round(one.pvalue, 3) == 0.032
+```
+
+## SQL
+
+```sql
+WITH d AS (
+  SELECT 'a' AS g, x FROM unnest(ARRAY[24,27,30,22,29,31,26,28,25,30]::numeric[]) AS x
+  UNION ALL
+  SELECT 'b', x FROM unnest(ARRAY[31,29,35,33,28,36,32,30,34,33]::numeric[]) AS x
+), s AS (
+  SELECT g, avg(x) AS m, var_samp(x) AS v, count(*) AS n FROM d GROUP BY g
+)
+SELECT round((a.m - b.m) / sqrt(a.v / a.n + b.v / b.n), 2) AS welch_t
+FROM s a JOIN s b ON a.g = 'a' AND b.g = 'b';
+-- rows: [{"welch_t":"-3.95"}]
+```
+
+## Excel or Power BI
+
+`=T.TEST(range1, range2, 2, 3)` is a two-tailed Welch test, type 2 is equal variances, and type 1 is paired. The Data Analysis ToolPak prints a full summary.
+
+## In industry
+
+Welch's t-test is the default for average revenue, order value and similar metrics. Paired tests suit before-and-after measurements and matched samples.
+
+## Assumptions and limitations
+
+With small samples and heavy skew, t-tests can be unreliable. Independence is non-negotiable. A paired before-and-after design with no control can't separate treatment from time.
+
+## Common mistakes
+
+- Analyzing paired data as independent.
+- Using Student's t when variances or group sizes differ.
+- Reading a nonsignificant result as "no difference".
+- Running a paired test when subjects don't actually match.
+
+## Alternatives
+
+Mann-Whitney and Wilcoxon for rank-based comparisons, permutation tests for few assumptions, and regression for adjusting covariates.
+
+## Interview questions
+
+<Question q="Why prefer Welch's t-test over Student's?">It stays valid when variances differ and loses very little power when they're equal, so it's a sensible default.</Question>
+
+<Question q="Why is pairing often more powerful?">It removes stable differences between subjects from the noise.</Question>

@@ -1,0 +1,139 @@
+---
+title: "Reconciliation and Keys"
+summary: "How React decides which state to keep, why position matters, and how keys fix lists and reset components deliberately."
+level: intermediate
+section: rendering
+order: 10
+tags: [reconciliation, keys, lists, state-preservation, ui-tree, reset-state]
+related: [react/state-and-rendering, react/performance-and-memoization]
+versions: "React 19, and all earlier versions with Hooks."
+tested: "Position, key and reset behaviour run on React 19.3.1 with jsdom."
+verified: "2026-11-09"
+docs:
+  - label: "React: Preserving and resetting state"
+    url: "https://react.dev/learn/preserving-and-resetting-state"
+  - label: "React: Rendering lists"
+    url: "https://react.dev/learn/rendering-lists"
+---
+
+## What it is
+
+Reconciliation is how React compares a new render with the previous one to work out what changed. State belongs to a **position in the UI tree**, not to your JSX or the component function.
+
+## Why it exists
+
+Rebuilding the whole DOM on each update would be slow and would lose focus and scroll position. Matching old and new elements lets React reuse nodes and preserve state.
+
+## How it works
+
+React preserves a component's state as long as the same component type stays at the same position. A different type at that position resets its entire subtree. In a list, a `key` becomes part of the position, so an item keeps its state when it moves.
+
+<StepFlow
+  title="Removing the first row"
+  nodes={["old list", "match children", "new list", "DOM update"]}
+  code={["// Before: [Ann, Bo, Cy], each row has its own input", "// After:  [Bo, Cy]"]}
+  steps={[
+    { active: [0], note: "Each row has an uncontrolled input. Ann typed 'a', Bo typed 'b' and Cy typed 'c'." },
+    { active: [1, 2], note: "With index keys, position 0 now means Bo, and React reuses Ann's row for it.", state: { "key 0": "Bo keeps a", "key 1": "Cy keeps b", "key 2": "removed" } },
+    { active: [3], note: "Result: names shift, but each input stays where it was. Bo now shows Ann's text.", state: { bug: "wrong input text" } },
+    { active: [1, 2], note: "With stable ID keys, React sees that key ann is gone, and bo and cy still exist.", state: { "key bo": "keeps b", "key cy": "keeps c", "key ann": "removed" } },
+    { active: [3], note: "React removes one row and leaves the others alone. State follows its data.", state: { correct: "each row keeps its text" } },
+  ]}
+/>
+
+## Syntax and key APIs
+
+```jsx
+{items.map((item) => <Row key={item.id} item={item} />)}
+
+<Profile key={userId} userId={userId} />
+```
+
+Keys only need to be unique among siblings.
+
+## Simple example
+
+Both branches render a `Counter` at the same position, so state is preserved between them.
+
+```jsx
+{isFancy ? <Counter color="gold" /> : <Counter color="gray" />}
+```
+
+Give them different keys and React treats them as different components:
+
+```jsx
+{isFancy ? <Counter key="fancy" color="gold" /> : <Counter key="plain" color="gray" />}
+```
+
+## Industry examples
+
+### Reset a form when the record changes
+
+Clearing many fields in an Effect is error-prone. A new key mounts a fresh instance.
+
+```jsx
+function EditPage({ customer }) {
+  return <CustomerForm key={customer.id} customer={customer} />;
+}
+```
+
+### Generate keys when data is created
+
+```jsx
+function addTodo(text) {
+  setTodos((todos) => [...todos, { id: crypto.randomUUID(), text }]);
+}
+```
+
+### Keep a stable type for inputs
+
+Keeping one element at one position preserves focus during a layout change.
+
+```jsx
+function Field({ compact }) {
+  return (
+    <div className={compact ? "row" : "stack"}>
+      <input />
+    </div>
+  );
+}
+```
+
+## Patterns and best practices
+
+- Use IDs that come from the data.
+- Use an index only for static lists that never reorder.
+- Use a key deliberately to reset state.
+- Don't change an element's wrapper type conditionally, or you lose the state beneath it.
+
+## Alternatives and trade-offs
+
+| Goal | Option | Trade-off |
+| --- | --- | --- |
+| Keep state across removal | Lift it to a parent | More props |
+| Hide without losing state | `Activity` or CSS | Stays in memory |
+| Reset state | Change `key` | Remounts the subtree |
+
+## Common mistakes
+
+**Generating keys during render.** `key={Math.random()}` remounts every row each time and loses state.
+
+**Using an index for a sortable list.** State attaches to positions, not items.
+
+**Declaring a component inside another.** Its function identity changes each render, which is a different type, so its state resets.
+
+**Expecting keys to be global.** They only specify position within the parent.
+
+## Interview questions
+
+<Question q="Why does React need keys?">
+They tell React which item is which across renders so it can match, move, add or remove elements and keep the right state.
+</Question>
+
+<Question q="When does React reset a component's state?">
+When it's removed from the tree, or when a different type or key appears at its position.
+</Question>
+
+<Question q="Is using the index as a key always wrong?">
+No. It's acceptable when the list is static and items have no state. It's a bug source when items can reorder, insert or delete.
+</Question>

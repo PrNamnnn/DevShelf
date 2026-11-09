@@ -1,0 +1,133 @@
+---
+title: "How Python Runs Your Code"
+summary: "From source file to bytecode to the interpreter loop, and what that means for imports, errors and speed."
+level: fundamental
+section: fundamentals
+order: 10
+tags: [execution-model, bytecode, interpreter, cpython, dis, repl, basics]
+related: [python/variables-and-memory, python/memory-management]
+versions: "CPython. Bytecode details vary between versions."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python reference: Execution model"
+    url: "https://docs.python.org/3/reference/executionmodel.html"
+  - label: "Python library: dis"
+    url: "https://docs.python.org/3/library/dis.html"
+  - label: "Python glossary"
+    url: "https://docs.python.org/3/glossary.html"
+---
+
+## What it is
+
+Python is usually described as interpreted, but CPython, the standard implementation, first compiles source code into **bytecode** and then executes that bytecode in a virtual machine.
+
+## Why it exists
+
+Bytecode is portable and quick to start. Compiling once per file and caching the result in `__pycache__` avoids reparsing unchanged modules.
+
+## How it works
+
+<StepFlow
+  title="From a .py file to running code"
+  nodes={["source text", "parse to AST", "compile to bytecode", "cache in __pycache__", "interpreter loop"]}
+  steps={[
+    { active: [0], note: "Python reads the file as text. Syntax is checked before any line runs." },
+    { active: [1], note: "The parser builds an abstract syntax tree. A SyntaxError stops everything here." },
+    { active: [2], note: "The compiler produces a code object containing bytecode instructions." },
+    { active: [3], note: "Imported modules have their bytecode cached as .pyc files. The script you run directly isn't cached." },
+    { active: [4], note: "The interpreter runs one instruction at a time. NameError and TypeError only appear at this stage." },
+  ]}
+/>
+
+Because names are looked up at run time, a misspelled name in a branch that never runs raises nothing. Top-level statements in a file execute in order, including `def`, which creates a function object when it's reached.
+
+## Syntax and key APIs
+
+| Tool | Purpose |
+| --- | --- |
+| `python file.py` | Run a script |
+| `python -m package` | Run a module as a script |
+| `python -i file.py` | Run, then open a prompt |
+| `dis.dis(fn)` | Show bytecode |
+| `compile(src, name, mode)` | Compile a string |
+| `__name__` | `"__main__"` when run directly |
+
+## Simple example
+
+```python
+import dis
+
+def add(a, b):
+    return a + b
+
+instructions = [i.opname for i in dis.get_instructions(add)]
+assert "BINARY_OP" in instructions
+assert add.__code__.co_varnames == ("a", "b")
+```
+
+## Industry examples
+
+### Guard script-only behaviour
+
+Code at module level runs on import. Put entry-point logic behind a check.
+
+```python
+def main():
+    return "running"
+
+if __name__ == "__main__":
+    assert main() == "running"
+```
+
+### Understand late errors
+
+Only executed lines fail at run time, which is why tests need to reach every branch.
+
+```python
+def report(flag):
+    if flag:
+        return undefined_name
+    return "ok"
+
+assert report(False) == "ok"
+
+try:
+    report(True)
+except NameError:
+    pass
+else:
+    raise AssertionError
+```
+
+## Patterns and best practices
+
+- Keep module top level free of slow work.
+- Run a linter or type checker to catch names that tests miss.
+- Use `python -m` so imports resolve from the project root.
+
+## Alternatives and trade-offs
+
+| Runtime | Strength | Trade-off |
+| --- | --- | --- |
+| CPython | Standard, best ecosystem | Slower for pure Python loops |
+| PyPy | JIT speeds long-running code | Extension compatibility varies |
+| Cython, C extensions | Native speed for hot code | Build complexity |
+
+## Common mistakes
+
+**Assuming a clean run means no typos.** Untested branches can hide `NameError`.
+
+**Committing `__pycache__`.** It's generated, so ignore it.
+
+**Using a file name like `random.py`.** It shadows the standard module of that name.
+
+## Interview questions
+
+<Question q="Is Python compiled or interpreted?">
+CPython compiles source to bytecode, then interprets that bytecode in a virtual machine.
+</Question>
+
+<Question q="What does if __name__ == '__main__' do?">
+It runs a block only when the file is executed directly, not when it's imported.
+</Question>

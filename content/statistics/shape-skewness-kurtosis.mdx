@@ -1,0 +1,91 @@
+---
+title: "Distribution Shape, Skewness and Kurtosis"
+summary: "Measure asymmetry and tail weight, and decide when a transformation or a robust method is warranted."
+level: intermediate
+section: descriptive
+order: 4
+tags: ["skewness","kurtosis","log transform","distribution shape"]
+requires: ["statistics/dispersion"]
+related: ["statistics/univariate-analysis","statistics/scaling-binning-and-transforms"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "SciPy: skew"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.skew.html"
+  - label: "SciPy: kurtosis"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.kurtosis.html"
+---
+
+## What it is
+
+**Skewness** measures asymmetry. Positive skew has a long right tail, and negative skew a long left tail. **Kurtosis** measures tail weight relative to a normal distribution. Excess kurtosis is kurtosis minus 3, so a normal distribution scores 0, and positive values mean heavier tails.
+
+## Why it exists
+
+Mean and standard deviation can match between very different distributions. Shape tells you whether those summaries can be trusted, whether a parametric test is reasonable, and how often extreme values should be expected.
+
+## How it works
+
+For right-skewed data, the usual ordering is mode, then median, then mean. Revenue, session length, delivery time and income are all typically right-skewed because they have a floor at zero and no strict ceiling.
+
+A rough guide for magnitude of skewness is that under 0.5 is near symmetric, 0.5 to 1 is moderate, and above 1 is strong. These are rules of thumb, not thresholds.
+
+Kurtosis is about tails more than about "peakedness". High kurtosis signals that outliers are a regular feature of the process, and the sample variance will be unstable.
+
+## Intuition and formula
+
+<Formula>skewness ≈ (1/n) Σ ((xᵢ − x̄) / s)³</Formula>
+
+<Formula>excess kurtosis ≈ (1/n) Σ ((xᵢ − x̄) / s)⁴ − 3</Formula>
+
+Cubing keeps the sign, so large deviations in one direction dominate. Raising to the fourth power is even more dominated by the extremes, which is why kurtosis is such a noisy estimate on small samples.
+
+## Worked example
+
+The ten-order sample has an adjusted skewness of 3.15 and excess kurtosis of 9.95, both driven by one value. Remove it and skewness almost disappears. The numbers are telling you to investigate that one order: is it a real bulk buyer, or an entry error?
+
+## Python
+
+```python
+import numpy as np
+from scipy import stats
+
+orders = np.array([420, 510, 480, 455, 530, 495, 2900, 470, 505, 440])
+assert round(stats.skew(orders, bias=False), 2) == 3.15
+assert round(stats.kurtosis(orders, bias=False), 2) == 9.95
+
+rng = np.random.default_rng(0)
+revenue = rng.lognormal(mean=4, sigma=1, size=20_000)
+assert stats.skew(revenue) > 2
+assert abs(stats.skew(np.log(revenue))) < 0.1
+```
+
+## Excel or Power BI
+
+Excel has `SKEW` and `KURT`, and `KURT` already returns excess kurtosis. Power BI has no built-in skewness function in DAX, so compute it in Power Query, Python, or a custom measure.
+
+## In industry
+
+Log-transforming revenue or latency stabilizes variance before modelling. Risk teams care about kurtosis because a heavy tail means losses far beyond what a normal model predicts.
+
+## Assumptions and limitations
+
+Both statistics are themselves very sensitive to outliers and need large samples. A skewness of 0 doesn't prove symmetry, since different tails can cancel out. Always look at the distribution.
+
+## Common mistakes
+
+- Calling a metric normal because its skewness is near zero.
+- Applying `log` to data with zeros without handling them.
+- Forgetting that Excel's `KURT` and some other tools report excess kurtosis, while other formulas don't subtract 3.
+- Interpreting a difference of log means as a difference of means.
+
+## Alternatives
+
+Visual tools such as histograms, density plots and Q-Q plots reveal shape better than one number. Robust measures use quantiles, for example Bowley skewness. Heavy-tailed data can be modelled directly with log-normal or Pareto distributions.
+
+## Interview questions
+
+<Question q="Why is customer revenue usually right-skewed?">It is bounded below at zero but unbounded above, and a small group of customers buys far more than the rest.</Question>
+
+<Question q="What does a high kurtosis imply for a t-test?">The sample variance is less stable, so larger samples are needed for the sampling distribution of the mean to look normal.</Question>

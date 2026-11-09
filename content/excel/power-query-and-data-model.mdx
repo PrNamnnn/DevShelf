@@ -1,0 +1,90 @@
+---
+title: "Power Query, Cleaning and the Data Model"
+summary: "Build repeatable ETL in Power Query, merge and unpivot tables, and connect them with relationships and measures."
+level: advanced
+section: analysis
+order: 2
+tags: ["Power Query","M","unpivot","merge","Data Model","Power Pivot"]
+requires: ["excel/pivot-tables-and-charts"]
+related: ["powerbi/power-query-and-m","powerbi/star-schema-and-relationships","statistics/missing-data","data-engineering/etl-elt-and-pipelines"]
+versions: "Microsoft 365 and Excel 2016 onward"
+tested: "Procedures and M syntax checked against Microsoft documentation. Queries weren't executed"
+verified: "2026-11-09"
+docs:
+  - label: "Power Query M language"
+    url: "https://learn.microsoft.com/en-us/powerquery-m/"
+  - label: "M quick tour"
+    url: "https://learn.microsoft.com/en-us/powerquery-m/quick-tour-of-the-power-query-m-formula-language"
+  - label: "Excel: Power Query overview"
+    url: "https://support.microsoft.com/en-us/office/about-power-query-in-excel-7104fbee-9e62-4cb9-a02e-5bfb1a6c536a"
+---
+
+## What it is
+
+**Power Query** extracts, transforms and loads data through recorded, repeatable steps written in the M language. The **Data Model** stores multiple related tables in memory and adds DAX measures through Power Pivot.
+
+## Why it exists
+
+Manually cleaning a monthly export is slow and error-prone. Power Query records the steps once and replays them on refresh. The Data Model removes the need for many `VLOOKUP` columns.
+
+## How it works
+
+Each applied step is a transformation in the query's `let` expression. Key operations:
+
+| Operation | Purpose |
+| --- | --- |
+| Filter, Remove Duplicates | Row cleaning |
+| Change Type | Correct types explicitly |
+| Split, Replace Values, Fill Down | Fix columns |
+| Unpivot | Turn month columns into rows |
+| Merge | Join queries |
+| Append | Stack files or tables |
+
+Folder queries can combine all files of the same shape. Relationships in the Data Model are usually one-to-many, from a lookup table to a fact table.
+
+## Syntax and key APIs
+
+```text
+let
+    Source = Excel.CurrentWorkbook(){[Name="Orders"]}[Content],
+    Typed = Table.TransformColumnTypes(Source, {{"Units", Int64.Type}, {"Date", type date}}),
+    Kept = Table.SelectRows(Typed, each [Units] > 0),
+    Added = Table.AddColumn(Kept, "Revenue", each [Units] * [Price], type number)
+in
+    Added
+```
+
+M is case-sensitive and functional, where each step refers to an earlier step. `each` is shorthand for a one-parameter function.
+
+## Simple example
+
+A budget file has columns Jan, Feb, Mar. Select the non-month columns and choose Unpivot Other Columns. The result is one row per item and month, which pivots and charts can use.
+
+## Industry examples
+
+Finance automates consolidation across dozens of subsidiary workbooks with Power Query folder queries. Analysts join CRM exports to an ERP dump inside the Data Model.
+
+## Patterns and best practices
+
+- Set types explicitly and early.
+- Use parameters for file paths.
+- Rename steps meaningfully.
+- Load staging queries as Connection Only.
+- Build a star schema in the Data Model.
+
+## Alternatives and trade-offs
+
+SQL is better when data already lives in a database. Python handles complex logic, and Power BI uses the same Power Query engine for shared, scheduled refresh.
+
+## Common mistakes
+
+- Removing a column by position, which breaks on schema changes.
+- Automatic type detection on partial samples.
+- Merging on untrimmed keys, resulting in missing matches.
+- Keeping unused columns in the model.
+
+## Interview questions
+
+<Question q="Merge versus append?">Merge joins columns from related tables. Append stacks rows from tables of the same shape.</Question>
+
+<Question q="Why unpivot?">Analysis tools work best with one column for each variable, and months across columns hide a date variable in the headers.</Question>

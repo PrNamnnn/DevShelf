@@ -1,0 +1,216 @@
+---
+title: "Errors, Logging and Type Hints"
+summary: "The three habits that make Python services maintainable: precise exceptions, library-safe logging, and types that catch mistakes early."
+level: intermediate
+section: errors
+order: 10
+tags: [exceptions, logging, type-hints, typing, protocol, exception-groups, generics]
+related: [python/decorators-and-context-managers, python/asyncio]
+versions: "add_note and ExceptionGroup need 3.11+. New generic syntax needs 3.12+. Annotations are lazily evaluated from 3.14."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python library: Built-in exceptions"
+    url: "https://docs.python.org/3/library/exceptions.html"
+  - label: "Python HOWTO: Logging"
+    url: "https://docs.python.org/3/howto/logging.html"
+  - label: "Python library: logging"
+    url: "https://docs.python.org/3/library/logging.html"
+  - label: "Python library: typing"
+    url: "https://docs.python.org/3/library/typing.html"
+  - label: "What's new in Python 3.14"
+    url: "https://docs.python.org/3/whatsnew/3.14.html"
+---
+
+## What it is
+
+Exceptions signal that an operation couldn't complete. Logging records what a running program did. Type hints describe expected types, which tools check without changing how the code runs.
+
+## Why it exists
+
+These address failures that appear after a program ships. Good exceptions identify what went wrong, logs reveal it in production, and types find many mistakes before the code runs.
+
+## How it works
+
+An exception unwinds the stack until a matching `except` is found. `finally` runs either way. `raise New from original` stores the cause in `__cause__`, so the traceback shows both.
+
+Logging is a tree of loggers named with dots. A record that passes a logger's level propagates up to the handlers of its ancestors, usually only the root. Without any configuration, warnings and above go to standard error.
+
+Type hints are metadata. Python doesn't enforce them at runtime, so a checker such as mypy or Pyright does the work.
+
+<Callout type="version">
+In Python 3.14, annotations are evaluated lazily, only when needed, unless the module uses `from __future__ import annotations`. Forward references generally no longer need quotes.
+</Callout>
+
+## Syntax and key APIs
+
+```py
+try:
+    risky()
+except (KeyError, ValueError) as error:
+    handle(error)
+else:
+    on_success()
+finally:
+    cleanup()
+```
+
+| Feature | Syntax | Since |
+| --- | --- | --- |
+| Chained error | `raise X from err` | 3.0 |
+| Add context | `err.add_note("...")` | 3.11 |
+| Several errors | `ExceptionGroup`, `except*` | 3.11 |
+| Generic class | `class Box[T]:` | 3.12 |
+| Type alias | `type Id = int` | 3.12 |
+| Structural type | `typing.Protocol` | 3.8 |
+| Return own class | `typing.Self` | 3.11 |
+
+## Simple example
+
+```python
+class PaymentError(Exception):
+    """Raised when a payment cannot be completed."""
+
+def charge(cents: int) -> str:
+    try:
+        if cents <= 0:
+            raise ValueError("amount must be positive")
+    except ValueError as error:
+        raise PaymentError("charge rejected") from error
+    return "ok"
+
+try:
+    charge(0)
+except PaymentError as error:
+    assert isinstance(error.__cause__, ValueError)
+```
+
+## Industry examples
+
+### Log in a library and an application
+
+A library creates a module logger and adds no handlers except `NullHandler`. The application configures output. Pass arguments separately so formatting is deferred until a record is really emitted.
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
+def load(user_id):
+    logger.info("loading user %s", user_id)
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
+load(7)
+```
+
+Use `logger.exception("...")` inside an `except` block to include the traceback.
+
+### Depend on behaviour with a Protocol
+
+A class satisfies a Protocol by having the right methods. No inheritance is needed.
+
+```python
+from typing import Protocol
+
+class Store(Protocol):
+    def get(self, key: str) -> str | None: ...
+
+class MemoryStore:
+    def __init__(self) -> None:
+        self.data: dict[str, str] = {"a": "1"}
+
+    def get(self, key: str) -> str | None:
+        return self.data.get(key)
+
+def read(store: Store, key: str) -> str:
+    return store.get(key) or "missing"
+
+assert read(MemoryStore(), "a") == "1"
+```
+
+### Report several failures together
+
+```python
+def validate(row):
+    errors = []
+    if not row.get("id"):
+        errors.append(ValueError("id missing"))
+    if not row.get("email"):
+        errors.append(KeyError("email missing"))
+    if errors:
+        raise ExceptionGroup("invalid row", errors)
+
+try:
+    validate({})
+except* ValueError as group:
+    assert len(group.exceptions) == 1
+except* KeyError as group:
+    assert len(group.exceptions) == 1
+```
+
+### Generics with the modern syntax
+
+```python
+class Stack[T]:
+    def __init__(self) -> None:
+        self.items: list[T] = []
+
+    def push(self, item: T) -> None:
+        self.items.append(item)
+
+    def pop(self) -> T:
+        return self.items.pop()
+
+s: Stack[int] = Stack()
+s.push(1)
+assert s.pop() == 1
+```
+
+## Patterns and best practices
+
+- Catch the narrowest exception you can actually handle.
+- Define a small exception hierarchy per package.
+- Use `logging.getLogger(__name__)` and never instantiate `Logger` directly.
+- Attach handlers to the root logger, because a handler on both a logger and its ancestor emits duplicates.
+- Run a type checker in CI, and type public functions first.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Expected "no value" | Return `None` | Callers must check |
+| Exceptional failure | Raise | Hidden control flow |
+| Machine-readable logs | JSON formatter | Harder to read locally |
+| Runtime validation | Pydantic | Dependency, but validates real data |
+
+## Common mistakes
+
+**Bare `except:`.** It also catches `SystemExit` and `KeyboardInterrupt`. Use `except Exception` at most.
+
+**Formatting log messages eagerly.** `logger.debug(f"...{expensive()}")` does the work even when debug is off. Guard expensive arguments with `logger.isEnabledFor(logging.DEBUG)`.
+
+**Assuming hints are enforced.** This runs without complaint.
+
+```python
+def double(x: int) -> int:
+    return x * 2
+
+assert double("ab") == "abab"
+```
+
+**Losing the cause.** `raise New()` inside `except` without `from` still records context, but `from` states the relationship deliberately.
+
+## Interview questions
+
+<Question q="What is the difference between else and finally on a try?">
+`else` runs only if the `try` block raised nothing. `finally` always runs, including during an exception or `return`.
+</Question>
+
+<Question q="Why call logger.info('%s', x) instead of using an f-string?">
+Formatting is deferred until the record will be emitted, and the message template stays constant, which helps log aggregation.
+</Question>
+
+<Question q="Does Python enforce type hints at runtime?">
+No. They're available for introspection, but checks come from static tools or libraries that explicitly validate.
+</Question>

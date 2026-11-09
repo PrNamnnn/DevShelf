@@ -1,0 +1,155 @@
+---
+title: "Performance Tuning and Query Store"
+summary: "Parameter sniffing, Parameter Sensitive Plan optimization, finding regressions with Query Store, and a practical tuning process."
+level: advanced
+section: performance
+order: 20
+tags: [performance, query-store, parameter-sniffing, psp, recompile, statistics, tuning, dmv]
+related: [sqlserver/indexes-and-execution-plans, sqlserver/transactions-and-locking]
+versions: "PSP needs compatibility level 160+ (SQL Server 2022). DML support needs level 170 (2025). Query Store is on by default for new databases from 2022."
+tested: "RECOMPILE and DMV queries run on SQL Server 2025. Query Store and PSP behaviour are from the docs."
+verified: "2026-11-09"
+docs:
+  - label: "SQL Server: Monitoring with Query Store"
+    url: "https://learn.microsoft.com/en-us/sql/relational-databases/performance/monitoring-performance-by-using-the-query-store"
+  - label: "SQL Server: Parameter sensitive plan optimization"
+    url: "https://learn.microsoft.com/en-us/sql/relational-databases/performance/parameter-sensitive-plan-optimization"
+  - label: "SQL Server: Query processing architecture guide"
+    url: "https://learn.microsoft.com/en-us/sql/relational-databases/query-processing-architecture-guide"
+  - label: "What's new in SQL Server 2025"
+    url: "https://learn.microsoft.com/en-us/sql/sql-server/what-s-new-in-sql-server-2025"
+---
+
+## What it is
+
+Tuning is the process of finding the queries that use the most resources and fixing why. **Query Store** records query plans and runtime statistics in the database over time.
+
+## Why it exists
+
+Plans change when data, statistics or parameters change, and performance can degrade overnight. Query Store shows what changed and lets you force a better plan.
+
+## How it works
+
+When a parameterized statement is compiled, SQL Server **sniffs** the current parameter values and builds a plan for them. The plan is cached and reused for later values, which can be very different.
+
+<StepFlow
+  title="A parameter sniffing incident"
+  nodes={["plan cache empty", "compile for rare value", "plan reused", "common value is slow", "PSP or fix"]}
+  steps={[
+    { active: [0], note: "The plan isn't cached, for example after a restart or statistics update." },
+    { active: [1], note: "The first call uses a customer with 5 rows, so a seek with key lookups is chosen.", state: { sniffed: "rare customer" } },
+    { active: [2], note: "The plan is cached and used by every later call." },
+    { active: [3], note: "A customer with 500,000 rows now does 500,000 lookups.", state: { result: "slow" } },
+    { active: [4], note: "PSP can cache several plan variants. Otherwise consider RECOMPILE, a covering index, or OPTIMIZE FOR.", state: { result: "stable" } },
+  ]}
+/>
+
+**Parameter Sensitive Plan** optimization, from SQL Server 2022 at compatibility level 160, keeps multiple active plans for one statement. It works with equality predicates. SQL Server 2025 extends it to DML at level 170.
+
+## Syntax and key APIs
+
+```plsql
+ALTER DATABASE Sales SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE);
+
+SELECT TOP (10) q.query_id, t.query_sql_text, s.avg_duration
+FROM sys.query_store_query q
+JOIN sys.query_store_query_text t ON q.query_text_id = t.query_text_id
+JOIN sys.query_store_plan p ON q.query_id = p.query_id
+JOIN sys.query_store_runtime_stats s ON p.plan_id = s.plan_id
+ORDER BY s.avg_duration DESC;
+
+EXEC sp_query_store_force_plan @query_id = 42, @plan_id = 7;
+```
+
+SSMS has built-in reports such as **Regressed Queries** and **Top Resource Consuming Queries**.
+
+## Simple example
+
+`OPTION (RECOMPILE)` compiles for the current values each time.
+
+```sql
+CREATE TABLE #t (a int);
+INSERT #t VALUES (1), (2), (2);
+
+DECLARE @v int = 2;
+SELECT COUNT(*) FROM #t WHERE a = @v OPTION (RECOMPILE);
+-- output: 2
+```
+
+## Industry examples
+
+### Find expensive queries now
+
+```sql
+SELECT TOP (1) 'ok'
+FROM sys.dm_exec_query_stats qs
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+ORDER BY qs.total_worker_time DESC;
+-- output: ok
+```
+
+### Check what's blocking
+
+```plsql
+SELECT r.session_id, r.blocking_session_id, r.wait_type, t.text
+FROM sys.dm_exec_requests r
+CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
+WHERE r.blocking_session_id <> 0;
+```
+
+### Handle optional search parameters
+
+A single plan can't serve every combination well.
+
+```plsql
+SELECT * FROM dbo.Orders
+WHERE (@CustomerId IS NULL OR CustomerId = @CustomerId)
+  AND (@Status IS NULL OR Status = @Status)
+OPTION (RECOMPILE);
+```
+
+## Patterns and best practices
+
+Follow a repeatable process:
+
+1. Find the top consumers with Query Store.
+2. Look at the actual plan and the logical reads.
+3. Compare estimated and actual rows.
+4. Fix statistics, predicates or indexes.
+5. Verify under a realistic workload.
+
+Use `OPTION (RECOMPILE)` only after assessing its compile cost, since Microsoft warns that it can be high.
+
+## Alternatives and trade-offs
+
+| Fix for sniffing | Benefit | Cost |
+| --- | --- | --- |
+| PSP | Automatic | Equality predicates, requires level 160 |
+| `OPTION (RECOMPILE)` | Best plan per call | CPU on every call |
+| Covering index | Plan is stable | Storage and writes |
+| Force plan in Query Store | Fast mitigation | May age badly |
+| `OPTIMIZE FOR` | Predictable | Needs a representative value |
+
+## Common mistakes
+
+**Clearing the plan cache as a fix.** It only gets a new plan for whichever value arrives next.
+
+**Using local variables to "disable" sniffing unknowingly.** Local variables can't be sniffed, so estimates become generic.
+
+**Forcing plans and forgetting them.** Review forced plans after data and schema changes.
+
+**Tuning from estimated plans alone.** Actual row counts reveal the misestimates.
+
+## Interview questions
+
+<Question q="What is parameter sniffing?">
+The optimizer uses the parameter values present at compilation to build a plan, which is then reused for other values.
+</Question>
+
+<Question q="What does Query Store do?">
+It persists query text, plans and runtime statistics in the database, helping you find regressions and force plans.
+</Question>
+
+<Question q="Is parameter sniffing bad?">
+No. It's usually beneficial. It becomes a problem when data is skewed and one cached plan can't suit all values.
+</Question>

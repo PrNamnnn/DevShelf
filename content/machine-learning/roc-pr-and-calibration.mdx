@@ -1,0 +1,94 @@
+---
+title: "ROC, PR Curves, Log Loss and Calibration"
+summary: "Evaluate rankings and probabilities, choose between ROC and PR, and calibrate model scores."
+level: advanced
+section: evaluation
+order: 2
+tags: ["ROC","AUC","precision-recall","average precision","log loss","calibration"]
+requires: ["machine-learning/classification-metrics"]
+related: ["machine-learning/imbalance-and-cost-sensitive-learning","statistics/logistic-regression"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Metrics and scoring"
+    url: "https://scikit-learn.org/stable/modules/model_evaluation.html"
+  - label: "scikit-learn: Probability calibration"
+    url: "https://scikit-learn.org/stable/modules/calibration.html"
+---
+
+## What it is
+
+- **ROC curve:** true positive rate against false positive rate at all thresholds.
+- **AUC:** the probability that a random positive outranks a random negative.
+- **PR curve:** precision against recall, summarized by **average precision**.
+- **Log loss:** penalizes confident wrong probabilities.
+- **Calibration:** whether predicted probabilities match observed frequencies.
+
+## Why it exists
+
+A threshold-free view separates ranking quality from a specific operating point. Business decisions that multiply probability by value need calibrated numbers.
+
+## How it works
+
+ROC is relatively insensitive to class balance. PR focuses on the positive class, and is usually more informative on imbalanced data. Its baseline is the prevalence.
+
+Calibration methods fit a mapping from scores to probabilities on held-out data: `sigmoid` (Platt), `isotonic` and temperature scaling. Isotonic is flexible but prone to overfit with fewer than about 1,000 samples.
+
+## Intuition and formula
+
+<Formula>log loss = −(1/n) Σ [yᵢ log pᵢ + (1 − yᵢ) log(1 − pᵢ)]</Formula>
+
+## Worked example
+
+Predicting 0.99 for a case that turns out negative costs −log(0.01) = 4.61, while predicting 0.6 costs 0.92. Two models might have identical AUC, yet only one yields trustworthy probabilities.
+
+## Python
+
+```python
+import math
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.datasets import make_classification
+from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
+from sklearn.model_selection import train_test_split
+from sklearn.naive_bayes import GaussianNB
+
+assert round(-math.log(0.01), 2) == 4.61
+assert round(-math.log(0.4), 2) == 0.92
+
+X, y = make_classification(n_samples=20_000, n_informative=4, n_redundant=10, weights=[0.9], random_state=0)
+X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, random_state=0)
+
+raw = GaussianNB().fit(X_train, y_train).predict_proba(X_test)[:, 1]
+fitted = CalibratedClassifierCV(GaussianNB(), method="isotonic", cv=3).fit(X_train, y_train)
+calibrated = fitted.predict_proba(X_test)[:, 1]
+
+assert brier_score_loss(y_test, calibrated) < brier_score_loss(y_test, raw)
+assert roc_auc_score(y_test, calibrated) > 0.7
+assert average_precision_score(y_test, calibrated) > y_test.mean()
+```
+
+## In industry
+
+Credit, insurance and ad-bidding models depend on calibrated probabilities, and they're monitored as prevalence shifts.
+
+## Assumptions and limitations
+
+AUC can look strong even when top-of-list precision is poor. Calibration fitted at one time can degrade.
+
+## Common mistakes
+
+- Comparing AP values across different class prevalences.
+- Calibrating on the training data.
+- Reading AUC as accuracy.
+- Assuming probability outputs are calibrated.
+
+## Alternatives
+
+Decile lift tables suit marketing, and expected cost directly evaluates decisions.
+
+## Interview questions
+
+<Question q="When is PR better than ROC?">When positives are rare and you care mainly about the performance on them.</Question>
+
+<Question q="What does calibration do?">It aligns predicted probabilities with observed frequencies.</Question>

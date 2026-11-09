@@ -1,0 +1,88 @@
+---
+title: "Class Imbalance, Thresholds and Cost-Sensitive Learning"
+summary: "Handle rare outcomes with weights and resampling, and select thresholds from business costs."
+level: advanced
+section: evaluation
+order: 3
+tags: ["class imbalance","threshold selection","cost-sensitive learning"]
+requires: ["machine-learning/roc-pr-and-calibration"]
+related: ["statistics/revenue-ltv-cac","statistics/interpreting-experiments"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Tuning the decision threshold"
+    url: "https://scikit-learn.org/stable/modules/classification_threshold.html"
+  - label: "scikit-learn: Metrics and scoring"
+    url: "https://scikit-learn.org/stable/modules/model_evaluation.html"
+---
+
+## What it is
+
+Imbalance occurs when one class is rare. **Cost-sensitive** learning explicitly incorporates differing error costs. **Threshold selection** turns probabilities into decisions.
+
+## Why it exists
+
+Default 0.5 thresholds rarely match business reality, and a rare-class model that never fires can look superb on accuracy.
+
+## How it works
+
+Options, in the order worth trying: pick the right metric, then adjust the threshold, then use class weights, then consider resampling. Oversampling and SMOTE must be applied only within training folds, and they distort probabilities. Undersampling discards data.
+
+Tune the threshold on validation data, or with `TunedThresholdClassifierCV`.
+
+## Intuition and formula
+
+With calibrated probabilities, act when the expected benefit exceeds expected cost:
+
+<Formula>t* = C_FP / (C_FP + C_FN)</Formula>
+
+## Worked example
+
+A retention offer costs ₹10 when wasted (a false positive), and a missed churner loses ₹100. The optimal threshold is 10 ÷ 110 = 0.091, far below 0.5. Acting on any customer with a churn risk above 9.1% maximizes expected value under those simple assumptions.
+
+## Python
+
+```python
+from sklearn.datasets import make_classification
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import recall_score
+from sklearn.model_selection import train_test_split
+
+assert round(10 / (10 + 100), 3) == 0.091
+
+X, y = make_classification(n_samples=10_000, weights=[0.95], flip_y=0.01, random_state=0)
+X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, random_state=0)
+
+plain = LogisticRegression(max_iter=1_000).fit(X_train, y_train)
+weighted = LogisticRegression(max_iter=1_000, class_weight="balanced").fit(X_train, y_train)
+
+assert recall_score(y_test, weighted.predict(X_test)) > recall_score(y_test, plain.predict(X_test))
+low_threshold = (plain.predict_proba(X_test)[:, 1] >= 0.091).astype(int)
+assert recall_score(y_test, low_threshold) > recall_score(y_test, plain.predict(X_test))
+```
+
+## In industry
+
+Teams pick thresholds based on analyst capacity, like reviewing the top 500 alerts a day, or on measured unit economics.
+
+## Assumptions and limitations
+
+The cost formula assumes calibrated probabilities and fixed costs. Treatment effects aren't captured, so it doesn't identify customers who'd respond.
+
+## Common mistakes
+
+- Oversampling before splitting.
+- Evaluating on a resampled test set.
+- Assuming SMOTE always helps.
+- Treating 0.5 as a law.
+
+## Alternatives
+
+Uplift modelling estimates incremental effects. Anomaly detection may be better where positives are extremely rare.
+
+## Interview questions
+
+<Question q="How would you choose a threshold?">From business costs and capacity, validated on held-out data.</Question>
+
+<Question q="Why apply resampling inside folds?">Otherwise duplicated or synthetic records leak into validation.</Question>

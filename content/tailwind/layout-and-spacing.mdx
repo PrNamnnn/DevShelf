@@ -1,0 +1,135 @@
+---
+title: "Layout: Flexbox, Grid and Spacing"
+summary: "The utilities behind almost every interface, the sizing scale, and the patterns that avoid common overflow problems."
+level: fundamental
+section: layout
+order: 10
+tags: [flexbox, grid, spacing, sizing, position, layout, min-w-0]
+related: [tailwind/utility-first-and-setup, tailwind/responsive-design-and-states]
+versions: "Tailwind CSS v4.3."
+tested: "Generated output compiled with Tailwind 4.3.5."
+verified: "2026-11-09"
+docs:
+  - label: "Tailwind: flex"
+    url: "https://tailwindcss.com/docs/flex"
+  - label: "Tailwind: grid-template-columns"
+    url: "https://tailwindcss.com/docs/grid-template-columns"
+  - label: "Tailwind: Theme variables"
+    url: "https://tailwindcss.com/docs/theme"
+---
+
+## What it is
+
+Tailwind maps CSS layout properties to short classes: `flex`, `grid`, `gap-4`, `p-6`, `max-w-md` and so on. Spacing comes from a single `--spacing` multiplier.
+
+## Why it exists
+
+A shared scale makes layouts consistent without per-component decisions. Flexbox and Grid utilities express most page structures directly in markup.
+
+## How it works
+
+Spacing utilities compute `calc(var(--spacing) * n)`, so `p-4` is four units. Grid columns use `repeat(n, minmax(0, 1fr))`, so `grid-cols-3` makes equal columns that can shrink.
+
+Use flexbox for one-dimensional alignment and grid for two-dimensional layout.
+
+## Syntax and key APIs
+
+| Goal | Classes |
+| --- | --- |
+| Row with centered items | `flex items-center gap-3` |
+| Push apart | `flex justify-between` |
+| Column stack | `flex flex-col gap-2` |
+| Fill remaining space | `flex-1` |
+| Don't shrink | `shrink-0` |
+| Equal grid | `grid grid-cols-3 gap-4` |
+| Span columns | `col-span-2` |
+| Center a page | `mx-auto max-w-5xl px-4` |
+
+## Simple example
+
+```html
+<article class="flex items-start gap-4 p-4">
+  <img class="size-12 rounded-full" src="/a.png" alt="" />
+  <div class="min-w-0 flex-1">
+    <h3 class="truncate font-semibold">A long title that may overflow</h3>
+    <p class="text-sm text-gray-600">Details</p>
+  </div>
+</article>
+```
+
+## Industry examples
+
+### App shell
+
+```html
+<div class="grid min-h-screen grid-cols-[16rem_minmax(0,1fr)]">
+  <aside class="border-r p-4">Navigation</aside>
+  <main class="p-6">Content</main>
+</div>
+```
+
+### A responsive card grid with no breakpoints
+
+```html
+<ul class="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-4">
+  <li>Card</li>
+</ul>
+```
+
+### A sticky header with scrolling content
+
+```html
+<div class="flex h-dvh flex-col">
+  <header class="shrink-0 border-b p-4">Header</header>
+  <div class="min-h-0 flex-1 overflow-y-auto p-4">Long content</div>
+</div>
+```
+
+### Align children to a parent grid
+
+`subgrid` lets nested content line up with the parent's tracks.
+
+```html
+<div class="grid grid-cols-3 gap-4">
+  <article class="col-span-3 grid grid-cols-subgrid">
+    <h3>Name</h3>
+    <p>Role</p>
+    <a href="#">View</a>
+  </article>
+</div>
+```
+
+## Patterns and best practices
+
+- Use `gap` for spacing between children rather than margins on each child.
+- Add `min-w-0` to flex or grid children that hold long text or code.
+- Use `dvh` units on mobile.
+- Prefer `size-*` when width and height match.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| One-axis alignment | Flexbox | Rows don't align across lines |
+| Two-axis structure | Grid | More setup for simple rows |
+| Overlays | `absolute`, `fixed` | Removed from the normal flow |
+
+## Common mistakes
+
+**Long content blowing out a flex item.** Flex items default to `min-width: auto`. Add `min-w-0`.
+
+**Using `h-screen` on phones.** Browser chrome changes the viewport. Use `h-dvh`.
+
+**Stacking margins on children.** Use `gap`, which doesn't add a stray edge.
+
+**Forgetting `relative` on the parent.** An `absolute` child is placed against its nearest positioned ancestor.
+
+## Interview questions
+
+<Question q="Why add min-w-0 to a flex child?">
+Flex items won't shrink below their content's minimum size by default. `min-w-0` allows shrinking, so that truncation and scrolling work.
+</Question>
+
+<Question q="Flexbox or grid?">
+Flexbox for a line of items along one axis. Grid when rows and columns must align together.
+</Question>

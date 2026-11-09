@@ -1,0 +1,142 @@
+---
+title: "Lazy Loading and Code Splitting"
+summary: "Shipping less JavaScript up front with lazy and Suspense, and where to split without hurting the user experience."
+level: advanced
+section: performance
+order: 20
+tags: [lazy, suspense, code-splitting, bundle-size, dynamic-import]
+requires: [react/performance-and-memoization]
+related: [javascript/es-modules, react/error-boundaries]
+versions: "React 16.6+."
+tested: "Not executed. Checked against the React docs."
+verified: "2026-11-09"
+docs:
+  - label: "React: lazy"
+    url: "https://react.dev/reference/react/lazy"
+  - label: "React: Suspense"
+    url: "https://react.dev/reference/react/Suspense"
+---
+
+## What it is
+
+`lazy` delays loading a component's code until it first renders. Bundlers split each dynamic `import()` into a separate file.
+
+## Why it exists
+
+JavaScript has to be downloaded, parsed and executed before a page is interactive. Rarely used features shouldn't delay everyone.
+
+## How it works
+
+<StepFlow
+  title="Rendering a lazy component"
+  code={["const Chart = lazy(() => import('./Chart'));", "<Suspense fallback={<Spinner />}>", "  {show && <Chart />}", "</Suspense>"]}
+  nodes={["first render", "call load()", "suspend", "fallback shown", "module resolves", "render Chart"]}
+  steps={[
+    { line: 0, active: [0], note: "lazy doesn't load anything when it's declared." },
+    { line: 2, active: [1], note: "On first render, React calls the loader." },
+    { line: 2, active: [2, 3], note: "The component suspends, and the nearest Suspense shows its fallback." },
+    { line: 0, active: [4], note: "The promise resolves to a module with a default export. It's cached, so loading happens once." },
+    { line: 2, active: [5], note: "React retries and renders the real component." },
+  ]}
+/>
+
+If the load fails, React throws to the nearest error boundary.
+
+## Syntax and key APIs
+
+```jsx
+const Settings = lazy(() => import("./Settings"));
+
+<ErrorBoundary fallback={<LoadFailed />}>
+  <Suspense fallback={<PageSkeleton />}>
+    <Settings />
+  </Suspense>
+</ErrorBoundary>
+```
+
+## Simple example
+
+```jsx
+const Editor = lazy(() => import("./Editor"));
+
+function Page() {
+  const [editing, setEditing] = useState(false);
+  return (
+    <>
+      <button onClick={() => setEditing(true)}>Edit</button>
+      {editing && (
+        <Suspense fallback={<p>Loading editor…</p>}>
+          <Editor />
+        </Suspense>
+      )}
+    </>
+  );
+}
+```
+
+## Industry examples
+
+### Named exports
+
+`lazy` needs a default export. Adapt a named one.
+
+```jsx
+const Chart = lazy(() =>
+  import("./charts").then((module) => ({ default: module.Chart })),
+);
+```
+
+### Start the download early
+
+Calling the import on hover gives the bundle a head start, and the module cache reuses it.
+
+```jsx
+const loadSettings = () => import("./Settings");
+const Settings = lazy(loadSettings);
+
+<a href="/settings" onMouseEnter={loadSettings}>Settings</a>
+```
+
+### Keep the old UI during navigation
+
+A Transition prevents visible content from being replaced by a fallback.
+
+```jsx
+startTransition(() => setPage("settings"));
+```
+
+## Patterns and best practices
+
+- Split at routes and large optional features.
+- Declare `lazy` at module scope.
+- Use skeletons sized like the final content.
+- Inspect your bundle before and after.
+
+## Alternatives and trade-offs
+
+| Technique | Benefit | Cost |
+| --- | --- | --- |
+| Route splitting | Biggest win | Delay on navigation |
+| Component splitting | Removes heavy widgets | Loading states |
+| Server Components | No client code | Needs a framework |
+| Eager loading | Instant interaction | Larger first load |
+
+## Common mistakes
+
+**Declaring `lazy` inside a component.** State resets on every render.
+
+**Splitting tiny components.** Requests can cost more than they save.
+
+**No error boundary.** A failed chunk crashes the tree.
+
+**Fallback causing layout shift.** Reserve the space.
+
+## Interview questions
+
+<Question q="How does lazy work?">
+It takes a function returning a dynamic import. The component suspends on first render until the module resolves.
+</Question>
+
+<Question q="Where should you code-split?">
+At routes first, and then large features that many users don't open.
+</Question>

@@ -1,0 +1,103 @@
+---
+title: "Data Modelling Patterns"
+summary: "Subset, computed, bucket, extended reference, polymorphic and outlier patterns for real workloads."
+level: intermediate
+section: modeling
+order: 2
+tags: ["bucket pattern","subset pattern","computed pattern","extended reference"]
+requires: ["mongodb/schema-design-embedding-referencing"]
+related: ["mongodb/aggregation-pipeline","data-engineering/dimensional-modelling-and-partitioning"]
+versions: "Documentation for MongoDB 9.0. Examples executed on MongoDB 8.0.12"
+tested: "JavaScript examples executed against a temporary MongoDB 8.0.12 replica set"
+verified: "2026-11-09"
+docs:
+  - label: "MongoDB: Schema design patterns"
+    url: "https://www.mongodb.com/docs/manual/data-modeling/design-patterns/"
+  - label: "MongoDB: Time series"
+    url: "https://www.mongodb.com/docs/manual/core/timeseries-collections/"
+---
+
+## What it is
+
+Patterns are reusable shapes for common workloads.
+
+| Pattern | Idea | Example |
+| --- | --- | --- |
+| Subset | Embed only the most used part | Latest 10 reviews on a product |
+| Extended reference | Copy a few fields beside a reference | Customer name on an order |
+| Computed | Store precomputed results | Rating average |
+| Bucket | Group many small items per document | Sensor readings per hour |
+| Outlier | Handle a few very large cases separately | A viral post's followers |
+| Polymorphic | Varied shapes share a collection | Different product types |
+
+## Why it exists
+
+Applying one general shape everywhere leads either to oversized documents or too many joins.
+
+## How it works
+
+Each pattern exchanges something: faster reads for more complicated writes, or duplication for fewer lookups. Choose based on measured read and write ratios.
+
+## Syntax and key APIs
+
+Computed update on every new rating:
+
+```text
+{ $inc: { "stats.count": 1, "stats.sum": rating } }
+```
+
+## Simple example
+
+```js
+import assert from "node:assert/strict";
+import { MongoClient } from "mongodb";
+
+const client = new MongoClient(process.env.MONGODB_URI);
+const db = client.db("shelf_patterns");
+await db.dropDatabase();
+const buckets = db.collection("readings");
+
+for (const reading of [{ t: 1, v: 20 }, { t: 2, v: 22 }, { t: 3, v: 24 }]) {
+  await buckets.updateOne(
+    { sensor: "s1", hour: "2026-01-05T10", count: { $lt: 2 } },
+    { $push: { readings: reading }, $inc: { count: 1, sum: reading.v } },
+    { upsert: true },
+  );
+}
+
+const docs = await buckets.find({ sensor: "s1" }).sort({ _id: 1 }).toArray();
+assert.deepEqual(docs.map((d) => d.count), [2, 1]);
+assert.equal(docs[0].sum, 42);
+
+await db.dropDatabase();
+await client.close();
+```
+
+Each document caps at two readings here, so the third reading opens a new bucket.
+
+## Industry examples
+
+IoT platforms bucket by time, and product pages combine subset and computed patterns. MongoDB's time series collections provide built-in bucketing.
+
+## Patterns and best practices
+
+- Apply a pattern only after identifying a real need.
+- Document which field is the source of truth.
+- Refresh computed values with a job when eventual consistency is acceptable.
+
+## Alternatives and trade-offs
+
+A materialized view through `$merge` provides computed results without touching the write path. A warehouse may be a better location for heavy analytics.
+
+## Common mistakes
+
+- Using several patterns where one would do.
+- Forgetting to update duplicated values.
+- Bucketing without a cap.
+- Treating an outlier case as the design center.
+
+## Interview questions
+
+<Question q="What problem does the bucket pattern solve?">It reduces document count and index size for large numbers of small related records.</Question>
+
+<Question q="What is an extended reference?">A reference that also copies a few frequently read fields, to avoid a lookup.</Question>

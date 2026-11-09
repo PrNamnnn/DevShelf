@@ -1,0 +1,162 @@
+---
+title: "Forms and Input Binding"
+summary: "How v-model maps to different inputs, its modifiers, and patterns for validation and submission."
+level: fundamental
+section: foundations
+order: 30
+tags: [v-model, forms, modifiers, checkbox, select, validation]
+requires: [vue/templates-and-components]
+related: [vue/component-communication, react/events-and-forms]
+versions: "Vue 3."
+tested: "Validation logic run on Vue 3.5.45. Template syntax checked against the Vue docs."
+verified: "2026-11-09"
+docs:
+  - label: "Vue: Form input bindings"
+    url: "https://vuejs.org/guide/essentials/forms.html"
+  - label: "Vue: Event handling"
+    url: "https://vuejs.org/guide/essentials/event-handling.html"
+---
+
+## What it is
+
+`v-model` creates a two-way binding between form inputs and state.
+
+## Why it exists
+
+Writing a value binding and event listener for every field is repetitive. `v-model` handles the correct pair for each input type.
+
+## How it works
+
+| Element | Property | Event |
+| --- | --- | --- |
+| Text and `textarea` | `value` | `input` |
+| Checkbox and radio | `checked` | `change` |
+| `select` | `value` | `change` |
+
+`v-model` ignores initial `value`, `checked` and `selected` attributes, so declare initial values in state.
+
+| Modifier | Effect |
+| --- | --- |
+| `.lazy` | Sync on `change` instead of `input` |
+| `.number` | Convert with `parseFloat` |
+| `.trim` | Trim whitespace |
+
+## Syntax and key APIs
+
+```vue
+<input v-model.trim="name" />
+<input type="checkbox" v-model="agree" />
+<input type="checkbox" value="a" v-model="choices" />
+<select v-model="city"><option value="">Pick one</option></select>
+<form @submit.prevent="save"></form>
+```
+
+## Simple example
+
+```vue
+<script setup>
+import { ref } from "vue";
+const email = ref("");
+const plan = ref("free");
+</script>
+
+<template>
+  <form @submit.prevent="$emit('save', { email, plan })">
+    <input v-model.trim="email" type="email" />
+    <select v-model="plan">
+      <option value="free">Free</option>
+      <option value="pro">Pro</option>
+    </select>
+    <button>Save</button>
+  </form>
+</template>
+```
+
+## Industry examples
+
+### Derive validation
+
+Computed errors stay in sync, with no separate error state to maintain.
+
+```js
+import assert from "node:assert";
+import { computed, reactive } from "vue";
+
+const form = reactive({ email: "", age: 17 });
+
+const errors = computed(() => ({
+  email: form.email.includes("@") ? null : "Enter an email",
+  age: form.age >= 18 ? null : "Must be 18",
+}));
+
+const valid = computed(() => Object.values(errors.value).every((e) => e === null));
+
+assert.equal(valid.value, false);
+form.email = "a@b.c";
+form.age = 20;
+assert.equal(valid.value, true);
+```
+
+### A group of checkboxes
+
+Binding checkboxes to an array collects the selected values.
+
+```vue
+<template>
+  <label v-for="tag in tags" :key="tag">
+    <input type="checkbox" :value="tag" v-model="selected" /> {{ tag }}
+  </label>
+</template>
+```
+
+### Build a reusable field
+
+```vue
+<script setup>
+const model = defineModel({ type: String });
+defineProps({ label: String, error: String });
+</script>
+
+<template>
+  <label>
+    {{ label }}
+    <input v-model="model" :aria-invalid="!!error" />
+    <small v-if="error">{{ error }}</small>
+  </label>
+</template>
+```
+
+## Patterns and best practices
+
+- Validate again on the server.
+- Use `.prevent` on `@submit`.
+- Use `.lazy` when per-keystroke updates are expensive.
+- Show errors with `aria-invalid` and associated text.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Simple forms | `v-model` and `computed` | Manual rules |
+| Complex forms | Form library | Dependency |
+| Sync on blur | `.lazy` | Less immediate |
+
+## Common mistakes
+
+**Setting `value=""` in the template.** `v-model` ignores it.
+
+**Expecting `.number` to always return a number.** If parsing fails, the original string remains.
+
+**A `select` with no matching initial value.** iOS may not fire `change`. Add a disabled first option.
+
+**Forgetting `.prevent`.** The page reloads on submit.
+
+## Interview questions
+
+<Question q="What does v-model compile to?">
+A value or checked binding plus an event listener, chosen by input type.
+</Question>
+
+<Question q="What does .lazy do?">
+It syncs on `change` rather than each `input` event.
+</Question>

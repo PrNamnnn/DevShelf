@@ -1,0 +1,194 @@
+---
+title: "Threads, Processes and the GIL"
+summary: "Why threads don't speed up CPU work on standard builds, choosing an executor, and what free-threaded Python changes."
+level: advanced
+section: concurrency
+order: 10
+tags: [gil, threading, multiprocessing, concurrent-futures, free-threading, locks, race-conditions]
+requires: [python/functions-and-scope]
+related: ["python/asyncio", "python/memory-management", "data-engineering/spark-fundamentals"]
+versions: "Free-threaded builds exist from 3.13 and are officially supported from 3.14. ProcessPoolExecutor no longer defaults to fork from 3.14."
+tested: "CPython 3.14.6, standard GIL build"
+verified: "2026-11-09"
+docs:
+  - label: "Python library: threading"
+    url: "https://docs.python.org/3/library/threading.html"
+  - label: "Python library: concurrent.futures"
+    url: "https://docs.python.org/3/library/concurrent.futures.html"
+  - label: "Python HOWTO: Free-threading"
+    url: "https://docs.python.org/3/howto/free-threading-python.html"
+---
+
+## What it is
+
+The **Global Interpreter Lock** lets only one thread execute Python bytecode at a time on standard CPython. Threads still help with waiting, and processes give real parallelism.
+
+## Why it exists
+
+The GIL protects CPython's internals, such as reference counts, and keeps single-threaded code fast and C extensions simple.
+
+## How it works
+
+<StepFlow
+  title="Two threads on a GIL build"
+  nodes={["thread A holds GIL", "A waits on I/O", "GIL released", "thread B runs", "A resumes"]}
+  steps={[
+    { active: [0], note: "Thread A executes bytecode while B waits for the lock." },
+    { active: [1], note: "A makes a blocking network call." },
+    { active: [2], note: "Blocking I/O releases the GIL, so waits overlap." },
+    { active: [3], note: "B runs. This is why threads speed up I/O-bound work." },
+    { active: [4], note: "CPU-bound threads just take turns, so total throughput doesn't improve." },
+  ]}
+/>
+
+| Workload | Tool | Reason |
+| --- | --- | --- |
+| Many network waits | `asyncio` | Cheap tasks |
+| Blocking I/O libraries | `ThreadPoolExecutor` | GIL released while waiting |
+| CPU-bound Python | `ProcessPoolExecutor` | Separate interpreters |
+
+The GIL doesn't make your code thread-safe. A compound operation like `count += 1` can still interleave.
+
+## Syntax and key APIs
+
+```py
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+with ThreadPoolExecutor(max_workers=8) as pool:
+    futures = [pool.submit(fetch, url) for url in urls]
+    for future in as_completed(futures):
+        print(future.result())
+
+results = list(pool.map(fetch, urls))
+```
+
+Only picklable objects can cross a process boundary. `sys._is_gil_enabled()` reports the GIL's status at runtime.
+
+## Simple example
+
+```python
+from concurrent.futures import ThreadPoolExecutor
+import time
+
+def wait(n):
+    time.sleep(0.05)
+    return n * 2
+
+start = time.perf_counter()
+with ThreadPoolExecutor(max_workers=4) as pool:
+    results = list(pool.map(wait, range(4)))
+elapsed = time.perf_counter() - start
+
+assert results == [0, 2, 4, 6]
+assert elapsed < 0.15
+```
+
+## Industry examples
+
+### Protect shared state
+
+```python
+import threading
+
+class Counter:
+    def __init__(self):
+        self.value = 0
+        self._lock = threading.Lock()
+
+    def add(self):
+        with self._lock:
+            self.value += 1
+
+counter = Counter()
+threads = [threading.Thread(target=lambda: [counter.add() for _ in range(1000)]) for _ in range(4)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+
+assert counter.value == 4000
+```
+
+### Handle failures per task
+
+`result()` re-raises the worker's exception.
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def work(n):
+    if n == 1:
+        raise ValueError("bad")
+    return n
+
+with ThreadPoolExecutor() as pool:
+    futures = {pool.submit(work, n): n for n in range(3)}
+    ok, failed = [], []
+    for future in as_completed(futures):
+        try:
+            ok.append(future.result())
+        except ValueError:
+            failed.append(futures[future])
+
+assert sorted(ok) == [0, 2]
+assert failed == [1]
+```
+
+### Pass work between threads
+
+```python
+import queue, threading
+
+jobs = queue.Queue()
+done = []
+
+def worker():
+    while (item := jobs.get()) is not None:
+        done.append(item * 2)
+        jobs.task_done()
+
+thread = threading.Thread(target=worker)
+thread.start()
+for i in range(3):
+    jobs.put(i)
+jobs.put(None)
+thread.join()
+
+assert done == [0, 2, 4]
+```
+
+## Patterns and best practices
+
+- Prefer `concurrent.futures` to raw threads.
+- Share data with queues, not global variables.
+- Check `sys._is_gil_enabled()` rather than assuming the build type.
+- Use `max_workers` deliberately on shared systems.
+
+## Alternatives and trade-offs
+
+| Option | Benefit | Cost |
+| --- | --- | --- |
+| Threads | Shared memory, simple | Races, GIL for CPU work |
+| Processes | Real parallelism | Pickling and memory overhead |
+| asyncio | Huge numbers of waits | Needs async libraries |
+| Free-threaded build | Parallel threads | About 1 to 8% single-thread cost, extension support varies |
+
+## Common mistakes
+
+**Using threads for CPU work and expecting speedup.** On a GIL build they take turns.
+
+**Thinking the GIL prevents races.** Use locks for read-modify-write.
+
+**Using a process pool in an interactive session.** `__main__` must be importable.
+
+**Ignoring `future.result()`.** An exception stays hidden until you ask for it.
+
+## Interview questions
+
+<Question q="What is the GIL?">
+A lock in standard CPython that allows one thread at a time to run Python bytecode.
+</Question>
+
+<Question q="Do threads help in Python?">
+Yes, for I/O-bound work, because the GIL is released during blocking I/O. CPU-bound work needs processes or a free-threaded build.
+</Question>

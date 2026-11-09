@@ -1,0 +1,172 @@
+---
+title: "State and the Render Cycle"
+summary: "Why setting state doesn't change the current value, how React batches updates, and what happens between a click and a repaint."
+level: fundamental
+section: state
+order: 10
+tags: [state, useState, rendering, batching, commit, snapshot, updater, immutability]
+related: [react/components-jsx-and-props, react/effects-and-refs, react/reconciliation-and-keys]
+versions: "React 18+ batches updates automatically."
+tested: "Snapshot, updater and batching behaviour run on React 19.3.1 with jsdom."
+verified: "2026-11-09"
+docs:
+  - label: "React: Render and commit"
+    url: "https://react.dev/learn/render-and-commit"
+  - label: "React: State as a snapshot"
+    url: "https://react.dev/learn/state-as-a-snapshot"
+  - label: "React: Queueing a series of state updates"
+    url: "https://react.dev/learn/queueing-a-series-of-state-updates"
+  - label: "React: useState"
+    url: "https://react.dev/reference/react/useState"
+---
+
+## What it is
+
+State is data a component remembers between renders. `useState` returns the current value and a setter. Setting state asks React to render again with a new value.
+
+## Why it exists
+
+A local variable resets on every call and changing it doesn't update the screen. State survives renders and triggers them.
+
+## How it works
+
+Every screen update has three steps: **trigger, render, commit**. Rendering is React calling your components. Committing is React applying the minimal DOM changes, after which the browser paints.
+
+A state value is fixed within a render. It's a snapshot.
+
+<StepFlow
+  title="Three setters in one click"
+  code={["const [n, setN] = useState(0);", "", "function onClick() {", "  setN(n + 1);", "  setN(n + 1);", "  setN(x => x + 1);", "}"]}
+  nodes={["trigger", "update queue", "render", "commit", "paint"]}
+  steps={[
+    { line: 3, active: [0, 1], note: "In this render n is 0. The first call queues 'replace with 1'.", state: { "n in this render": "0", queue: "1" } },
+    { line: 4, active: [1], note: "n is still 0 here, so the second call queues 'replace with 1' again.", state: { "n in this render": "0", queue: "1, 1" } },
+    { line: 5, active: [1], note: "An updater function is queued and will receive the pending value.", state: { queue: "1, 1, x+1" } },
+    { line: 6, active: [2], note: "The handler has finished, so React processes the queue in one render: 1, then 1, then 2.", state: { "next n": "2" } },
+    { line: 0, active: [3, 4], note: "React commits the difference to the DOM and the browser paints. There was one render for all three calls.", state: { n: "2", renders: "1" } },
+  ]}
+/>
+
+A state change renders that component and, by default, everything beneath it.
+
+<TreeViz
+  title="What re-renders when Sidebar's state changes"
+  nodes={[{ id: "app", label: "App" }, { id: "side", label: "Sidebar (state)", parent: "app" }, { id: "main", label: "Main", parent: "app" }, { id: "menu", label: "Menu", parent: "side" }, { id: "item", label: "MenuItem", parent: "menu" }, { id: "feed", label: "Feed", parent: "main" }]}
+  steps={[
+    { active: ["side"], note: "setState in Sidebar schedules a render starting at Sidebar." },
+    { active: ["side", "menu"], note: "Its children render too, whether or not their props changed." },
+    { active: ["side", "menu", "item"], note: "This continues down the subtree." },
+    { visited: ["side", "menu", "item"], faded: ["app", "main", "feed"], note: "Ancestors and siblings aren't rendered. Commit then applies only actual DOM differences." },
+  ]}
+/>
+
+React waits until all the code in an event handler has run before processing updates, which is called batching. Separate deliberate events, such as two clicks, are handled separately.
+
+## Syntax and key APIs
+
+```jsx
+const [value, setValue] = useState(initial);
+const [data, setData] = useState(() => expensiveInit());
+
+setValue(next);          // replace
+setValue(prev => next);  // compute from the latest queued value
+```
+
+Objects and arrays in state must be treated as immutable. React compares with `Object.is`, so a mutated object looks unchanged.
+
+## Simple example
+
+```jsx
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <button onClick={() => setCount((c) => c + 1)}>
+      Clicked {count} times
+    </button>
+  );
+}
+```
+
+## Industry examples
+
+### Update nested state immutably
+
+```jsx
+function rename(user, name) {
+  return { ...user, profile: { ...user.profile, name } };
+}
+
+setUser((user) => rename(user, "Ada"));
+setItems((items) => items.map((i) => (i.id === id ? { ...i, done: true } : i)));
+setItems((items) => items.filter((i) => i.id !== id));
+```
+
+### Derive instead of duplicating
+
+Storing a filtered list in state creates two sources of truth.
+
+```jsx
+function Products({ products }) {
+  const [query, setQuery] = useState("");
+  const visible = products.filter((p) => p.name.includes(query));
+
+  return (
+    <>
+      <input value={query} onChange={(e) => setQuery(e.target.value)} />
+      <p>{visible.length} results</p>
+    </>
+  );
+}
+```
+
+### Model exclusive states
+
+A single status value prevents impossible combinations like loading and error together.
+
+```jsx
+const [request, setRequest] = useState({ status: "idle" });
+// { status: "loading" }
+// { status: "success", data }
+// { status: "error", error }
+```
+
+## Patterns and best practices
+
+- Use an updater function when the new value depends on the old one.
+- Keep the minimum state, and calculate everything else.
+- Group values that change together.
+- Store an ID for selection, not a copy of the object.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Local, simple value | `useState` | Logic can scatter across handlers |
+| Complex transitions | `useReducer` | More code |
+| Value that doesn't affect output | `useRef` | No re-render |
+| Server data | A data-fetching library or framework | Additional concepts |
+
+## Common mistakes
+
+**Reading state right after setting it.** The variable still holds this render's snapshot.
+
+**Mutating state.** `items.push(x); setItems(items)` passes the same reference, so React can skip the update.
+
+**Copying props into state.** The copy won't follow later prop changes.
+
+**Expecting double logs to be a bug.** Strict Mode calls components twice in development to expose impurity.
+
+## Interview questions
+
+<Question q="Why doesn't setState update the variable immediately?">
+The variable is a constant in the current render's snapshot. The setter queues a change for the next render.
+</Question>
+
+<Question q="What is batching?">
+React processes all state updates from one event handler in a single render pass, including across components.
+</Question>
+
+<Question q="What is the difference between render and commit?">
+Render calls components to compute the desired UI. Commit applies the differences to the DOM.
+</Question>

@@ -1,0 +1,162 @@
+---
+title: "Reactivity and Dependency Tracking"
+summary: "How ref and reactive record who reads them, how a change finds its subscribers, and the limits that break reactivity."
+level: intermediate
+section: reactivity
+order: 10
+tags: [reactivity, ref, reactive, proxy, track, trigger, shallowRef, nextTick, dependency-tracking]
+related: [vue/computed-and-watchers, vue/rendering-and-performance]
+versions: "Vue 3."
+tested: "Vue 3.5.45 in Node.js"
+verified: "2026-11-09"
+docs:
+  - label: "Vue: Reactivity fundamentals"
+    url: "https://vuejs.org/guide/essentials/reactivity-fundamentals.html"
+  - label: "Vue: Reactivity in depth"
+    url: "https://vuejs.org/guide/extras/reactivity-in-depth.html"
+  - label: "Vue API: Reactivity core"
+    url: "https://vuejs.org/api/reactivity-core.html"
+---
+
+## What it is
+
+Vue's reactivity system records which effects read which data, then re-runs exactly those effects when the data changes.
+
+## Why it exists
+
+You write ordinary-looking code that reads state. Vue works out the dependencies at runtime, so you don't have to list what each piece of UI depends on.
+
+## How it works
+
+`ref` uses getter and setter functions on `.value`, while `reactive` uses a JavaScript `Proxy`. Reads call `track`, and writes call `trigger`. Subscribers are stored in a global `WeakMap<target, Map<key, Set<effect>>>`.
+
+<StepFlow
+  title="Tracking and triggering"
+  code={["const count = ref(0);", "watchEffect(() => {", "  console.log(count.value);", "});", "count.value = 1;"]}
+  nodes={["activeEffect set", "getter: track", "dependency set", "setter: trigger", "effect re-runs"]}
+  steps={[
+    { line: 1, active: [0], note: "watchEffect sets this function as activeEffect and runs it immediately." },
+    { line: 2, active: [1, 2], note: "Reading count.value calls track, which adds activeEffect to count's subscriber set.", state: { subscribers: "1 effect", logged: "0" } },
+    { line: 4, active: [3], note: "Writing count.value calls trigger, which finds the subscribers.", state: { value: "1" } },
+    { line: 2, active: [4, 1], note: "The effect re-runs and dependencies are recollected. Component updates are batched until the next tick.", state: { logged: "1" } },
+  ]}
+/>
+
+DOM updates are buffered until the next tick so that many changes cause one update. `await nextTick()` waits for that update.
+
+## Syntax and key APIs
+
+| API | Use | Note |
+| --- | --- | --- |
+| `ref(v)` | Any value | Access through `.value` |
+| `reactive(obj)` | Objects only | Returns a proxy |
+| `shallowRef(v)` | Large immutable data | Only `.value` access is tracked |
+| `toRefs(obj)` | Destructure reactive objects | Keeps the link |
+| `toRaw`, `markRaw` | Escape reactivity | Use sparingly |
+| `nextTick()` | Wait for the DOM update | Returns a promise |
+
+## Simple example
+
+```js
+import assert from "node:assert";
+import { reactive, ref, watchEffect } from "vue";
+
+const count = ref(1);
+const state = reactive({ total: 0 });
+
+watchEffect(() => {
+  state.total = count.value * 2;
+}, { flush: "sync" });
+
+count.value = 3;
+assert.equal(state.total, 6);
+```
+
+## Industry examples
+
+### Avoid deep tracking for big payloads
+
+```js
+import assert from "node:assert";
+import { shallowRef, watchEffect } from "vue";
+
+const rows = shallowRef([{ id: 1 }]);
+let runs = 0;
+
+watchEffect(() => {
+  rows.value.length;
+  runs++;
+}, { flush: "sync" });
+
+rows.value.push({ id: 2 });
+assert.equal(runs, 1);
+
+rows.value = [...rows.value];
+assert.equal(runs, 2);
+```
+
+### Keep reactivity through destructuring
+
+```js
+import assert from "node:assert";
+import { reactive, toRefs } from "vue";
+
+const state = reactive({ count: 0 });
+
+const { count: lost } = state;
+const { count } = toRefs(state);
+
+state.count = 5;
+assert.equal(lost, 0);
+assert.equal(count.value, 5);
+```
+
+## Patterns and best practices
+
+- Default to `ref`, which works for any type and survives reassignment.
+- Replace `shallowRef` values instead of mutating them.
+- Keep reads inside the effect's synchronous part.
+- Compare proxies consistently: `reactive(raw) !== raw`.
+
+## Alternatives and trade-offs
+
+| Option | Good for | Trade-off |
+| --- | --- | --- |
+| `ref` | Default | `.value` in script |
+| `reactive` | Grouped state | Can't be replaced or destructured safely |
+| `shallowRef` | Large or external objects | Inner changes aren't tracked |
+
+## Common mistakes
+
+**Replacing a `reactive` object.** The old proxy's subscribers aren't transferred.
+
+**Destructuring reactive state.** It copies the primitive and loses the connection.
+
+**Expecting refs to unwrap in arrays.** Ref elements in arrays and `Map`s need `.value`.
+
+```js
+import assert from "node:assert";
+import { reactive, ref } from "vue";
+
+const books = reactive([ref("Vue")]);
+assert.equal(books[0].value, "Vue");
+
+const object = reactive({ count: ref(1) });
+assert.equal(object.count, 1);
+```
+
+**Reading the DOM right after changing state.** Wait for `nextTick`.
+
+## Interview questions
+
+<Question q="How does Vue know what to update?">
+While an effect runs, each reactive read registers the effect as a subscriber. A later write triggers those subscribers.
+</Question>
+
+<Question q="Why does Vue use Proxy instead of getters and setters on objects?">
+Vue 3 uses `Proxy` for reactive objects, while `ref` uses getters and setters for `.value`. Vue 2 relied only on getters and setters.
+</Question>
+
+<Question q="When would you use shallowRef?">
+For large data structures or external objects, where deep tracking is expensive and you can replace the value instead of mutating it.
+</Question>

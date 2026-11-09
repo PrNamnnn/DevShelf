@@ -1,0 +1,103 @@
+---
+title: "Variance, Standard Deviation and Spread"
+summary: "Range, variance, standard deviation, IQR and coefficient of variation, and why n minus 1 appears in the formula."
+level: fundamental
+section: descriptive
+order: 2
+tags: ["variance","standard deviation","IQR","coefficient of variation"]
+requires: ["statistics/central-tendency"]
+related: ["statistics/quantiles-and-five-number-summary","statistics/estimation-and-confidence-intervals"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "NumPy: std"
+    url: "https://numpy.org/doc/stable/reference/generated/numpy.std.html"
+  - label: "pandas: DataFrame.std"
+    url: "https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.std.html"
+---
+
+## What it is
+
+Dispersion describes how far values spread around their center. Two stores can both average ₹500 per order while one is steady and the other swings between ₹50 and ₹5,000.
+
+## Why it exists
+
+Variability sets how predictable a process is, how confident an estimate can be, and how much inventory, staff or cash buffer a business needs. Every statistical test compares a signal to variability.
+
+## How it works
+
+| Measure | Definition | Strength | Weakness |
+| --- | --- | --- | --- |
+| Range | Max − min | Simple | Two points only |
+| IQR | Q3 − Q1 | Robust | Ignores tails |
+| Variance | Average squared deviation | Additive for independent variables | Squared units |
+| Standard deviation | √variance | Original units | Sensitive to outliers |
+| Coefficient of variation | s ÷ x̄ | Compares different scales | Needs a positive ratio scale |
+
+## Intuition and formula
+
+<Formula>s² = Σ(xᵢ − x̄)² / (n − 1)</Formula>
+
+Squaring stops positive and negative deviations from cancelling. The n − 1 is **Bessel's correction**. Deviations are measured from the sample mean, which is computed from the same data, so they come out slightly too small. Dividing by n − 1 makes s² an unbiased estimator of σ². Once the mean is fixed, only n − 1 deviations are free to vary, which is what degrees of freedom means.
+
+<Formula>CV = s / x̄</Formula>
+
+## Worked example
+
+For the ten orders from the previous lesson, the mean is 720.5, the standard deviation is 766.5 and the IQR is 50. The standard deviation exceeds most order values because of one 2,900 order, while the IQR says the middle half of orders sits within ₹50. The large CV of 1.06 signals that the mean and SD poorly describe this data.
+
+## Python
+
+```python
+import numpy as np
+
+orders = np.array([420, 510, 480, 455, 530, 495, 2900, 470, 505, 440])
+sample_sd = orders.std(ddof=1)
+q1, q3 = np.percentile(orders, [25, 75])
+
+assert round(sample_sd, 1) == 766.5
+assert q3 - q1 == 50
+assert round(sample_sd / orders.mean(), 2) == 1.06
+```
+
+<Callout type="warning">NumPy's `std` defaults to `ddof=0`, the population formula, while pandas' `.std()` defaults to `ddof=1`, the sample formula. The same data gives different numbers unless you set it.</Callout>
+
+## SQL
+
+```sql
+SELECT round(stddev_samp(amount), 1) AS sd,
+       percentile_cont(0.75) WITHIN GROUP (ORDER BY amount)
+         - percentile_cont(0.25) WITHIN GROUP (ORDER BY amount) AS iqr
+FROM unnest(ARRAY[420, 510, 480, 455, 530, 495, 2900, 470, 505, 440]) AS amount;
+-- rows: [{"sd":"766.5","iqr":50}]
+```
+
+## Excel or Power BI
+
+Excel: `STDEV.S` and `VAR.S` for samples, `STDEV.P` and `VAR.P` for a full population, `QUARTILE.INC` or `PERCENTILE.INC` for quantiles. DAX has `STDEV.S`, `STDEV.P`, `VAR.S`, `VAR.P` and `PERCENTILE.INC`.
+
+## In industry
+
+Experiment sample sizes depend directly on metric variance. Operations teams track variability in lead time, since a late delivery is usually a variance problem. Finance reports volatility as the standard deviation of returns.
+
+## Assumptions and limitations
+
+Standard deviation is most interpretable for roughly symmetric, unimodal data. The familiar 68-95-99.7 rule holds only for the normal distribution. Chebyshev's inequality gives a weaker guarantee that holds for any distribution with finite variance: at least 1 − 1/k² of values fall within k standard deviations.
+
+## Common mistakes
+
+- Mixing population and sample formulas between tools.
+- Adding standard deviations. Variances add for independent variables, and standard deviations don't.
+- Comparing standard deviations between different units or scales.
+- Confusing standard deviation (data spread) with standard error (estimate precision).
+
+## Alternatives
+
+The median absolute deviation is highly robust to outliers. Scaling by 1.4826 makes it comparable to σ on normal data. Interquantile ranges such as P90 − P10 show tail behaviour in percentile-based reporting.
+
+## Interview questions
+
+<Question q="Why n minus 1 in sample variance?">The sample mean is fitted to the same data, which makes squared deviations systematically too small. Dividing by n − 1 corrects this, giving an unbiased variance estimate.</Question>
+
+<Question q="What is the difference between standard deviation and standard error?">Standard deviation describes variation between individual observations. Standard error describes how much a statistic such as the mean would vary between repeated samples, and it shrinks with √n.</Question>

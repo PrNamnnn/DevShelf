@@ -1,0 +1,144 @@
+---
+title: "Modules: ESM, CommonJS and Bundling"
+summary: "How import and export work, live bindings, dynamic import, the differences from CommonJS, and what bundlers do."
+level: intermediate
+section: modules
+order: 10
+tags: [esm, commonjs, import, export, dynamic-import, tree-shaking, bundlers, top-level-await]
+requires: [javascript/scope-closures-and-this]
+related: [react/lazy-loading-and-code-splitting]
+versions: "Node.js 22+ can require synchronous ES modules."
+tested: "Node.js 24.17.0"
+verified: "2026-11-09"
+docs:
+  - label: "MDN: JavaScript modules"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules"
+  - label: "MDN: import()"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import"
+  - label: "Node.js: ECMAScript modules"
+    url: "https://nodejs.org/api/esm.html"
+  - label: "Node.js: CommonJS modules"
+    url: "https://nodejs.org/api/modules.html"
+---
+
+## What it is
+
+A module is a file with its own scope that declares what it exports and imports. ES modules (ESM) are the standard format. CommonJS is Node's original one.
+
+## Why it exists
+
+Scripts sharing one global namespace collide. Modules give explicit dependencies, and because ESM imports are static, tools can remove unused code.
+
+## How it works
+
+ESM loads in phases: parse to find imports, link bindings, then evaluate dependencies first. Each module runs once. Imports are **live bindings** to the exporting variable, not copies.
+
+| Feature | ESM | CommonJS |
+| --- | --- | --- |
+| Syntax | `import`, `export` | `require`, `module.exports` |
+| Loading | Static, async capable | Synchronous at call |
+| Bindings | Live | Copied value |
+| Top-level `await` | Yes | No |
+| `this` at top | `undefined` | `module.exports` |
+
+In Node, `.mjs` is ESM, `.cjs` is CommonJS, and `.js` follows the `type` field in `package.json`.
+
+## Syntax and key APIs
+
+```javascript
+export const a = 1;
+export default function main() {}
+import main, { a as alias } from "./mod.js";
+import * as all from "./mod.js";
+const mod = await import("./heavy.js");
+import.meta.url;
+```
+
+## Simple example
+
+```js
+import assert from "node:assert";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const dir = mkdtempSync(join(tmpdir(), "esm-"));
+const file = join(dir, "counter.mjs");
+writeFileSync(file, "export let count = 0; export function inc() { count++; }");
+
+const mod = await import(pathToFileURL(file));
+mod.inc();
+
+assert.equal(mod.count, 1);
+assert.equal(await import(pathToFileURL(file)), mod);
+```
+
+The namespace shows the updated `count`, which demonstrates a live binding, and the second import returns the same module.
+
+## Industry examples
+
+### Load heavy code on demand
+
+```javascript
+button.addEventListener("click", async () => {
+  const { renderChart } = await import("./chart.js");
+  renderChart(data);
+});
+```
+
+### Keep an API surface small
+
+A barrel file gives one import path, but large barrels can hurt build speed and tree-shaking.
+
+```javascript
+export { Button } from "./button.js";
+export { Modal } from "./modal.js";
+```
+
+### Replace CommonJS globals
+
+```js
+import assert from "node:assert";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+
+const here = dirname(fileURLToPath(import.meta.url));
+assert.equal(typeof here, "string");
+assert.equal(import.meta.dirname, here);
+```
+
+## Patterns and best practices
+
+- Prefer named exports for tree-shaking and refactoring.
+- Keep modules free of side effects at the top level.
+- Include file extensions in Node ESM imports.
+- Use dynamic `import()` at route and feature boundaries.
+
+## Alternatives and trade-offs
+
+| Tool | Purpose | Trade-off |
+| --- | --- | --- |
+| Native ESM | No build needed | Many small requests |
+| Bundler | Optimized output | Build step |
+| Dynamic import | Smaller first load | Loading state |
+
+## Common mistakes
+
+**Mixing `require` into ESM.** Use `import`, or `createRequire` when necessary.
+
+**Assigning to an import.** Bindings are read-only for importers.
+
+**Circular imports relying on order.** Values may still be in the temporal dead zone.
+
+**Missing extensions in Node.** Node's ESM resolver requires them.
+
+## Interview questions
+
+<Question q="What is tree-shaking?">
+Removing unused exports at build time, which is possible because ESM imports are statically analyzable.
+</Question>
+
+<Question q="What is a live binding?">
+An import that always reflects the exporting module's current value of that variable.
+</Question>

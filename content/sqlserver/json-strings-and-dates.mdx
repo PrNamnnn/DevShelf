@@ -1,0 +1,147 @@
+---
+title: "JSON, Strings and Dates in T-SQL"
+summary: "The native json type, shredding JSON to rows, useful string functions, and working safely with dates."
+level: intermediate
+section: querying
+order: 30
+tags: [json, openjson, json_value, string-functions, dates, datetime2, try_convert]
+requires: [sqlserver/tsql-and-ssms-basics]
+related: [postgresql/jsonb-and-full-text-search]
+versions: "The json type needs SQL Server 2025. OPENJSON needs compatibility level 130+."
+tested: "SQL Server 2025 Developer Edition, using temporary tables"
+verified: "2026-11-09"
+docs:
+  - label: "T-SQL: JSON data type"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/data-types/json-data-type"
+  - label: "T-SQL: JSON functions"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/functions/json-functions-transact-sql"
+  - label: "T-SQL: String functions"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/functions/string-functions-transact-sql"
+  - label: "T-SQL: Date and time functions"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/functions/date-and-time-data-types-and-functions-transact-sql"
+---
+
+## What it is
+
+T-SQL provides functions for JSON documents, text and dates. SQL Server 2025 adds a native binary `json` type.
+
+## Why it exists
+
+Applications exchange JSON, and reports need text and date handling inside queries.
+
+## How it works
+
+The `json` type stores documents in binary, up to 2 GB. It accepts objects and arrays, not scalars. A `json` column can't be a standard index key, but it can be an included column.
+
+| Function | Purpose |
+| --- | --- |
+| `JSON_VALUE` | Extract a scalar |
+| `JSON_QUERY` | Extract an object or array |
+| `OPENJSON` | Turn JSON into rows |
+| `JSON_MODIFY` | Update a value |
+| `ISJSON` | Validate |
+| `TRY_CONVERT` | Convert or return NULL |
+| `DATEADD`, `DATEDIFF` | Date arithmetic |
+| `STRING_SPLIT`, `TRIM`, `CONCAT_WS` | Text |
+
+## Syntax and key APIs
+
+```sql
+DECLARE @doc json = N'{"name":"Ada","tags":["a","b"]}';
+SELECT JSON_VALUE(@doc, '$.name');
+-- output: Ada
+```
+
+## Simple example
+
+```sql
+DECLARE @text nvarchar(max) = N'[{"id":1,"sku":"a"},{"id":2,"sku":"b"}]';
+
+SELECT id, sku
+FROM OPENJSON(@text) WITH (id int '$.id', sku varchar(10) '$.sku')
+ORDER BY id;
+-- output: 1|a
+-- output: 2|b
+```
+
+## Industry examples
+
+### Validate on the way in
+
+```sql
+SELECT ISJSON('{"a":1}'), ISJSON('{bad');
+-- output: 1|0
+```
+
+### Convert without failing
+
+```sql
+SELECT TRY_CONVERT(int, 'abc'), TRY_CONVERT(int, '12');
+-- output: NULL|12
+```
+
+### Build a JSON response
+
+```sql
+CREATE TABLE #users (id int, name varchar(10));
+INSERT #users VALUES (1, 'Ada');
+
+SELECT id, name FROM #users FOR JSON PATH, WITHOUT_ARRAY_WRAPPER;
+-- output: {"id":1,"name":"Ada"}
+```
+
+### Filter a date range safely
+
+Half-open ranges avoid precision problems, and they stay SARGable.
+
+```sql
+CREATE TABLE #events (at datetime2);
+INSERT #events VALUES ('2026-01-31T23:59:59.999'), ('2026-02-01');
+
+SELECT COUNT(*) FROM #events
+WHERE at >= '2026-01-01' AND at < '2026-02-01';
+-- output: 1
+```
+
+### Split and join text
+
+```sql
+SELECT STRING_AGG(value, '|') WITHIN GROUP (ORDER BY value)
+FROM STRING_SPLIT('b,a', ',');
+-- output: a|b
+```
+
+## Patterns and best practices
+
+- Use `TRY_CONVERT` on untrusted text.
+- Store UTC in `datetime2`, and use `AT TIME ZONE` for display.
+- Project common JSON fields to indexed computed columns.
+- Use half-open date ranges.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Flexible fields | `json` column | Fewer constraints |
+| Known fields | Regular columns | Schema changes |
+| Older servers | `nvarchar(max)` with `ISJSON` | Reparsed each time |
+
+## Common mistakes
+
+**`BETWEEN` for date ranges.** The upper bound misses or includes values by accident.
+
+**A scalar into `json`.** Error 13609 is raised, because it must be an object or array.
+
+**Functions around date columns.** `YEAR(col) = 2026` prevents a seek.
+
+**`STRING_SPLIT` assuming order.** Pass the ordinal argument when order matters.
+
+## Interview questions
+
+<Question q="JSON_VALUE versus JSON_QUERY?">
+`JSON_VALUE` returns a scalar. `JSON_QUERY` returns an object or array.
+</Question>
+
+<Question q="CONVERT versus TRY_CONVERT?">
+`CONVERT` raises an error on failure. `TRY_CONVERT` returns NULL.
+</Question>

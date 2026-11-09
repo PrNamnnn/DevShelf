@@ -1,0 +1,108 @@
+---
+title: "Duplicates, Types, Categories and Validation"
+summary: "Standardize messy values, remove the right duplicates, correct types and write validation rules that catch errors."
+level: fundamental
+section: cleaning
+order: 2
+tags: ["duplicates","data validation","type correction","standardization"]
+requires: ["statistics/missing-data"]
+related: ["statistics/data-quality-and-leakage","excel/power-query-and-data-model","data-engineering/data-validation-and-observability"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "pandas: drop_duplicates"
+    url: "https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.drop_duplicates.html"
+  - label: "pandas: to_datetime"
+    url: "https://pandas.pydata.org/docs/reference/api/pandas.to_datetime.html"
+---
+
+## What it is
+
+Cleaning makes values correct, consistent and usable: removing duplicates, correcting types, standardizing categories, and rejecting invalid rows.
+
+## Why it exists
+
+A single retry bug can double-count revenue, and "IN", "India" and "india " split one country into three groups in every report.
+
+## How it works
+
+1. Define the row's **grain** and key, and then deduplicate on the correct key.
+2. Convert types explicitly and count failed conversions.
+3. Standardize text by trimming, normalizing case and mapping known aliases.
+4. Validate ranges, formats, relationships and logic, for example `delivered_at ≥ shipped_at`.
+5. Quarantine bad rows with reasons instead of silently deleting them.
+
+Be careful with terminology: **data standardization** often means consistent values, while **feature standardization** means rescaling to mean 0 and SD 1.
+
+## Worked example
+
+A raw order export contains a retry duplicate, country variants, and an impossible quantity. Deduplication keeps the latest `updated_at` per `order_id`. A mapping table turns aliases into "India". Rows with a negative quantity move to a quarantine file, with the reason, and the count is tracked per run.
+
+## Python
+
+```python
+import pandas as pd
+
+raw = pd.DataFrame({
+    "order_id": [1, 1, 2, 3],
+    "updated_at": ["2026-01-01", "2026-01-02", "2026-01-03", "bad"],
+    "country": [" india", "IN", "India ", "U.S."],
+    "qty": [1, 1, 2, -5],
+})
+raw["updated_at"] = pd.to_datetime(raw["updated_at"], errors="coerce")
+aliases = {"in": "India", "india": "India", "u.s.": "United States"}
+raw["country"] = raw["country"].str.strip().str.lower().map(aliases)
+
+latest = raw.sort_values("updated_at").drop_duplicates("order_id", keep="last")
+invalid = latest[(latest["qty"] <= 0) | latest["updated_at"].isna()]
+clean = latest.drop(invalid.index)
+
+assert sorted(clean["order_id"]) == [1, 2]
+assert set(clean["country"]) == {"India"}
+assert invalid["order_id"].tolist() == [3]
+```
+
+## SQL
+
+```sql
+WITH raw(order_id, updated_at, amount) AS (
+  VALUES (1, DATE '2026-01-01', 10), (1, DATE '2026-01-02', 12), (2, DATE '2026-01-03', 5)
+)
+SELECT order_id, amount
+FROM (
+  SELECT *, row_number() OVER (PARTITION BY order_id ORDER BY updated_at DESC) AS rn FROM raw
+) AS r
+WHERE rn = 1
+ORDER BY order_id;
+-- rows: [{"order_id":1,"amount":12},{"order_id":2,"amount":5}]
+```
+
+## Excel or Power BI
+
+Use `TRIM`, `CLEAN`, `PROPER`, and Remove Duplicates, or better, Power Query steps that replay on refresh. Data Validation prevents new bad entries.
+
+## In industry
+
+Data contracts between producers and consumers formalize expected fields. Tests in dbt or Great Expectations reject bad batches before they reach dashboards.
+
+## Assumptions and limitations
+
+Rules encode current understanding and can reject valid new cases. Automated fuzzy matching can merge separate entities.
+
+## Common mistakes
+
+- Using `SELECT DISTINCT` to hide a broken join.
+- Silently coercing errors with no count.
+- Editing cells manually, so it can't be reproduced.
+- Deduplicating on a key other than the real grain.
+
+## Alternatives
+
+Master data management systems maintain canonical entities across an organization, and probabilistic record linkage matches entities without shared keys.
+
+## Interview questions
+
+<Question q="How do you remove duplicates while keeping the latest record in SQL?">Use `row_number()` partitioned by the key, ordered by timestamp descending, and keep row 1.</Question>
+
+<Question q="What's the danger of errors='coerce'?">It silently converts invalid values to missing, so count the failures after conversion.</Question>

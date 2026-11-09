@@ -1,0 +1,169 @@
+---
+title: "Values, Types and Equality"
+summary: "JavaScript's seven primitives, how objects differ, what coercion really does, and which equality check to use."
+level: fundamental
+section: fundamentals
+order: 10
+tags: [types, primitives, objects, coercion, equality, nullish, basics, let, const]
+related: [javascript/scope-closures-and-this, javascript/objects-arrays-and-collections]
+versions: "ES2020+ for BigInt, ?? and ?. operators."
+tested: "Node.js 24.17.0"
+verified: "2026-11-09"
+docs:
+  - label: "MDN: JavaScript data types and structures"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Data_structures"
+  - label: "MDN: Equality comparisons and sameness"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Equality_comparisons_and_sameness"
+  - label: "MDN: let and the temporal dead zone"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/let"
+---
+
+## What it is
+
+Every JavaScript value is either one of seven immutable **primitives** (null, undefined, boolean, number, bigint, string, symbol) or an **object**. Functions and arrays are objects.
+
+## Why it exists
+
+JavaScript was designed to be forgiving, so it converts types automatically. Knowing the rules tells you when that's useful and when it hides a bug.
+
+## How it works
+
+Primitives are compared by value and can't be changed. Objects are compared by reference, and a variable holds a reference to them. Copying a variable holding an object copies the reference, not the object.
+
+`let` and `const` are block-scoped and sit in a **temporal dead zone** from the start of the block until their declaration runs. `const` prevents rebinding, but it doesn't make the object immutable.
+
+Equality has three common algorithms:
+
+| Comparison | `==` | `===` | `Object.is` | Used by `includes`, Map, Set |
+| --- | --- | --- | --- | --- |
+| `null` vs `undefined` | true | false | false | false |
+| `+0` vs `-0` | true | true | false | true |
+| `NaN` vs `NaN` | false | false | true | true |
+
+## Syntax and key APIs
+
+```javascript
+typeof value           // type name as a string
+value ?? fallback      // only for null or undefined
+value || fallback      // for any falsy value
+user?.address?.city    // stop safely at null or undefined
+Number("42")           // explicit conversion
+Number.isNaN(x)        // true only for the value NaN
+```
+
+## Simple example
+
+```js
+import assert from "node:assert";
+
+assert.equal(typeof null, "object");
+assert.equal(typeof undefined, "undefined");
+assert.equal(typeof 10n, "bigint");
+
+const a = { n: 1 };
+const b = a;
+b.n = 2;
+assert.equal(a.n, 2);
+assert.notStrictEqual({ n: 1 }, { n: 1 });
+```
+
+## Industry examples
+
+### Keep valid falsy values
+
+`||` replaces `0` and `""`, which are often legitimate.
+
+```js
+import assert from "node:assert";
+
+const config = { retries: 0, name: "" };
+
+assert.equal(config.retries || 3, 3);
+assert.equal(config.retries ?? 3, 0);
+assert.equal(config.name ?? "anon", "");
+```
+
+### Convert input explicitly
+
+```js
+import assert from "node:assert";
+
+function parseQuantity(input) {
+  const value = Number(input);
+  if (!Number.isInteger(value) || value <= 0) throw new RangeError("invalid quantity");
+  return value;
+}
+
+assert.equal(parseQuantity("4"), 4);
+assert.throws(() => parseQuantity("4x"), RangeError);
+```
+
+### Handle money and large integers
+
+Numbers are 64-bit floats, so decimal fractions aren't exact, and integers above `Number.MAX_SAFE_INTEGER` lose precision. Store money in the smallest unit and use `BigInt` for large identifiers.
+
+```js
+import assert from "node:assert";
+
+assert.notEqual(0.1 + 0.2, 0.3);
+assert.equal(2 ** 53, 2 ** 53 + 1);
+assert.notEqual(2n ** 53n, 2n ** 53n + 1n);
+```
+
+## Patterns and best practices
+
+- Use `===` by default. MDN advises it unless you need `Object.is` behaviour.
+- Prefer `const`, then `let`. Avoid `var`.
+- Use `??` for defaults when `0`, `""` or `false` are valid.
+- Test for null with `=== null`, because `typeof null` is `"object"`.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Compile-time type checks | TypeScript | Build step, and erased at runtime |
+| Runtime validation | Schema library | Extra code at boundaries |
+| Exact decimals | Integer cents | Requires formatting on output |
+
+## Common mistakes
+
+**Testing NaN with `===`.** `NaN === NaN` is false. Use `Number.isNaN`.
+
+**Using global `isNaN`.** It converts first, so `isNaN("abc")` is true.
+
+**Assuming `const` freezes an object.**
+
+```js
+import assert from "node:assert";
+
+const list = [1];
+list.push(2);
+assert.deepEqual(list, [1, 2]);
+```
+
+**Reading a `let` before its declaration.** It throws, while `var` gives `undefined`.
+
+```js
+import assert from "node:assert";
+
+assert.throws(() => {
+  value;
+  let value = 1;
+}, ReferenceError);
+```
+
+**Assuming `[NaN].indexOf(NaN)` works.** `indexOf` uses strict equality and returns -1, while `includes` finds it.
+
+## Interview questions
+
+<Question q="What are the primitive types?">
+Null, Undefined, Boolean, Number, BigInt, String and Symbol. Everything else is an object.
+</Question>
+
+<Question q="Why is typeof null equal to 'object'?">
+It's a long-standing quirk kept for compatibility. Check with `value === null`.
+</Question>
+
+<Question q="What is the difference between null and undefined?">
+`undefined` usually means a value was never assigned. `null` is an intentional "no value". `==` treats them as equal, but `===` doesn't.
+</Question>

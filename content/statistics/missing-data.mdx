@@ -1,0 +1,114 @@
+---
+title: "Missing Data: MCAR, MAR and MNAR"
+summary: "Classify why values are missing and choose deletion, imputation or indicators accordingly."
+level: intermediate
+section: cleaning
+order: 1
+tags: ["missing data","MCAR","MAR","MNAR","imputation"]
+requires: ["statistics/exploratory-data-analysis"]
+related: ["statistics/inconsistent-data-and-validation","statistics/data-quality-and-leakage","excel/power-query-and-data-model"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Imputation"
+    url: "https://scikit-learn.org/stable/modules/impute.html"
+  - label: "pandas: Missing data"
+    url: "https://pandas.pydata.org/docs/user_guide/missing_data.html"
+---
+
+## What it is
+
+Missing data mechanisms describe why a value is absent.
+
+| Mechanism | Meaning | Example |
+| --- | --- | --- |
+| MCAR | Unrelated to anything | A random logging drop |
+| MAR | Depends on observed variables | Older users skip income more often |
+| MNAR | Depends on the missing value itself | High earners hide income |
+
+## Why it exists
+
+Handling missing values wrongly biases results silently. Filling them in with a mean shrinks variance and distorts relationships, and removing rows may leave only one kind of customer.
+
+## How it works
+
+| Method | Works when | Risk |
+| --- | --- | --- |
+| Listwise deletion | MCAR, few rows | Loses data, biased otherwise |
+| Mean or median | Simple baseline | Shrinks variance and correlations |
+| Group-wise imputation | MAR by known groups | Needs reasonable groups |
+| Model or KNN imputation | MAR | Needs care to avoid leakage |
+| Multiple imputation | MAR with inference | More complex |
+| Missing indicator | Missingness is informative | Adds columns |
+| Collect or model the process | MNAR | Often difficult |
+
+MCAR can be examined, but MNAR can't be proven from observed data alone, so domain knowledge matters. Blank doesn't always mean unknown: an empty `coupon_code` usually means no coupon was used.
+
+## Worked example
+
+A churn table has `last_nps` blank for 30% of customers. Comparing them, blanks churn at 40% against 15%, so the absence is informative. Median imputation alone would conceal that signal. Adding `nps_missing` keeps it while fitting the imputer on training data alone.
+
+## Python
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.impute import SimpleImputer
+
+df = pd.DataFrame({
+    "nps": [9, np.nan, 7, np.nan, 3, 8],
+    "churned": [0, 1, 0, 1, 1, 0],
+    "region": ["n", "n", "s", "s", "s", "n"],
+})
+assert df.groupby(df["nps"].isna())["churned"].mean()[True] == 1.0
+
+imputer = SimpleImputer(strategy="median", add_indicator=True)
+filled = imputer.fit_transform(df[["nps"]])
+assert filled.shape == (6, 2)
+assert filled[1, 0] == 7.5 and filled[1, 1] == 1
+
+df["nps_group"] = df.groupby("region")["nps"].transform(lambda s: s.fillna(s.median()))
+assert df["nps_group"].isna().sum() == 0
+```
+
+## SQL
+
+```sql
+SELECT coalesce(region, 'unknown') AS region,
+       count(*) - count(nps) AS missing,
+       round(100.0 * (count(*) - count(nps)) / count(*), 1) AS missing_pct
+FROM (VALUES ('n', 9), ('n', NULL), (NULL, 7), ('n', 5)) AS t(region, nps)
+GROUP BY 1
+ORDER BY 1;
+-- rows: [{"region":"n","missing":1,"missing_pct":"33.3"},{"region":"unknown","missing":0,"missing_pct":"0.0"}]
+```
+
+## Excel or Power BI
+
+`COUNTBLANK` measures missingness, and Power Query's Replace Values or Fill Down applies rules repeatably. Power Query's Column Quality shows the percentage of empty values.
+
+## In industry
+
+Pipelines report missing rates by source over time, because a sudden increase usually signals a broken upstream change.
+
+## Assumptions and limitations
+
+Imputed values aren't real measurements. Single imputation understates uncertainty, so analyses requiring valid inference should use multiple imputation.
+
+## Common mistakes
+
+- Fitting the imputer on all data before splitting.
+- Treating sentinels such as −1 and 999 as valid.
+- Forward-filling across different customers.
+- Dropping every row with any blank.
+
+## Alternatives
+
+Tree libraries such as XGBoost and LightGBM can handle missing values natively, and Bayesian models can model the missingness.
+
+## Interview questions
+
+<Question q="How would you tell if data is MCAR or MAR?">Compare missing and non-missing rows on observed variables. A systematic difference rules out MCAR, but it can't by itself exclude MNAR.</Question>
+
+<Question q="Why can mean imputation hurt?">It reduces variance, weakens correlations and can hide informative missingness.</Question>

@@ -1,0 +1,154 @@
+---
+title: "Single-File Components and Templates"
+summary: "The anatomy of a Vue component, script setup, template directives, and how to render lists and handle input."
+level: fundamental
+section: foundations
+order: 10
+tags: [sfc, script-setup, templates, directives, v-if, v-for, v-model, events, basics]
+related: [vue/reactivity-in-depth, vue/computed-and-watchers]
+versions: "Vue 3.4+ for same-name attribute shorthand."
+tested: "Not executed. Template syntax was checked against the Vue docs."
+verified: "2026-11-09"
+docs:
+  - label: "Vue: Template syntax"
+    url: "https://vuejs.org/guide/essentials/template-syntax.html"
+  - label: "Vue: script setup"
+    url: "https://vuejs.org/api/sfc-script-setup.html"
+  - label: "Vue: Conditional rendering"
+    url: "https://vuejs.org/guide/essentials/conditional.html"
+  - label: "Vue: List rendering"
+    url: "https://vuejs.org/guide/essentials/list.html"
+---
+
+## What it is
+
+A Vue Single-File Component (SFC) is a `.vue` file that keeps template, logic and styles together. `<script setup>` is compile-time syntax for the Composition API.
+
+## Why it exists
+
+Templates stay close to HTML and let the compiler optimize updates. SFCs keep related code in one file while still building to plain JavaScript and CSS.
+
+## How it works
+
+The compiler turns the template into a render function. Code in `<script setup>` runs each time a component instance is created, and its top-level bindings are available in the template. Refs are automatically unwrapped at the top level of a template.
+
+## Syntax and key APIs
+
+```vue
+<script setup>
+import { ref } from "vue";
+const count = ref(0);
+</script>
+
+<template>
+  <button @click="count++">{{ count }}</button>
+</template>
+
+<style scoped>
+button { font-weight: 600; }
+</style>
+```
+
+| Directive | Purpose |
+| --- | --- |
+| `{{ value }}` | Text interpolation |
+| `:attr` (`v-bind`) | Bind an attribute |
+| `@event` (`v-on`) | Listen to an event |
+| `v-if`, `v-else` | Conditional rendering |
+| `v-show` | Toggle CSS display |
+| `v-for` | Lists |
+| `v-model` | Two-way binding |
+| `#name` (`v-slot`) | Slots |
+
+## Simple example
+
+```vue
+<script setup>
+import { ref } from "vue";
+
+const items = ref([{ id: 1, text: "Learn Vue" }]);
+const draft = ref("");
+
+function add() {
+  items.value.push({ id: Date.now(), text: draft.value });
+  draft.value = "";
+}
+</script>
+
+<template>
+  <input v-model.trim="draft" @keyup.enter="add" />
+  <ul>
+    <li v-for="item in items" :key="item.id">{{ item.text }}</li>
+  </ul>
+</template>
+```
+
+## Industry examples
+
+### Show a loading, error or data state
+
+```vue
+<template>
+  <p v-if="loading">Loading…</p>
+  <p v-else-if="error" role="alert">{{ error.message }}</p>
+  <OrderTable v-else :orders="orders" />
+</template>
+```
+
+### Dynamic classes
+
+```vue
+<template>
+  <button :class="['btn', { 'btn-active': active, 'btn-busy': busy }]" :disabled="busy">
+    Save
+  </button>
+</template>
+```
+
+### Prevent the default action
+
+```vue
+<template>
+  <form @submit.prevent="save">
+    <input v-model.number="quantity" type="number" />
+    <button>Save</button>
+  </form>
+</template>
+```
+
+## Patterns and best practices
+
+- Always give `v-for` a stable `:key`.
+- Use `v-show` for frequent toggles and `v-if` for rarely changing conditions.
+- Keep complex expressions in computed properties.
+- Prefer `<style scoped>` to avoid global leakage.
+
+## Alternatives and trade-offs
+
+| Option | Good for | Trade-off |
+| --- | --- | --- |
+| `script setup` | Most new components | Requires a build step |
+| Options API | Existing codebases | Logic is split by option type |
+| Render functions | Highly dynamic output | Fewer compiler optimizations |
+
+The Vue docs note that render functions don't get the same compile-time optimizations as templates.
+
+## Common mistakes
+
+**Using `v-if` and `v-for` on one element.** `v-if` has higher priority and can't see the loop variable. Filter with a computed value instead.
+
+**Forgetting `.value` in script.** Refs auto-unwrap in templates, not in JavaScript.
+
+**Using an index as a key for a changing list.** Component state can stick to the wrong item.
+
+**Expecting `<style scoped>` to style slot content from the child.** Slot content belongs to the parent's scope.
+
+## Interview questions
+
+<Question q="What is the difference between v-if and v-show?">
+`v-if` adds or removes elements. `v-show` keeps them and toggles the CSS `display` property.
+</Question>
+
+<Question q="What does script setup do?">
+It's compile-time syntax. Top-level bindings are exposed to the template and the code runs for each component instance.
+</Question>

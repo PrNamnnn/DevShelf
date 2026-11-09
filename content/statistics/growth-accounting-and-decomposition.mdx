@@ -1,0 +1,102 @@
+---
+title: "Growth Accounting and Revenue Decomposition"
+summary: "Break growth into new, expansion, contraction and churn flows, and split revenue change into price, volume and mix."
+level: intermediate
+section: business
+order: 6
+tags: ["growth accounting","revenue decomposition","price volume mix","quick ratio"]
+requires: ["statistics/revenue-ltv-cac"]
+related: ["statistics/diagnostic-analysis","excel/dashboards-and-business-analysis"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "pandas: pct_change"
+    url: "https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.pct_change.html"
+  - label: "PostgreSQL: Window functions"
+    url: "https://www.postgresql.org/docs/current/functions-window.html"
+---
+
+## What it is
+
+**Growth accounting** divides change in users or revenue into flows: new, expansion, resurrected, contraction and churned. **Revenue decomposition** separates a change into price, volume and sometimes mix.
+
+## Why it exists
+
+A headline growth rate can hide a leaky business. Decomposition assigns the change to something a team owns.
+
+## How it works
+
+The **SaaS quick ratio** is (new + expansion) ÷ (contraction + churn). Above 1, inflows exceed outflows. **Net revenue retention** uses only existing customers.
+
+**Price-volume** analysis uses the convention below. The two effects sum to the total change, but other attribution conventions distribute interaction differently, so state which one you used.
+
+## Intuition and formula
+
+<Formula>end = start + new + expansion − contraction − churn</Formula>
+
+<Formula>volume effect = (Q₁ − Q₀) · P₀, price effect = (P₁ − P₀) · Q₁</Formula>
+
+## Worked example
+
+Starting MRR is ₹100,000, with new ₹8,000, expansion ₹3,000, contraction ₹2,000 and churn ₹5,000. Ending MRR is ₹104,000, a 4% rise. Quick ratio is 1.57, and net revenue retention is 96%: existing customers shrank, and new sales hid it.
+
+A product moves from 1,000 units at ₹100 to 950 units at ₹105. Volume effect is −₹5,000, price effect is +₹4,750, and the total is −₹250.
+
+## Python
+
+```python
+start, new, expansion, contraction, churn = 100_000, 8_000, 3_000, 2_000, 5_000
+end = start + new + expansion - contraction - churn
+assert end == 104_000
+assert round((new + expansion) / (contraction + churn), 2) == 1.57
+assert (start + expansion - contraction - churn) / start == 0.96
+
+p0, q0, p1, q1 = 100, 1_000, 105, 950
+volume, price = (q1 - q0) * p0, (p1 - p0) * q1
+assert (volume, price) == (-5_000, 4_750)
+assert volume + price == p1 * q1 - p0 * q0
+```
+
+## SQL
+
+```sql
+WITH m(customer, prev_mrr, cur_mrr) AS (
+  VALUES ('a', 100, 100), ('b', 100, 150), ('c', 100, 60), ('d', 100, 0), ('e', 0, 80)
+)
+SELECT sum(cur_mrr) FILTER (WHERE prev_mrr = 0) AS new_mrr,
+       sum(cur_mrr - prev_mrr) FILTER (WHERE prev_mrr > 0 AND cur_mrr > prev_mrr) AS expansion,
+       sum(prev_mrr - cur_mrr) FILTER (WHERE cur_mrr > 0 AND cur_mrr < prev_mrr) AS contraction,
+       sum(prev_mrr) FILTER (WHERE cur_mrr = 0) AS churned
+FROM m;
+-- rows: [{"new_mrr":80,"expansion":50,"contraction":40,"churned":100}]
+```
+
+## Excel or Power BI
+
+Waterfall charts in Excel and Power BI show these bridges well. In DAX, write one measure per flow, so that each is independently testable.
+
+## In industry
+
+Used constantly in board reports, SaaS finance and pricing reviews.
+
+## Assumptions and limitations
+
+Decomposition is arithmetic, not causation. Mix effects need item-level data. Quick ratios can mislead at small scale, where one customer has a large impact.
+
+## Common mistakes
+
+- Double-counting reactivations.
+- Mixing currency effects with price.
+- Omitting the interaction convention.
+- Using quick ratio without looking at absolute size.
+
+## Alternatives
+
+Shapley-based attribution fairly distributes changes among many factors, and regression-based decompositions estimate drivers.
+
+## Interview questions
+
+<Question q="What does a quick ratio of 1.5 mean?">For every rupee of revenue lost, 1.5 rupees of new or expansion revenue were added.</Question>
+
+<Question q="Can revenue increase while volume falls?">Yes, if the price effect or a favourable mix shift outweighs the volume loss.</Question>

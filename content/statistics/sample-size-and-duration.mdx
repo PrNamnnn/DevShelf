@@ -1,0 +1,98 @@
+---
+title: "Sample Size, MDE and Test Duration"
+summary: "Calculate how many users you need, trade off minimum detectable effect against time, and set a duration with weekly cycles in mind."
+level: intermediate
+section: experimentation
+order: 3
+tags: ["sample size","MDE","power analysis","duration"]
+requires: ["statistics/errors-power-and-effect-size","statistics/experiment-design-and-metrics"]
+related: ["statistics/analyzing-ab-tests","statistics/peeking-and-sequential-testing"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "statsmodels: NormalIndPower"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.stats.power.NormalIndPower.html"
+  - label: "statsmodels: proportion_effectsize"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.stats.proportion.proportion_effectsize.html"
+---
+
+## What it is
+
+Sample size planning determines how many units are needed to detect an effect with desired power. The **minimum detectable effect (MDE)** is the smallest true effect the test has a good chance of detecting.
+
+## Why it exists
+
+Too few users means an inconclusive test. Too many wastes time and exposes users to possible harm. Planning also exposes tests that simply aren't feasible, before any engineering effort is spent on them.
+
+## How it works
+
+<SampleSizeCalculator />
+
+Sample size rises with lower α, higher power and higher variance, and it rises with the **square** of how small an effect you're chasing. Halving the MDE needs about four times the users.
+
+Choose the MDE from business value: "what's the smallest change that would justify shipping and maintaining this?". Don't pick the MDE that happens to fit the traffic you have.
+
+Run for at least one full week, ideally two, even at high traffic, so that weekday and weekend behaviour are represented.
+
+## Intuition and formula
+
+<Formula>n = (z_(1−α/2) √(2p̄q̄) + z_(1−β) √(p₁q₁ + p₂q₂))² / (p₂ − p₁)²</Formula>
+
+Here q = 1 − p and p̄ is the average of p₁ and p₂, giving n per group. For a continuous metric with common SD σ and absolute difference δ, use n ≈ 2(z_(1−α/2) + z_(1−β))² σ² / δ².
+
+## Worked example
+
+Baseline conversion is 5%, and the team wants a 10% relative lift to 5.5%, with α = 0.05 and 80% power. Then n ≈ 31,234 per group, 62,468 in total. At 5,000 eligible visitors a day, that takes about 12.5 days, so plan for two full weeks.
+
+A 20% relative lift needs about 8,158 per group, which demonstrates the quadratic relationship.
+
+For a fixed 20,000 per group at a 5% baseline, the MDE is about 2.8 × √(2 · 0.05 · 0.95 / 20,000) = 0.61 points absolute, or a 12% relative lift.
+
+## Python
+
+```python
+import math
+from scipy import stats
+from statsmodels.stats.power import NormalIndPower
+from statsmodels.stats.proportion import proportion_effectsize
+
+def n_per_group(p1, p2, alpha=0.05, power=0.8):
+    za, zb = stats.norm.ppf(1 - alpha / 2), stats.norm.ppf(power)
+    bar = (p1 + p2) / 2
+    top = za * math.sqrt(2 * bar * (1 - bar)) + zb * math.sqrt(p1 * (1 - p1) + p2 * (1 - p2))
+    return math.ceil(top**2 / (p2 - p1) ** 2)
+
+assert n_per_group(0.05, 0.055) == 31_234
+assert n_per_group(0.05, 0.06) == 8_158
+
+arcsine = NormalIndPower().solve_power(proportion_effectsize(0.055, 0.05), alpha=0.05, power=0.8)
+assert 31_000 < arcsine < 31_500
+```
+
+Different formulas give slightly different answers. Here, the arcsine method gives 31,218.
+
+## In industry
+
+Teams use historical data to estimate baseline and variance, including only users who'd actually be eligible. Where traffic is low, they pick higher-variance-reducing designs or larger changes.
+
+## Assumptions and limitations
+
+Calculations assume independent users and a known variance. Heavy-tailed revenue metrics need more data than the formula implies. Ramps that hold 1% of traffic for days don't count toward the full exposure time.
+
+## Common mistakes
+
+- Setting the MDE from available traffic.
+- Using a whole-site baseline for a small segment.
+- Stopping early because the calculated n was reached on a Tuesday.
+- Forgetting multiple variants or metrics in the calculation.
+
+## Alternatives
+
+CUPED reduces the required sample through lower variance. Sequential designs allow valid early stopping. Bayesian decision rules are sometimes used to operate at low traffic.
+
+## Interview questions
+
+<Question q="What happens to sample size if you halve the MDE?">It roughly quadruples, because n depends on the inverse square of the effect.</Question>
+
+<Question q="Why run for full weeks when you have enough traffic?">User behaviour varies by day of week, and a partial week could misrepresent the average effect.</Question>

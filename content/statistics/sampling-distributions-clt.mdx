@@ -1,0 +1,84 @@
+---
+title: "Sampling Distributions, CLT and the Law of Large Numbers"
+summary: "Why sample means behave predictably, demonstrated with a live Central Limit Theorem simulator."
+level: intermediate
+section: probability
+order: 5
+tags: ["CLT","law of large numbers","sampling distribution","standard error"]
+requires: ["statistics/continuous-distributions","statistics/sampling-and-bias"]
+related: ["statistics/estimation-and-confidence-intervals","statistics/hypothesis-testing-logic"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "NIST: Central Limit Theorem"
+    url: "https://www.itl.nist.gov/div898/handbook/eda/section3/eda352.htm"
+  - label: "NumPy: Generator"
+    url: "https://numpy.org/doc/stable/reference/random/generator.html"
+---
+
+## What it is
+
+A **sampling distribution** is the distribution of a statistic across repeated samples. The **Law of Large Numbers** says the sample mean converges to the true mean as n grows. The **Central Limit Theorem** says that, for independent observations with finite variance, the distribution of the sample mean approaches a normal distribution, whatever the original shape.
+
+## Why it exists
+
+Because of the CLT, you can make probability statements about an average without knowing the population's distribution. It's the main reason z-tests and t-tests work on skewed data at sufficient scale.
+
+## How it works
+
+<CltSimulator />
+
+Try the skewed source. At n = 2, sample means are still clearly skewed. By n = 100 they closely match the normal curve. The width also shrinks.
+
+## Intuition and formula
+
+<Formula>SE(x̄) = σ / √n</Formula>
+
+Halving the standard error requires four times the data. Averaging lets high and low values cancel, which is why means vary less than individual observations.
+
+## Worked example
+
+Order values average ₹1,000 with an SD of ₹1,000, and are strongly skewed. For samples of 36 orders the standard error is about ₹167, so the sample mean is approximately normal around ₹1,000. The probability a sample mean exceeds ₹1,500 is P(Z > 3) = 0.13%, while plenty of individual orders exceed that amount.
+
+## Python
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(0)
+means = rng.exponential(scale=1.0, size=(50_000, 36)).mean(axis=1)
+
+assert abs(means.mean() - 1.0) < 0.01
+assert abs(means.std(ddof=1) - 1 / 6) < 0.005
+
+upper = np.mean(means > 1.5)
+assert 0.001 < upper < 0.008
+```
+
+The simulated tail is a little heavier than the normal figure of 0.13%, because at n = 36 skew hasn't completely disappeared.
+
+## In industry
+
+Experiment platforms apply normal approximations to mean metrics across millions of users. Monitoring systems likewise use averages over a window to reduce noise.
+
+## Assumptions and limitations
+
+The CLT needs independence and finite variance. Convergence is slow for very skewed or heavy-tailed data: revenue with rare huge orders may need far more than the often-quoted 30 observations. Extreme percentiles aren't covered by the same result.
+
+## Common mistakes
+
+- Believing the data itself becomes normal as n grows.
+- Applying "n ≥ 30" as a universal rule.
+- Ignoring clustering, such as repeated sessions from each user.
+- Thinking that a large sample corrects bias.
+
+## Alternatives
+
+Bootstrapping approximates the sampling distribution by resampling from the data, and it works for medians and other statistics that have no simple formula.
+
+## Interview questions
+
+<Question q="State the CLT for a non-statistician.">If you average enough independent measurements, the average behaves predictably in a bell shape, regardless of how irregular the individual measurements are.</Question>
+
+<Question q="What's the difference between LLN and CLT?">LLN says the average converges to the true mean. CLT describes the distribution of its error around that mean.</Question>

@@ -1,0 +1,180 @@
+---
+title: "Prompts, Runnables and Composition"
+summary: "Templating prompts, composing steps with the pipe operator, and running work in parallel with the Runnable interface."
+level: fundamental
+section: foundations
+order: 20
+tags: [prompts, runnables, lcel, pipe, RunnableLambda, RunnableParallel, output-parsers]
+related: [langchain/models-and-messages, langchain/structured-output]
+versions: "langchain-core 1.x."
+tested: "langchain-core 1.7.6 with fake models. No real provider was called."
+verified: "2026-11-09"
+docs:
+  - label: "LangChain: Models"
+    url: "https://docs.langchain.com/oss/python/langchain/models"
+  - label: "LangChain: Structured output"
+    url: "https://docs.langchain.com/oss/python/langchain/structured-output"
+  - label: "LangChain Python reference"
+    url: "https://reference.langchain.com/python/"
+---
+
+## What it is
+
+A **Runnable** is anything with a standard `invoke`, `stream` and `batch` interface. Prompt templates, models and parsers are all Runnables, and `|` joins them into a pipeline.
+
+## Why it exists
+
+An LLM feature is usually a sequence: format input, call the model, parse output. A shared interface lets each step be swapped, tested and traced, and gives streaming and batching for free.
+
+## How it works
+
+`a | b` creates a sequence where `a`'s output becomes `b`'s input. A dictionary in a chain becomes a `RunnableParallel`, running each value against the same input and returning a dictionary.
+
+<StepFlow
+  title="One call through a chain"
+  code={["chain = prompt | model | StrOutputParser()", "chain.invoke({'topic': 'indexes'})"]}
+  nodes={["input dict", "ChatPromptTemplate", "chat model", "StrOutputParser", "string"]}
+  steps={[
+    { line: 1, active: [0], note: "The chain receives a dictionary of variables.", state: { value: "{topic: indexes}" } },
+    { line: 0, active: [1], note: "The template fills its variables and produces a list of messages.", state: { value: "PromptValue" } },
+    { line: 0, active: [2], note: "The model receives the messages and returns an AIMessage.", state: { value: "AIMessage" } },
+    { line: 0, active: [3], note: "The parser extracts the text.", state: { value: "text" } },
+    { line: 1, active: [4], note: "The result is returned. The same chain also supports stream and batch.", state: { value: "str" } },
+  ]}
+/>
+
+## Syntax and key APIs
+
+```py
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import RunnableLambda, RunnableParallel, RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
+```
+
+| Method | Purpose |
+| --- | --- |
+| `invoke(x)` | One input, one output |
+| `batch(xs)` | Many inputs |
+| `stream(x)` | Incremental output |
+| `ainvoke(x)` | Async |
+| `with_retry()` | Retry on failure |
+| `with_fallbacks([...])` | Try alternates |
+
+## Simple example
+
+```python
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You explain {topic} briefly."),
+    ("human", "{question}"),
+])
+
+messages = prompt.invoke({"topic": "SQL", "question": "What is a join?"}).to_messages()
+assert messages[0].content == "You explain SQL briefly."
+
+chain = prompt | FakeListChatModel(responses=["It combines tables."]) | StrOutputParser()
+assert chain.invoke({"topic": "SQL", "question": "What is a join?"}) == "It combines tables."
+```
+
+## Industry examples
+
+### Run steps in parallel
+
+```python
+from langchain_core.runnables import RunnableLambda, RunnableParallel
+
+analysis = RunnableParallel(
+    words=RunnableLambda(lambda text: len(text.split())),
+    upper=RunnableLambda(str.upper),
+)
+
+assert analysis.invoke("a b") == {"words": 2, "upper": "A B"}
+```
+
+### Keep the input and add to it
+
+```python
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+
+add_context = RunnablePassthrough.assign(
+    context=RunnableLambda(lambda x: f"docs about {x['question']}")
+)
+
+result = add_context.invoke({"question": "keys"})
+assert result == {"question": "keys", "context": "docs about keys"}
+```
+
+### Fall back to another model
+
+```python
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain_core.runnables import RunnableLambda
+
+def failing(_):
+    raise TimeoutError("primary unavailable")
+
+primary = RunnableLambda(failing)
+backup = FakeListChatModel(responses=["backup answer"])
+
+resilient = primary.with_fallbacks([backup])
+assert resilient.invoke("hi").content == "backup answer"
+```
+
+### Carry history in a template
+
+```python
+from langchain.messages import AIMessage, HumanMessage
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "Be helpful."),
+    MessagesPlaceholder("history"),
+    ("human", "{input}"),
+])
+
+value = prompt.invoke({
+    "history": [HumanMessage(content="Hi"), AIMessage(content="Hello")],
+    "input": "Again",
+})
+
+assert len(value.to_messages()) == 4
+```
+
+## Patterns and best practices
+
+- Keep prompts in templates, separate from code flow.
+- Keep each runnable small enough to unit test.
+- Use `batch` with `max_concurrency` instead of a manual loop.
+- Use an agent or LangGraph when the path isn't fixed.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Fixed pipeline | Runnables with `\|` | Linear flows only |
+| Model chooses steps | `create_agent` | Less predictable |
+| Branches, loops, state | LangGraph | More code |
+| Very simple call | Plain Python function | No built-in tracing |
+
+Legacy chain classes are in `langchain-classic`. Pipe composition remains supported.
+
+## Common mistakes
+
+**Formatting prompts with user input as templates.** Braces in user text can be read as variables. Pass user input as a value.
+
+**Treating `|` as function-call syntax.** Output types have to match the next step's input.
+
+**Expecting automatic retries in a chain.** `prompt | model | parser` doesn't repair bad output on its own.
+
+## Interview questions
+
+<Question q="What is a Runnable?">
+A component with a standard interface, including `invoke`, `batch` and `stream`, that can be composed with others.
+</Question>
+
+<Question q="When would you stop using a chain?">
+When the workflow needs loops, branching on model decisions, or persistent state.
+</Question>

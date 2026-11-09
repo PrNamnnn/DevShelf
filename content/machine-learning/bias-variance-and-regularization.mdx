@@ -1,0 +1,100 @@
+---
+title: "Bias-Variance, Overfitting and Regularization"
+summary: "Diagnose underfitting and overfitting from learning curves, and control complexity."
+level: intermediate
+section: foundations
+order: 2
+tags: ["bias-variance","overfitting","underfitting","regularization"]
+requires: ["machine-learning/ml-foundations"]
+related: ["statistics/polynomial-and-regularization","machine-learning/cross-validation-and-tuning","deep-learning/training-losses-and-optimizers"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Underfitting vs overfitting"
+    url: "https://scikit-learn.org/stable/auto_examples/model_selection/plot_underfitting_overfitting.html"
+  - label: "scikit-learn: Validation curves"
+    url: "https://scikit-learn.org/stable/modules/learning_curve.html"
+---
+
+## What it is
+
+**Bias** is error from overly simple assumptions. **Variance** is sensitivity to the particular training sample. **Underfitting** is high error everywhere, and **overfitting** is low training error with high validation error.
+
+## Why it exists
+
+Every model trades these off. Understanding which one you've got determines the right fix.
+
+## How it works
+
+| Symptom | Diagnosis | Remedies |
+| --- | --- | --- |
+| Train and validation both poor | Underfit | More features, more flexible model |
+| Train great, validation poor | Overfit | More data, regularize, simplify |
+| Both good | Fit | Verify on the test set |
+
+Regularization methods include L1 and L2 penalties, tree depth limits, early stopping, dropout and ensembling.
+
+## Intuition and formula
+
+For squared error, expected error decomposes as:
+
+<Formula>E[(y − f̂)²] = Bias² + Variance + σ²</Formula>
+
+σ² is irreducible noise.
+
+## Worked example
+
+Fitting polynomials to 30 noisy points from a sine wave, degree 1 underfits, degree 4 fits well, and degree 15 has nearly zero training error with huge validation error.
+
+## Python
+
+```python
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import cross_validate
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures
+
+rng = np.random.default_rng(0)
+x = np.sort(rng.uniform(0, 1, 30)).reshape(-1, 1)
+y = np.cos(1.5 * np.pi * x.ravel()) + rng.normal(0, 0.1, 30)
+
+def scores(degree):
+    model = make_pipeline(PolynomialFeatures(degree), LinearRegression())
+    result = cross_validate(model, x, y, cv=5, scoring="neg_mean_squared_error", return_train_score=True)
+    return -result["train_score"].mean(), -result["test_score"].mean()
+
+train_1, test_1 = scores(1)
+train_4, test_4 = scores(4)
+train_15, test_15 = scores(15)
+
+assert train_1 > 0.1
+assert test_4 < test_1
+assert train_15 < train_4 and test_15 > test_4
+```
+
+## In industry
+
+Learning curves show whether extra data would help, which can justify the cost of labelling.
+
+## Assumptions and limitations
+
+The classical trade-off doesn't fully describe very large models, which may generalize well despite interpolating training data, a phenomenon called double descent.
+
+## Common mistakes
+
+- Treating training accuracy as performance.
+- Adding complexity before checking data quality.
+- Adjusting complexity using the test set.
+- Forgetting that leakage can look like an excellent fit.
+
+## Alternatives
+
+Bagging reduces variance, boosting reduces bias, and more data reduces variance.
+
+## Interview questions
+
+<Question q="How do you tell overfitting from underfitting?">Compare training and validation error. A large gap suggests overfitting. Both high suggests underfitting.</Question>
+
+<Question q="Which reduces variance, bagging or boosting?">Bagging primarily reduces variance, while boosting primarily reduces bias.</Question>

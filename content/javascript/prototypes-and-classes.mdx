@@ -1,0 +1,204 @@
+---
+title: "Prototypes and Classes"
+summary: "How property lookup walks the prototype chain, what class syntax really creates, and how private fields differ from properties."
+level: intermediate
+section: objects
+order: 20
+tags: [prototypes, classes, inheritance, private-fields, super, oop]
+related: [javascript/scope-closures-and-this, javascript/objects-arrays-and-collections]
+versions: "Private elements are Baseline widely available since July 2021."
+tested: "Node.js 24.17.0"
+verified: "2026-11-09"
+docs:
+  - label: "MDN: Inheritance and the prototype chain"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Inheritance_and_the_prototype_chain"
+  - label: "MDN: Private elements"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Private_elements"
+  - label: "MDN: Classes"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes"
+---
+
+## What it is
+
+Every object has an internal link, `[[Prototype]]`, to another object or `null`. Reading a missing property follows that chain. The `class` keyword is cleaner syntax for building these chains.
+
+## Why it exists
+
+A prototype lets thousands of objects share one copy of each method. It's also the mechanism behind inheritance throughout the language.
+
+## How it works
+
+<StepFlow
+  title="Looking up rex.speak"
+  code={["class Animal { speak() { return 'hi'; } }", "class Dog extends Animal {}", "const rex = new Dog();", "rex.speak();", "rex.fly;"]}
+  nodes={["rex", "Dog.prototype", "Animal.prototype", "Object.prototype", "null"]}
+  steps={[
+    { line: 3, active: [0], note: "Lookup starts on the object itself. rex has no own property named speak." },
+    { line: 3, active: [1], note: "The search follows [[Prototype]] to Dog.prototype. It isn't there either." },
+    { line: 3, active: [2], note: "Animal.prototype has speak. It's called with this set to rex.", state: { result: "'hi'" } },
+    { line: 4, active: [0, 1, 2, 3, 4], note: "For a name that doesn't exist, the search reaches null and the result is undefined.", state: { "rex.fly": "undefined" } },
+  ]}
+/>
+
+Reads walk the chain, but assignment normally creates or updates an **own** property on the object, unless a setter intercepts it. So instances can shadow inherited values without touching the prototype.
+
+## Syntax and key APIs
+
+```javascript
+Object.getPrototypeOf(obj);
+Object.create(proto);
+Object.create(null);        // no inherited properties at all
+Object.hasOwn(obj, "key");
+class A extends B {
+  #secret = 1;              // private field
+  static count = 0;
+  constructor() { super(); }
+}
+```
+
+<Callout type="deprecated">
+The `__proto__` accessor is non-standard and deprecated. Use `Object.getPrototypeOf` and `Object.setPrototypeOf`. The literal form `{ __proto__: x }` is standard.
+</Callout>
+
+## Simple example
+
+```js
+import assert from "node:assert";
+
+class Box {
+  constructor(value) {
+    this.value = value;
+  }
+  get() {
+    return this.value;
+  }
+}
+
+const a = new Box(1);
+const b = new Box(2);
+
+assert.equal(Object.getPrototypeOf(a), Box.prototype);
+assert.equal(a.get, b.get);
+assert.equal(Object.hasOwn(a, "get"), false);
+```
+
+## Industry examples
+
+### Enforce invariants with private fields
+
+Private fields aren't properties. They can't be enumerated or proxied, and access is restricted to the class body.
+
+```js
+import assert from "node:assert";
+
+class Account {
+  #balance = 0;
+
+  deposit(amount) {
+    if (amount <= 0) throw new RangeError("amount must be positive");
+    this.#balance += amount;
+  }
+
+  get balance() {
+    return this.#balance;
+  }
+
+  static isAccount(value) {
+    return #balance in value;
+  }
+}
+
+const account = new Account();
+account.deposit(5);
+assert.equal(account.balance, 5);
+assert.equal(Object.keys(account).length, 0);
+assert.equal(Account.isAccount({}), false);
+```
+
+### Extend Error for typed failures
+
+```js
+import assert from "node:assert";
+
+class NotFoundError extends Error {
+  constructor(resource) {
+    super(`${resource} not found`);
+    this.name = "NotFoundError";
+    this.status = 404;
+  }
+}
+
+try {
+  throw new NotFoundError("order");
+} catch (error) {
+  assert.ok(error instanceof Error);
+  assert.equal(error.status, 404);
+}
+```
+
+### Use a null-prototype object as a dictionary
+
+A normal object inherits keys like `constructor`, which can collide with user input.
+
+```js
+import assert from "node:assert";
+
+const seen = {};
+assert.notEqual(seen["constructor"], undefined);
+
+const safe = Object.create(null);
+assert.equal(safe["constructor"], undefined);
+```
+
+## Patterns and best practices
+
+- Prefer `class` for constructors and inheritance.
+- Keep inheritance shallow, and compose behaviour where you can.
+- Use `#private` for internal state and `Object.hasOwn` to test own properties.
+- Don't modify prototypes of built-ins.
+
+## Alternatives and trade-offs
+
+| Option | Good for | Trade-off |
+| --- | --- | --- |
+| `class` | Many instances sharing methods | Dynamic `this` to manage |
+| Factory with closures | True privacy, simple objects | Methods duplicated per object |
+| Plain objects and functions | Data-oriented code | No built-in encapsulation |
+
+## Common mistakes
+
+**Using `this` before `super()`.** It throws a `ReferenceError` in a derived constructor.
+
+**Reassigning `Constructor.prototype`.** Existing instances keep the old prototype and the `constructor` link is lost.
+
+**Reading a private field from the wrong object.** It throws a `TypeError` rather than returning `undefined`.
+
+```js
+import assert from "node:assert";
+
+class A {
+  #x = 1;
+  static read(o) {
+    return o.#x;
+  }
+}
+
+assert.equal(A.read(new A()), 1);
+assert.throws(() => A.read({}), TypeError);
+```
+
+**Expecting `structuredClone` to copy private fields or the class.** Private elements aren't cloned.
+
+## Interview questions
+
+<Question q="How does the prototype chain work?">
+A missing property is searched on the object's prototype, then that prototype's prototype, until it's found or the chain ends in `null`.
+</Question>
+
+<Question q="Are JavaScript classes real classes?">
+They're syntax over constructor functions and prototypes, with extra rules such as strict mode, `super` and private elements.
+</Question>
+
+<Question q="What is the difference between __proto__ and prototype?">
+`prototype` is a property of a constructor function, used as the `[[Prototype]]` of objects created with `new`. `__proto__` is a deprecated accessor for an object's `[[Prototype]]`.
+</Question>

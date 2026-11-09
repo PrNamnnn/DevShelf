@@ -1,0 +1,87 @@
+---
+title: "Choosing the Right Statistical Test"
+summary: "An interactive decision guide based on outcome type, groups, pairing and assumptions, plus parametric versus non-parametric tradeoffs."
+level: intermediate
+section: inference
+order: 4
+tags: ["test selection","parametric","non-parametric","assumptions"]
+requires: ["statistics/hypothesis-testing-logic"]
+related: ["statistics/z-tests","statistics/t-tests","statistics/chi-square-tests","statistics/anova-and-post-hoc","statistics/non-parametric-tests"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "SciPy: Hypothesis tests"
+    url: "https://docs.scipy.org/doc/scipy/reference/stats.html#hypothesis-tests-and-related-functions"
+  - label: "NIST: Product and process comparisons"
+    url: "https://www.itl.nist.gov/div898/handbook/prc/prc.htm"
+---
+
+## What it is
+
+Test selection maps a question and its data structure to a valid procedure. Answer four questions and most choices become obvious: what type is the outcome, how many groups are there, are observations independent or paired, and do the assumptions hold?
+
+## Why it exists
+
+Memorized formulas don't help when faced with real data. A wrong test either inflates false positives or wastes power, and it can answer a different question than the one asked.
+
+## How it works
+
+<TestSelector />
+
+| Outcome | Groups | Independent | Paired or repeated |
+| --- | --- | --- | --- |
+| Numeric | 1 | One-sample t or z | |
+| Numeric | 2 | Welch's t, Mann-Whitney | Paired t, Wilcoxon |
+| Numeric | 3+ | ANOVA, Kruskal-Wallis | Repeated ANOVA, Friedman |
+| Binary | 2 | Two-proportion z, Fisher | McNemar |
+| Categorical | any | Chi-square | Cochran's Q |
+| Two numerics | | Pearson, Spearman, regression | |
+
+**Parametric** tests assume a distribution for the data or the errors. They're more powerful when those assumptions hold. **Non-parametric** tests rely on ranks or signs and need weaker assumptions, but test a somewhat different thing, generally not equality of means.
+
+## Worked example
+
+A team compares average revenue per user across a control and a treatment, with 40,000 users each. The outcome is numeric, there are two independent groups, and revenue is skewed but n is huge. The CLT makes the mean's sampling distribution approximately normal, so Welch's t-test is appropriate. Mann-Whitney would answer a different question, about whether one group tends to have larger values, not about the total revenue that matters to the business.
+
+## Python
+
+```python
+import numpy as np
+from scipy import stats
+
+rng = np.random.default_rng(3)
+control = rng.lognormal(3, 1, 40_000)
+treatment = rng.lognormal(3.02, 1, 40_000)
+
+welch = stats.ttest_ind(treatment, control, equal_var=False)
+ranks = stats.mannwhitneyu(treatment, control)
+
+assert welch.df > 70_000
+assert 0 <= welch.pvalue <= 1 and 0 <= ranks.pvalue <= 1
+```
+
+## In industry
+
+Most analyst teams document a default choice for each standard metric type, so results are comparable and no one picks the test that gave the best answer.
+
+## Assumptions and limitations
+
+Decision tables simplify. Clustered observations need cluster-robust errors or mixed models, whatever the table says. Normality tests aren't a good gatekeeper, since they reject trivial deviations at large n and lack power at small n.
+
+## Common mistakes
+
+- Picking whichever test gives significance.
+- Running a normality test and then blindly switching tests.
+- Using pooled Student's t by default.
+- Treating repeated measurements as independent.
+
+## Alternatives
+
+Permutation tests make few assumptions and can test any statistic. Regression with indicator variables reproduces many tests and lets you adjust for covariates.
+
+## Interview questions
+
+<Question q="Revenue per user is highly skewed. Which test do you use on two large groups?">Welch's t-test on means is usually right because the CLT applies at large n and the business cares about the mean. Examine winsorizing or bootstrap for robustness.</Question>
+
+<Question q="Does a t-test need normal raw data?">It needs an approximately normal sampling distribution of the mean. With sufficient sample size, skewed data is often acceptable.</Question>

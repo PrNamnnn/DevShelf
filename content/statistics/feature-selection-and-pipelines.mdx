@@ -1,0 +1,104 @@
+---
+title: "Feature Selection, Splits and Pipelines"
+summary: "Select features and combine preprocessing into leak-proof train, validation and test workflows."
+level: advanced
+section: features
+order: 4
+tags: ["feature selection","train test split","pipeline","ColumnTransformer"]
+requires: ["statistics/data-quality-and-leakage","statistics/encoding-categoricals"]
+related: ["machine-learning/cross-validation-and-tuning","machine-learning/pca-and-dimensionality-reduction","mlops/feature-stores-and-pipelines"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Pipelines and composite estimators"
+    url: "https://scikit-learn.org/stable/modules/compose.html"
+  - label: "scikit-learn: Feature selection"
+    url: "https://scikit-learn.org/stable/modules/feature_selection.html"
+---
+
+## What it is
+
+**Feature selection** chooses which inputs to keep. A **pipeline** chains preprocessing and modelling so that every step learns only from training data. Splits separate **training** (fit), **validation** (tune) and **test** (final estimate).
+
+## Why it exists
+
+Unneeded features add noise, cost and failure points. Manual preprocessing outside a pipeline is the most common source of contamination.
+
+## How it works
+
+| Approach | Example | Tradeoff |
+| --- | --- | --- |
+| Filter | Variance, mutual information | Fast, ignores interactions |
+| Wrapper | Recursive feature elimination | Accurate, slow |
+| Embedded | Lasso, tree importance | Selection during fit |
+
+Dimensionality reduction with PCA is a separate technique, creating new combinations rather than selecting originals.
+
+Choose the split by how the data arrives: random for independent rows, group-based for repeated customers, time-based for temporal data.
+
+## Worked example
+
+A churn model mixes numeric and categorical columns. A `ColumnTransformer` imputes and scales numbers, and one-hot encodes plans. The whole pipeline is passed to cross-validation, so each fold refits the transformations. It's then saved as one artifact, so production receives identical preprocessing.
+
+## Python
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GroupKFold, cross_val_score, train_test_split
+from sklearn.pipeline import Pipeline, make_pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+rng = np.random.default_rng(0)
+n = 400
+X = pd.DataFrame({
+    "tenure": rng.integers(1, 60, n).astype(float),
+    "spend": rng.normal(100, 20, n),
+    "plan": rng.choice(["basic", "pro"], n),
+})
+X.loc[X.sample(20, random_state=0).index, "spend"] = np.nan
+y = (X["tenure"] < 20).astype(int)
+
+preprocess = ColumnTransformer([
+    ("num", make_pipeline(SimpleImputer(strategy="median"), StandardScaler()), ["tenure", "spend"]),
+    ("cat", OneHotEncoder(handle_unknown="ignore"), ["plan"]),
+])
+model = Pipeline([("prep", preprocess), ("clf", LogisticRegression(max_iter=1_000))])
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, stratify=y, random_state=0)
+assert cross_val_score(model, X_train, y_train, cv=5).mean() > 0.9
+assert model.fit(X_train, y_train).score(X_test, y_test) > 0.9
+
+groups = np.arange(n) % 40
+for train, test in GroupKFold(n_splits=5).split(X, y, groups):
+    assert not set(groups[train]) & set(groups[test])
+```
+
+## In industry
+
+Pipelines are saved and versioned along with the model. Feature selection also reduces the ongoing monitoring and data cost of each input.
+
+## Assumptions and limitations
+
+Selected sets vary among samples, particularly among correlated features. Selection within the same data used to report performance is optimistic unless it's nested in cross-validation.
+
+## Common mistakes
+
+- Preprocessing before the split.
+- Reusing the test set many times.
+- Random splits with repeated customers.
+- Keeping a feature that won't be available at prediction time.
+
+## Alternatives
+
+Regularization avoids an explicit selection step. Neural networks learn representations, though they still need disciplined splits.
+
+## Interview questions
+
+<Question q="Why use a pipeline with cross-validation?">So that preprocessing is fitted only on each training fold, preventing leakage.</Question>
+
+<Question q="What is the purpose of the test set?">To provide a single final estimate of performance after all model decisions are complete.</Question>

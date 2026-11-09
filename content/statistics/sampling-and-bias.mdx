@@ -1,0 +1,115 @@
+---
+title: "Populations, Samples and Sampling Bias"
+summary: "Parameters and statistics, probability sampling methods, the biases that break them, and observational versus experimental designs."
+level: fundamental
+section: foundations
+order: 4
+tags: ["population","sample","bias","stratified sampling","experiments"]
+requires: ["statistics/data-types-and-scales"]
+related: ["statistics/ab-testing-foundations","statistics/sampling-distributions-clt","statistics/correlation-and-causation"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "pandas: DataFrame.sample"
+    url: "https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.sample.html"
+  - label: "NIST: Sampling and measurement"
+    url: "https://www.itl.nist.gov/div898/handbook/ppc/section3/ppc33.htm"
+---
+
+## What it is
+
+A **population** is the full group you want to draw conclusions about. A **sample** is the subset you measured. A **parameter** describes the population (μ, σ, p). A **statistic** is computed from a sample (x̄, s, p̂) and estimates a parameter.
+
+## Why it exists
+
+Measuring everyone is often impossible or wasteful. A well-drawn sample of a few thousand can estimate a national rate precisely, but a badly drawn sample of millions can be confidently wrong, because a larger sample shrinks random error and leaves bias untouched.
+
+## How it works
+
+Probability sampling gives each unit a known chance of selection:
+
+| Method | How | Best for |
+| --- | --- | --- |
+| Simple random | Every unit equally likely | A complete list exists |
+| Systematic | Every kth unit | Ordered lists with no matching cycle |
+| Stratified | Random within subgroups | Guaranteeing small segments |
+| Cluster | Randomly choose whole groups | Costly travel or naturally grouped units |
+
+Convenience, volunteer and quota samples are non-probability methods, so their error can't be quantified the same way.
+
+Common biases:
+
+- **Selection bias**: the way units enter the data relates to the outcome.
+- **Survivorship bias**: only those who lasted are visible.
+- **Non-response bias**: those who answer differ from those who don't.
+- **Measurement bias**: the instrument is systematically off.
+
+**Observational** studies record what happens. **Experiments** assign treatment randomly, which balances known and unknown confounders on average and supports causal claims.
+
+## Worked example
+
+A company emails a satisfaction survey to all customers. 4% respond, averaging 4.6 out of 5, and the team reports "customers are delighted". But unhappy customers who already churned weren't emailed (survivorship), and those with strong feelings answer more readily (non-response). A better design randomly samples customers, including recently churned ones, follows up with non-responders, and compares responders with the population on known fields like tenure.
+
+## Python
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(42)
+users = pd.DataFrame({
+    "segment": ["enterprise"] * 200 + ["self-serve"] * 9_800,
+    "spend": np.r_[rng.normal(5_000, 500, 200), rng.normal(50, 10, 9_800)],
+})
+stratified = users.groupby("segment").sample(frac=0.05, random_state=42)
+
+counts = stratified["segment"].value_counts()
+assert counts["enterprise"] == 10 and counts["self-serve"] == 490
+```
+
+## SQL
+
+```sql
+SELECT segment, count(*) AS sampled
+FROM (
+  SELECT segment,
+         row_number() OVER (PARTITION BY segment ORDER BY md5(user_id::text)) AS rn,
+         count(*) OVER (PARTITION BY segment) AS total
+  FROM (SELECT g AS user_id, CASE WHEN g <= 100 THEN 'a' ELSE 'b' END AS segment
+        FROM generate_series(1, 1000) AS g) AS users
+) AS ranked
+WHERE rn <= total * 0.1
+GROUP BY segment
+ORDER BY segment;
+-- rows: [{"segment":"a","sampled":10},{"segment":"b","sampled":90}]
+```
+
+Hashing an ID makes selection repeatable, which plain `random()` isn't.
+
+## In industry
+
+Product telemetry can look like a census while only covering logged-in users on instrumented app versions. Experimentation platforms hash user IDs for stable assignment, and fraud or quality review teams often stratify so rare cases are represented.
+
+## Assumptions and limitations
+
+Sampling theory assumes a frame that covers the population. If the list omits people, randomization can't recover them. Standard formulas also assume independence, so clustered samples need design-aware standard errors.
+
+## Common mistakes
+
+- Using a very large sample as evidence that bias doesn't matter.
+- Analyzing only active users when studying why people leave.
+- Treating web analytics sessions as independent when many belong to one user.
+- Inferring beyond the population sampled.
+
+## Alternatives
+
+When randomization is impossible, quasi-experimental designs such as difference-in-differences or regression discontinuity approximate it under stated assumptions. Survey weighting and post-stratification can reduce known imbalance, but they can't fix differences on unmeasured variables.
+
+## Interview questions
+
+<Question q="Does a larger sample fix bias?">No. It reduces sampling variability, so a biased sample becomes a more precise estimate of the wrong number.</Question>
+
+<Question q="When is stratified better than simple random sampling?">When strata differ on the outcome or when small groups need guaranteed representation. It usually lowers variance for the same sample size.</Question>
+
+<Question q="Give an example of survivorship bias in a business.">Analyzing only retained customers to learn what makes them loyal. Traits seen in that group may be equally common among those who left.</Question>

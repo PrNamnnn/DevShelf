@@ -1,0 +1,193 @@
+---
+title: "Transitions, Suspense and Actions"
+summary: "Marking updates as non-urgent, showing loading states declaratively, and handling form submissions with React 19 Actions."
+level: advanced
+section: async-ui
+order: 20
+tags: [useTransition, suspense, use, useActionState, useOptimistic, activity, actions, concurrent]
+related: [react/performance-and-memoization, nextjs/server-actions]
+versions: "useActionState, useOptimistic and use arrived in React 19. Activity is in current docs for 19.2+."
+tested: "Not executed. Checked against the React docs."
+verified: "2026-11-09"
+docs:
+  - label: "React: useTransition"
+    url: "https://react.dev/reference/react/useTransition"
+  - label: "React: Suspense"
+    url: "https://react.dev/reference/react/Suspense"
+  - label: "React: use"
+    url: "https://react.dev/reference/react/use"
+  - label: "React: useActionState"
+    url: "https://react.dev/reference/react/useActionState"
+  - label: "React: useOptimistic"
+    url: "https://react.dev/reference/react/useOptimistic"
+  - label: "React: Activity"
+    url: "https://react.dev/reference/react/Activity"
+---
+
+## What it is
+
+**Transitions** mark state updates as non-urgent and interruptible. **Suspense** displays a fallback while part of the tree waits. **Actions** are async functions run in a transition, with built-in pending and error handling.
+
+## Why it exists
+
+A slow tab switch shouldn't freeze typing, and every form shouldn't need hand-written pending, error and rollback code.
+
+## How it works
+
+Urgent updates such as typing can interrupt a Transition's background render. If a component suspends, React shows the nearest `Suspense` fallback. Inside a Transition, React avoids hiding content that's already visible.
+
+<StepFlow
+  title="An Action with an optimistic update"
+  nodes={["user submits", "optimistic state", "pending Action", "server responds", "real state"]}
+  steps={[
+    { active: [0, 1], note: "The form Action starts. setOptimistic immediately shows the expected result.", state: { list: "Buy milk (sending)" } },
+    { active: [2], note: "The async Action is in progress, and isPending is true.", state: { isPending: "true" } },
+    { active: [3], note: "The server confirms the write.", state: { isPending: "true" } },
+    { active: [4], note: "The Action finishes and real state takes over. On failure, the optimistic value is discarded automatically.", state: { list: "Buy milk", isPending: "false" } },
+  ]}
+/>
+
+Suspense doesn't detect data fetched in an Effect or event handler. It activates for `lazy`, for promises read with `use`, and for Suspense-enabled frameworks.
+
+## Syntax and key APIs
+
+```jsx
+const [isPending, startTransition] = useTransition();
+const [state, dispatchAction, isPending] = useActionState(reducerAction, initial);
+const [optimistic, setOptimistic] = useOptimistic(value, reducer);
+const value = use(promiseOrContext);
+<Suspense fallback={<Spinner />}>...</Suspense>
+<Activity mode="hidden">...</Activity>
+```
+
+`use` isn't a Hook. It can be called in conditions and loops, but not in a `try`-`catch` block.
+
+## Simple example
+
+```jsx
+function Tabs() {
+  const [tab, setTab] = useState("home");
+  const [isPending, startTransition] = useTransition();
+
+  function select(next) {
+    startTransition(() => setTab(next));
+  }
+
+  return (
+    <>
+      <button onClick={() => select("reports")}>Reports</button>
+      <div style={{ opacity: isPending ? 0.5 : 1 }}>
+        <TabPanel tab={tab} />
+      </div>
+    </>
+  );
+}
+```
+
+## Industry examples
+
+### A form with useActionState
+
+The reducer Action gets the previous state and the payload. Passing `dispatchAction` to `form action` runs it inside a Transition.
+
+```jsx
+async function save(previous, formData) {
+  const name = formData.get("name");
+  if (!name) return { error: "Name is required" };
+  await updateName(name);
+  return { error: null };
+}
+
+function NameForm() {
+  const [state, action, isPending] = useActionState(save, { error: null });
+
+  return (
+    <form action={action}>
+      <input name="name" />
+      <button disabled={isPending}>Save</button>
+      {state.error && <p role="alert">{state.error}</p>}
+    </form>
+  );
+}
+```
+
+### Optimistic UI
+
+The setter must be called inside an Action.
+
+```jsx
+function Likes({ count, onLike }) {
+  const [optimistic, addLike] = useOptimistic(count, (value) => value + 1);
+
+  return (
+    <form action={async () => {
+      addLike();
+      await onLike();
+    }}>
+      <button>{optimistic} likes</button>
+    </form>
+  );
+}
+```
+
+### Stream independent sections
+
+Each boundary reveals separately, so the slow section doesn't block the fast ones.
+
+```jsx
+<Suspense fallback={<HeaderSkeleton />}>
+  <Header />
+  <Suspense fallback={<FeedSkeleton />}>
+    <Feed />
+  </Suspense>
+</Suspense>
+```
+
+### Keep hidden state
+
+With `mode="hidden"`, children are hidden with `display: none` and their Effects are destroyed, but their state is retained.
+
+```jsx
+<Activity mode={tab === "editor" ? "visible" : "hidden"}>
+  <Editor />
+</Activity>
+```
+
+## Patterns and best practices
+
+- Place Suspense boundaries around sections that make sense to load independently.
+- Cache promises passed to `use`. Don't create them during render.
+- Use Actions for mutations so that pending and error state stay consistent.
+- Keep text input state outside Transitions.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Update is yours to wrap | `useTransition` | You must control the setter |
+| Value comes from elsewhere | `useDeferredValue` | No pending flag |
+| Simple submit | Event handler with state | Manual pending and errors |
+
+## Common mistakes
+
+**Controlling an input inside a Transition.** The docs state that Transition updates can't control text inputs.
+
+**Calling setState after an `await` or in a `setTimeout` inside `startTransition`.** Updates after the synchronous boundary may need their own `startTransition`.
+
+**Creating a promise during render and passing it to `use`.** It's recreated each render, so it never resolves stably.
+
+**Calling `setOptimistic` outside an Action.** React warns and the state only flashes.
+
+## Interview questions
+
+<Question q="What is a Transition?">
+A state update marked non-urgent, whose rendering can be interrupted by urgent updates such as typing.
+</Question>
+
+<Question q="Does Suspense work with fetch in useEffect?">
+No. Suspense only activates for sources that integrate with it, such as `lazy`, `use` and Suspense-enabled frameworks.
+</Question>
+
+<Question q="How is use different from a Hook?">
+It can be called conditionally and in loops. It still has to be called within a component or Hook.
+</Question>

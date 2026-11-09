@@ -1,0 +1,85 @@
+---
+title: "Dashboards, Financial and Business Analysis"
+summary: "Build one-page dashboards and use PMT, NPV, IRR, scenarios and goal seek for practical business decisions."
+level: advanced
+section: professional
+order: 1
+tags: ["dashboards","NPV","IRR","PMT","scenario analysis","Goal Seek"]
+requires: ["excel/pivot-tables-and-charts"]
+related: ["statistics/predictive-and-prescriptive-analysis","statistics/revenue-ltv-cac","statistics/growth-accounting-and-decomposition"]
+versions: "Excel 2016 onward"
+tested: "PMT, NPV and IRR evaluated in Excel build 20527. Interactive features checked against Microsoft documentation"
+verified: "2026-11-09"
+docs:
+  - label: "Excel: NPV function"
+    url: "https://support.microsoft.com/en-us/office/npv-function-8672cb67-2576-4d07-b67b-ac28acf2a568"
+  - label: "Excel: IRR function"
+    url: "https://support.microsoft.com/en-us/office/irr-function-64925eaa-9988-495b-b290-3ad0c163c1bc"
+  - label: "Excel: PMT function"
+    url: "https://support.microsoft.com/en-us/office/pmt-function-0214da64-9a63-4996-bc20-214433fa6441"
+  - label: "Excel: What-if analysis"
+    url: "https://support.microsoft.com/en-us/office/introduction-to-what-if-analysis-22bffa5f-e891-4acc-bf7a-e4645c446fb4"
+---
+
+## What it is
+
+An Excel dashboard is a single sheet summarizing key metrics, using linked charts and slicers. Financial functions and What-If tools evaluate business decisions.
+
+## Why it exists
+
+Many organizations run on Excel, and analysts frequently need a shareable decision tool without new infrastructure.
+
+## How it works
+
+Organize a dashboard workbook into raw data, cleaning queries, calculations and a presentation sheet. Connect slicers to multiple pivots. For finance:
+
+| Function | Use |
+| --- | --- |
+| `PMT` | Loan payment per period |
+| `NPV` | Present value of later cash flows |
+| `IRR` | Rate that makes net present value zero |
+| Goal Seek | Solve for one input |
+| Data Table | Output across values of inputs |
+| Scenario Manager | Named sets of assumptions |
+
+`NPV` assumes the first cash flow arrives at the end of period 1, so add the time-zero amount separately.
+
+## Syntax and key APIs
+
+```text
+=PMT(0.1/12,12,-1000)      87.92 per month
+=NPV(0.1,110,121)          200
+=IRR(K2:K4)                10%, for flows of -200, 110, 121
+```
+
+## Simple example
+
+Investing ₹200 today returns ₹110 and ₹121 over two years. At a 10% discount rate, `=-200+NPV(0.1,110,121)` is 0, so the IRR is exactly 10%. A Data Table can show how this result moves as the discount rate changes.
+
+## Industry examples
+
+Sales teams use KPI pages with slicers per region. FP&A teams maintain budget scenarios. Project teams calculate payback and NPV before funding decisions.
+
+## Patterns and best practices
+
+- Label all assumptions, and keep them separate.
+- Add reconciliation checks.
+- Limit a dashboard to the questions a reader actually asks.
+- Use one consistent palette.
+
+## Alternatives and trade-offs
+
+Power BI offers richer security, sharing and scale. Excel is flexible and familiar, and it's prone to version sprawl.
+
+## Common mistakes
+
+- Including the time-zero cash flow within `NPV`.
+- Mixing monthly rates with annual periods in `PMT`.
+- Hard-coded overrides without documentation.
+- Charts that depend on hidden, stale ranges.
+
+## Interview questions
+
+<Question q="How does Excel's NPV treat timing?">It discounts the first value by one period, so an upfront investment must be added outside the function.</Question>
+
+<Question q="When would you use a Data Table over Scenario Manager?">Data Tables sweep input values for a grid of outcomes. Scenarios store complete named sets of assumptions.</Question>

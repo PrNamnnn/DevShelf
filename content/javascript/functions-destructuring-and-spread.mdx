@@ -1,0 +1,159 @@
+---
+title: "Functions, Destructuring, Spread and Rest"
+summary: "Function forms, default and rest parameters, destructuring patterns, and how spread makes shallow copies."
+level: fundamental
+section: functions
+order: 10
+tags: [functions, arrow-functions, default-parameters, destructuring, spread, rest]
+requires: [javascript/values-and-types]
+related: [javascript/scope-closures-and-this, javascript/objects-arrays-and-collections]
+versions: "All modern engines."
+tested: "Node.js 24.17.0"
+verified: "2026-11-09"
+docs:
+  - label: "MDN: Functions"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Functions"
+  - label: "MDN: Destructuring"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Destructuring"
+  - label: "MDN: Spread syntax"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Spread_syntax"
+  - label: "MDN: Rest parameters"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/rest_parameters"
+---
+
+## What it is
+
+Functions are first-class values. Destructuring pulls values out of arrays and objects. `...` is spread when expanding and rest when collecting.
+
+## Why it exists
+
+Named options objects with defaults are easier to read than long positional arguments, and destructuring removes repetitive property access.
+
+## How it works
+
+| Form | Hoisted | Own `this` | Use |
+| --- | --- | --- | --- |
+| `function f() {}` | Yes | Yes | Named top-level functions |
+| `const f = function () {}` | No | Yes | Rare |
+| `const f = () => {}` | No | No | Callbacks |
+| `{ f() {} }` | n/a | Yes | Methods |
+
+Default parameters apply only when the argument is `undefined`. They're evaluated at each call, so new objects are safe, unlike Python's defaults.
+
+## Syntax and key APIs
+
+```javascript
+function create({ name, role = "user", ...rest } = {}) {}
+const [first, , third = 0, ...others] = list;
+const { a: renamed, nested: { b } } = object;
+Math.max(...numbers);
+const copy = [...list];
+const merged = { ...defaults, ...overrides };
+```
+
+## Simple example
+
+```js
+import assert from "node:assert";
+
+function greet({ name, greeting = "Hello" } = {}) {
+  return `${greeting}, ${name ?? "guest"}`;
+}
+
+assert.equal(greet(), "Hello, guest");
+assert.equal(greet({ name: "Ada", greeting: "Hi" }), "Hi, Ada");
+
+const [a, b = 2, ...rest] = [1, undefined, 3, 4];
+assert.deepEqual([a, b, rest], [1, 2, [3, 4]]);
+
+let x = 1, y = 2;
+[x, y] = [y, x];
+assert.deepEqual([x, y], [2, 1]);
+```
+
+## Industry examples
+
+### Remove a field without mutating
+
+```js
+import assert from "node:assert";
+
+const user = { id: 1, password: "secret", name: "Ada" };
+const { password, ...safe } = user;
+
+assert.deepEqual(safe, { id: 1, name: "Ada" });
+assert.equal(user.password, "secret");
+```
+
+### Merge settings in order
+
+Later spreads win, so put defaults first.
+
+```js
+import assert from "node:assert";
+
+const defaults = { retries: 3, timeout: 1000 };
+const config = { ...defaults, timeout: 50 };
+
+assert.deepEqual(config, { retries: 3, timeout: 50 });
+```
+
+### Compose small functions
+
+```js
+import assert from "node:assert";
+
+const pipe = (...fns) => (input) => fns.reduce((value, fn) => fn(value), input);
+const slug = pipe((s) => s.trim(), (s) => s.toLowerCase(), (s) => s.replaceAll(" ", "-"));
+
+assert.equal(slug("  Hello World "), "hello-world");
+```
+
+### Fresh defaults on every call
+
+```js
+import assert from "node:assert";
+
+function add(item, list = []) {
+  list.push(item);
+  return list;
+}
+
+assert.deepEqual(add(1), [1]);
+assert.deepEqual(add(2), [2]);
+```
+
+## Patterns and best practices
+
+- Use an options object once a function has more than two or three parameters.
+- Give destructured objects a `= {}` default.
+- Use arrow functions for callbacks, and regular functions when you need `this`.
+- Spread is shallow, so use `structuredClone` for deep copies.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Few required arguments | Positional | Order must be remembered |
+| Many options | Options object | Allocates an object |
+| Deep copy | `structuredClone` | Slower |
+
+## Common mistakes
+
+**Assuming `null` triggers a default.** Only `undefined` does.
+
+**Destructuring `undefined`.** It throws a `TypeError` without a default.
+
+**Spreading a very long array into a call.** Argument limits can be exceeded.
+
+**Using `arguments` in an arrow function.** Arrows don't have it. Use rest parameters.
+
+## Interview questions
+
+<Question q="Spread versus rest?">
+Spread expands an iterable or object where values are expected. Rest collects remaining values into an array or object.
+</Question>
+
+<Question q="When do default parameters apply?">
+When the argument is missing or `undefined`. `null` doesn't trigger them.
+</Question>

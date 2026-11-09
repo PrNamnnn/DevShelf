@@ -1,0 +1,127 @@
+---
+title: "ANOVA and Post-Hoc Comparisons"
+summary: "One-way, two-way and repeated measures ANOVA, the F statistic, interactions and Tukey's HSD."
+level: advanced
+section: tests
+order: 4
+tags: ["ANOVA","F-test","post-hoc","Tukey","interaction"]
+requires: ["statistics/t-tests"]
+related: ["statistics/non-parametric-tests","statistics/multiple-testing-and-fdr","statistics/assumption-and-exact-tests"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "SciPy: f_oneway"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.f_oneway.html"
+  - label: "SciPy: tukey_hsd"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.tukey_hsd.html"
+  - label: "statsmodels: ANOVA"
+    url: "https://www.statsmodels.org/stable/anova.html"
+---
+
+## What it is
+
+Analysis of variance tests whether the means of three or more groups are all equal. It compares variation between groups with variation within them.
+
+| Design | Question |
+| --- | --- |
+| One-way | Does one factor change the mean? |
+| Two-way | Do two factors matter, and do they interact? |
+| Repeated measures | Does the mean change across conditions in the same subjects? |
+
+## Why it exists
+
+Running pairwise t-tests inflates false positives. With three groups there are three tests, and with ten there are 45. ANOVA provides a single overall test, and a post-hoc procedure controls the error across follow-up comparisons.
+
+## How it works
+
+**When to use:** numeric outcome, categorical groups. **Assumptions:** independent observations, roughly normal residuals, similar variances. Moderate departures from normality are tolerated with balanced, reasonably sized groups.
+
+**H₀:** all means are equal. **H₁:** at least one differs. A significant F doesn't say which ones, so apply **Tukey's HSD** for all pairs, or **Dunnett's test** for comparisons with one control.
+
+An **interaction** means that one factor's effect depends on the level of another. If significant, interpret main effects with care.
+
+## Intuition and formula
+
+<Formula>F = MS_between / MS_within = (SS_between / (k − 1)) / (SS_within / (N − k))</Formula>
+
+Between-group variance reflects the signal plus noise, and within-group variance reflects noise. Under H₀ their ratio is near 1. η² = SS_between / SS_total measures effect size.
+
+## Worked example
+
+Three landing pages yield session values: A = 23, 25, 21, 24, 26; B = 28, 30, 27, 29, 31; C = 22, 24, 23, 25, 21.
+
+SS_between = 106.13 and SS_within = 34.8, so MS values are 53.07 and 2.90, making F(2, 12) = 18.30, p = 0.00023, and η² = 0.75. Tukey's test shows B differs from both A (mean difference 5.2, p = 0.001) and C (6.0, p under 0.001), while A and C do not (p = 0.74). Page B wins.
+
+## Python
+
+```python
+import pandas as pd
+from scipy import stats
+import statsmodels.formula.api as smf
+from statsmodels.stats.anova import anova_lm
+
+a, b, c = [23, 25, 21, 24, 26], [28, 30, 27, 29, 31], [22, 24, 23, 25, 21]
+oneway = stats.f_oneway(a, b, c)
+assert round(oneway.statistic, 2) == 18.30
+
+tukey = stats.tukey_hsd(a, b, c)
+assert round(tukey.pvalue[0, 2], 2) == 0.74
+
+df = pd.DataFrame({
+    "sales": [20, 22, 24, 26, 30, 32, 21, 23, 29, 31, 40, 42],
+    "price": ["low"] * 6 + ["high"] * 6,
+    "region": (["north"] * 2 + ["south"] * 2 + ["east"] * 2) * 2,
+})
+twoway = anova_lm(smf.ols("sales ~ C(price) * C(region)", df).fit(), typ=2)
+assert twoway.loc["C(price):C(region)", "PR(>F)"] < 0.05
+```
+
+## SQL
+
+```sql
+WITH d(g, x) AS (
+  SELECT 'a', v FROM unnest(ARRAY[23,25,21,24,26]::numeric[]) AS v
+  UNION ALL SELECT 'b', v FROM unnest(ARRAY[28,30,27,29,31]::numeric[]) AS v
+  UNION ALL SELECT 'c', v FROM unnest(ARRAY[22,24,23,25,21]::numeric[]) AS v
+), g AS (
+  SELECT g, count(*) AS n, avg(x) AS m, sum((x - sub.m0) ^ 2) AS ssw
+  FROM d CROSS JOIN LATERAL (SELECT avg(x) AS m0 FROM d d2 WHERE d2.g = d.g) AS sub
+  GROUP BY g
+), t AS (
+  SELECT sum(n * (m - (SELECT avg(x) FROM d)) ^ 2) AS ssb, sum(ssw) AS ssw,
+         count(*) - 1 AS df1, sum(n) - count(*) AS df2
+  FROM g
+)
+SELECT round((ssb / df1) / (ssw / df2), 2) AS f FROM t;
+-- rows: [{"f":"18.30"}]
+```
+
+## Excel or Power BI
+
+The Data Analysis ToolPak includes Anova: Single Factor and Two-Factor. `F.DIST.RT(F, df1, df2)` returns the p-value.
+
+## In industry
+
+ANOVA suits multi-variant page tests, process comparisons and factorial experiments, where interactions between features are of interest.
+
+## Assumptions and limitations
+
+Unequal variances combined with unequal sizes hurt validity, where Welch's ANOVA helps. Repeated measures require sphericity or a correction such as Greenhouse-Geisser.
+
+## Common mistakes
+
+- Running only pairwise t-tests.
+- Stopping at the F test.
+- Interpreting main effects despite a strong interaction.
+- Treating repeated measurements as independent groups.
+
+## Alternatives
+
+Kruskal-Wallis and Friedman tests on ranks, Welch's ANOVA, linear mixed models for repeated measures with missing values, and regression with dummy variables.
+
+## Interview questions
+
+<Question q="Why not run many t-tests?">The family-wise false-positive rate grows with the number of comparisons. With α = 0.05, ten independent tests give about a 40% chance of at least one false positive.</Question>
+
+<Question q="What does an interaction mean in a two-way ANOVA?">The effect of one factor depends on the level of the other, so main effects alone don't tell the story.</Question>

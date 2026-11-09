@@ -1,0 +1,173 @@
+---
+title: "Fetch, HTTP and Browser Storage"
+summary: "Using fetch correctly, handling errors and timeouts, CORS, and choosing where to store data in the browser."
+level: advanced
+section: browser
+order: 20
+tags: [fetch, http, cors, json, localstorage, indexeddb, cookies, formdata]
+requires: [javascript/promises-and-cancellation]
+related: [javascript/dom-events-and-patterns, express/routing-requests-and-responses]
+versions: "fetch is global in Node.js 18+ and all current browsers."
+tested: "Node.js 24.17.0 for fetch handling. Browser storage and CORS behaviour weren't run."
+verified: "2026-11-09"
+docs:
+  - label: "MDN: Using the Fetch API"
+    url: "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch"
+  - label: "MDN: CORS"
+    url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS"
+  - label: "MDN: Web Storage API"
+    url: "https://developer.mozilla.org/en-US/docs/Web/API/Web_Storage_API"
+  - label: "MDN: IndexedDB API"
+    url: "https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API"
+---
+
+## What it is
+
+`fetch` makes HTTP requests and returns a promise for a `Response`. Browsers also offer several places to keep data locally.
+
+## Why it exists
+
+Web apps constantly exchange data with servers. Each storage option has a different size, lifetime and security profile.
+
+## How it works
+
+<LanesViz
+  title="A cross-origin POST with preflight"
+  actors={["Script", "Browser", "API server"]}
+  steps={[
+    { from: 0, to: 1, label: "fetch(url, POST JSON)", note: "Your code asks the browser to send a request with a JSON body." },
+    { from: 1, to: 2, label: "OPTIONS preflight", note: "A non-simple cross-origin request makes the browser ask permission first." },
+    { from: 2, to: 1, label: "Access-Control-Allow-*", note: "The server states which origins, methods and headers it allows." },
+    { from: 1, to: 2, label: "POST /orders", note: "With permission, the browser sends the real request." },
+    { from: 2, to: 1, label: "201 + JSON", note: "The server replies. Cookies are only sent if credentials were requested and allowed." },
+    { from: 1, to: 0, label: "Response", note: "The promise resolves as soon as headers arrive. The body is read separately." },
+  ]}
+/>
+
+`fetch` rejects only on network failure or abort. **HTTP 404 and 500 still fulfil**, so you must check `response.ok`.
+
+| Storage | Size | Lifetime | Use |
+| --- | --- | --- | --- |
+| `localStorage` | About 5 MB | Until cleared | Small preferences |
+| `sessionStorage` | About 5 MB | Tab | Temporary state |
+| IndexedDB | Large | Until evicted | Structured offline data |
+| Cookies | About 4 KB | Configurable | Sent to server |
+
+## Syntax and key APIs
+
+```javascript
+const response = await fetch(url, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(data),
+  signal: AbortSignal.timeout(5000),
+  credentials: "include",
+});
+```
+
+## Simple example
+
+```js
+import assert from "node:assert";
+import { createServer } from "node:http";
+
+const server = createServer((req, res) => {
+  res.statusCode = req.url === "/ok" ? 200 : 404;
+  res.end(JSON.stringify({ path: req.url }));
+}).listen(0);
+await new Promise((r) => server.once("listening", r));
+const base = `http://127.0.0.1:${server.address().port}`;
+
+const missing = await fetch(`${base}/nope`);
+assert.equal(missing.ok, false);
+assert.equal(missing.status, 404);
+
+const ok = await (await fetch(`${base}/ok`)).json();
+assert.equal(ok.path, "/ok");
+server.close();
+server.closeAllConnections();
+```
+
+## Industry examples
+
+### A typed request wrapper
+
+```js
+import assert from "node:assert";
+
+class HttpError extends Error {
+  constructor(response, body) {
+    super(`HTTP ${response.status}`);
+    this.status = response.status;
+    this.body = body;
+  }
+}
+
+async function request(fetcher, url) {
+  const response = await fetcher(url);
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new HttpError(response, body);
+  return body;
+}
+
+const fake = async () => new Response('{"error":"no"}', { status: 403 });
+await assert.rejects(request(fake, "/x"), { status: 403 });
+```
+
+### Upload a form
+
+Let the browser set the multipart boundary, so don't set `Content-Type` yourself.
+
+```javascript
+const body = new FormData(formElement);
+await fetch("/upload", { method: "POST", body });
+```
+
+### Read storage defensively
+
+Storage can throw when it's blocked or full.
+
+```javascript
+function readJson(key, fallback) {
+  try {
+    return JSON.parse(localStorage.getItem(key)) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+```
+
+## Patterns and best practices
+
+- Check `response.ok` on every call.
+- Set timeouts with `AbortSignal.timeout`.
+- Keep session tokens in `httpOnly` cookies, not `localStorage`.
+- Never trust data read from local storage.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Basic requests | `fetch` | Manual error checks |
+| Caching and retries | Data library | Dependency |
+| Live updates | WebSocket or SSE | Connection management |
+
+## Common mistakes
+
+**Assuming a 500 rejects.** It fulfils. Check `ok`.
+
+**Reading a body twice.** Use `response.clone()` if you must.
+
+**Setting `Content-Type` for FormData.** The boundary goes missing.
+
+**Treating CORS as server protection.** Non-browser clients ignore it.
+
+## Interview questions
+
+<Question q="Does fetch reject on 404?">
+No. It rejects only on network errors or aborts. Check `response.ok` or `response.status`.
+</Question>
+
+<Question q="What triggers a CORS preflight?">
+Cross-origin requests that use non-simple methods or headers, such as `Content-Type: application/json`.
+</Question>

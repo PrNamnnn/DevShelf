@@ -1,0 +1,152 @@
+---
+title: "Deployment and Environment Variables"
+summary: "Choosing a deployment model, what static export gives up, and how environment variables reach the server and browser."
+level: intermediate
+section: production
+order: 10
+tags: [deployment, docker, static-export, standalone, environment-variables, adapters]
+requires: [nextjs/server-and-client-components]
+related: [nextjs/data-fetching-and-caching, express/production-operations]
+versions: "Next.js 16. Requires Node.js 20.9+."
+tested: "Production builds run on Next.js 16.4.5. Docker and hosted deployment weren't run."
+verified: "2026-11-09"
+docs:
+  - label: "Next.js: Deploying"
+    url: "https://nextjs.org/docs/app/getting-started/deploying"
+  - label: "Next.js: Environment variables"
+    url: "https://nextjs.org/docs/app/guides/environment-variables"
+  - label: "Next.js: Static exports"
+    url: "https://nextjs.org/docs/app/guides/static-exports"
+---
+
+## What it is
+
+Next.js apps can run as a Node.js server, in Docker, as static files, or through a platform adapter. Environment variables configure each deployment.
+
+## Why it exists
+
+Different projects need different trade-offs among features, cost and control.
+
+## How it works
+
+| Option | Feature support |
+| --- | --- |
+| Node.js server | All |
+| Docker | All |
+| Static export | Limited |
+| Adapters | Varies |
+
+Only variables prefixed `NEXT_PUBLIC_` reach the browser, and they're **inlined at build time**. Other variables stay on the server.
+
+<StepFlow
+  title="Where a variable's value comes from"
+  nodes={["process.env", ".env.$(NODE_ENV).local", ".env.local", ".env.$(NODE_ENV)", ".env"]}
+  steps={[
+    { active: [0], note: "Lookup stops at the first match. Real environment variables win." },
+    { active: [1], note: "Environment-specific local overrides, such as .env.production.local." },
+    { active: [2], note: "Local overrides. Not checked when NODE_ENV is test." },
+    { active: [3], note: "Environment-specific defaults, safe to commit if they hold no secrets." },
+    { active: [4], note: "General defaults." },
+  ]}
+/>
+
+## Syntax and key APIs
+
+```bash
+next build
+next start -p 3000
+```
+
+```ts
+import type { NextConfig } from "next";
+
+const config: NextConfig = { output: "standalone" };
+
+export default config;
+```
+
+`output: "export"` produces static files, which don't support features that require a server.
+
+## Simple example
+
+```tsx
+export default function Page() {
+  return <p>Region: {process.env.NEXT_PUBLIC_REGION ?? "unset"}</p>;
+}
+```
+
+## Industry examples
+
+### Read a runtime variable
+
+This lets one Docker image be promoted across environments, reading values at request time.
+
+```tsx
+import { connection } from "next/server";
+
+export default async function Page() {
+  await connection();
+  return <p>{process.env.DEPLOY_NAME}</p>;
+}
+```
+
+### A minimal container
+
+```dockerfile
+FROM node:24-alpine AS build
+WORKDIR /app
+COPY . .
+RUN npm ci && npm run build
+
+FROM node:24-alpine
+WORKDIR /app
+COPY --from=build /app/.next/standalone ./
+COPY --from=build /app/.next/static ./.next/static
+COPY --from=build /app/public ./public
+CMD ["node", "server.js"]
+```
+
+### Validate configuration early
+
+```ts
+const required = ["DATABASE_URL", "SESSION_SECRET"] as const;
+
+for (const name of required) {
+  if (!process.env[name]) throw new Error(`Missing ${name}`);
+}
+```
+
+## Patterns and best practices
+
+- Never prefix secrets with `NEXT_PUBLIC_`.
+- Commit `.env.example`, not `.env.local`.
+- Set `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` for multiple instances.
+- Configure a shared cache handler when running several instances.
+
+## Alternatives and trade-offs
+
+| Option | Strength | Trade-off |
+| --- | --- | --- |
+| Managed platform | Least operations | Vendor cost |
+| Node server or Docker | Full control | You run it |
+| Static export | Cheapest hosting | No server features |
+
+## Common mistakes
+
+**Expecting `NEXT_PUBLIC_` to change after build.** It's inlined at build time.
+
+**Accessing `process.env[name]` for a public variable.** Dynamic lookups aren't inlined.
+
+**Forgetting to copy `static` and `public` with standalone.** Assets return 404.
+
+**Using static export with Server Actions.** They need a server.
+
+## Interview questions
+
+<Question q="How does a variable reach the browser?">
+By being prefixed `NEXT_PUBLIC_`, which inlines its value into the JavaScript at build time.
+</Question>
+
+<Question q="What is standalone output?">
+A minimal server folder with only the files needed in production, useful for small Docker images.
+</Question>

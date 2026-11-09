@@ -1,0 +1,86 @@
+---
+title: "The ML Project Lifecycle"
+summary: "From business problem to monitored production system, and the main places ML projects fail."
+level: fundamental
+section: foundations
+order: 1
+tags: ["MLOps","lifecycle","deployment","ML systems"]
+requires: ["machine-learning/ml-foundations"]
+related: ["mlops/reproducibility-and-experiment-tracking","mlops/monitoring-drift-and-retraining","statistics/asking-analytical-questions"]
+versions: "Practices current as of November 2026"
+tested: "Python example executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "MLflow documentation"
+    url: "https://mlflow.org/docs/latest/"
+  - label: "scikit-learn: Model persistence"
+    url: "https://scikit-learn.org/stable/model_persistence.html"
+---
+
+## What it is
+
+MLOps applies engineering practices to building, shipping and operating machine learning systems.
+
+## Why it exists
+
+A notebook that works once is far from a dependable service. Data changes, models decay and pipelines break.
+
+## How it works
+
+<StepFlow
+  title="Lifecycle"
+  nodes={["Frame", "Data", "Train", "Validate", "Deploy", "Monitor"]}
+  steps={[
+    { note: "Define the decision, success metric, constraints and fallback behaviour.", active: [0] },
+    { note: "Build versioned datasets with point-in-time correct features.", active: [1] },
+    { note: "Train reproducibly and track each experiment.", active: [2] },
+    { note: "Test model quality, data checks and fairness against a baseline.", active: [3] },
+    { note: "Package and release gradually with a rollback plan.", active: [4] },
+    { note: "Track data, predictions, outcomes and service health, and feed that back.", active: [5] }
+  ]}
+/>
+
+## Syntax and key APIs
+
+Common maturity stages: manual notebooks, automated training pipelines, then CI/CD for pipelines with automated retraining.
+
+## Simple example
+
+```python
+def promote(candidate: float, production: float, min_gain: float, checks_passed: bool) -> bool:
+    return checks_passed and candidate >= production + min_gain
+
+assert promote(0.84, 0.81, 0.01, True)
+assert not promote(0.815, 0.81, 0.01, True)
+assert not promote(0.9, 0.81, 0.01, False)
+```
+
+A promotion gate like this prevents an automated pipeline from releasing a worse model.
+
+## Industry examples
+
+Recommendation systems retrain frequently. Credit models change rarely, under strict governance and documentation.
+
+## Patterns and best practices
+
+- Establish a non-ML baseline and fallback.
+- Automate only after a manual process works.
+- Assign clear ownership for models in production.
+- Keep a model registry with lineage.
+
+## Alternatives and trade-offs
+
+A batch job may be all that's needed. Managed platforms reduce effort and may lead to vendor lock-in.
+
+## Common mistakes
+
+- Treating deployment as the finish line.
+- No plan for label collection.
+- Training code that differs from serving code.
+- No rollback path.
+
+## Interview questions
+
+<Question q="Why do ML projects fail after a good notebook result?">Leakage, unavailable features, drift, integration difficulties and no owner.</Question>
+
+<Question q="What belongs in a release gate?">Data validation, performance versus the baseline, latency and rollback readiness.</Question>

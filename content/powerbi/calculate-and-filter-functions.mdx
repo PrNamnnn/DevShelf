@@ -1,0 +1,91 @@
+---
+title: "CALCULATE, FILTER, ALL, ALLEXCEPT and REMOVEFILTERS"
+summary: "Modify filter context deliberately, compute shares of total and understand filter override rules."
+level: intermediate
+section: dax
+order: 2
+tags: ["CALCULATE","FILTER","ALL","ALLEXCEPT","REMOVEFILTERS","KEEPFILTERS"]
+requires: ["powerbi/dax-fundamentals-and-context"]
+related: ["powerbi/iterators-and-variables","powerbi/context-transition-and-advanced-patterns"]
+versions: "DAX as documented in November 2026"
+tested: "Not executable here. Hand-checked against the sample table and Microsoft documentation"
+verified: "2026-11-09"
+docs:
+  - label: "CALCULATE"
+    url: "https://learn.microsoft.com/en-us/dax/calculate-function-dax"
+  - label: "ALL"
+    url: "https://learn.microsoft.com/en-us/dax/all-function-dax"
+  - label: "REMOVEFILTERS"
+    url: "https://learn.microsoft.com/en-us/dax/removefilters-function-dax"
+  - label: "FILTER"
+    url: "https://learn.microsoft.com/en-us/dax/filter-function-dax"
+  - label: "ALLEXCEPT"
+    url: "https://learn.microsoft.com/en-us/dax/allexcept-function-dax"
+---
+
+## What it is
+
+`CALCULATE` evaluates an expression in a modified filter context. It's the most important function in DAX.
+
+## Why it exists
+
+KPIs depend on comparison to a different context: total sales, last year, the same category, or a specific segment.
+
+## How it works
+
+`CALCULATE` copies the existing filter context, applies its filter arguments, and then evaluates the expression. A filter on a column **replaces** any existing filter on that column, unless wrapped in `KEEPFILTERS`, which intersects.
+
+Boolean filter arguments work on columns from one table, and can't reference measures or nested `CALCULATE`. For those cases, pass a table expression such as `FILTER`.
+
+| Function | Effect |
+| --- | --- |
+| `ALL(Table)` or `ALL(Col)` | Ignores filters and, in a table context, returns all rows |
+| `REMOVEFILTERS` | Clears filters, and is only a modifier |
+| `ALLEXCEPT(T, T[Col])` | Clears all filters on T except those on the listed columns |
+| `ALLSELECTED` | Respects outer report selections |
+| `FILTER(T, cond)` | Iterates and returns the rows that match |
+
+Prefer a plain boolean or small column-based filter over `FILTER(EntireTable, ...)`, for clarity and performance.
+
+## Syntax and key APIs
+
+```text
+North Units = CALCULATE ( [Total Units], Sales[Region] = "North" )
+All Regions = CALCULATE ( [Total Units], REMOVEFILTERS ( Sales[Region] ) )
+Share = DIVIDE ( [Total Units], [All Regions] )
+Keep North = CALCULATE ( [Total Units], KEEPFILTERS ( Sales[Region] = "North" ) )
+Category Total = CALCULATE ( [Total Units], ALLEXCEPT ( Sales, Sales[Product] ) )
+Big Orders = CALCULATE ( [Total Units], FILTER ( VALUES ( Sales[Product] ), [Total Units] > 20 ) )
+```
+
+## Simple example
+
+In a visual by Region, the South row shows `North Units` of 13, because the filter replaces South. `Keep North` for South is blank, since the two filters intersect to nothing. `Share` for South is 17 ÷ 38 = 44.7%.
+
+## Industry examples
+
+Share of category, contribution to total, target comparisons and "new customers" measures all rely on `CALCULATE`.
+
+## Patterns and best practices
+
+- Start with the simplest filter that works.
+- Use `REMOVEFILTERS` when you only mean to clear.
+- Name measures so that it's obvious what context they use.
+- Be careful of unexpected behaviour with `ALL` on a whole fact table.
+
+## Alternatives and trade-offs
+
+Calculation groups centralize patterns such as year-to-date. Precomputing in the warehouse gives speed at the cost of flexibility.
+
+## Common mistakes
+
+- Expecting a boolean filter to intersect with existing filters.
+- Using `FILTER` on an entire large table.
+- Forgetting that `ALLEXCEPT` keeps only filters on specified columns.
+- Clearing a dimension filter from the wrong table.
+
+## Interview questions
+
+<Question q="Why does CALCULATE(..., Region = 'North') show a North value on a South row?">The boolean filter replaces the existing filter on that same column.</Question>
+
+<Question q="ALL vs REMOVEFILTERS?">REMOVEFILTERS only removes filters as a CALCULATE modifier. ALL can do that and can also act as a table function.</Question>

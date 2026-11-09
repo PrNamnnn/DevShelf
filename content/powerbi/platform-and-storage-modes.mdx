@@ -1,0 +1,90 @@
+---
+title: "Power BI Architecture and Storage Modes"
+summary: "Desktop, Service and Gateway, data sources, and choosing between Import, DirectQuery and Direct Lake."
+level: fundamental
+section: platform
+order: 1
+tags: ["Power BI Desktop","Power BI Service","gateway","Import","DirectQuery","Direct Lake"]
+related: ["powerbi/star-schema-and-relationships","powerbi/performance-and-deployment","excel/power-query-and-data-model"]
+versions: "Power BI service as documented in November 2026"
+tested: "Not executable here. Limits checked against Microsoft documentation"
+verified: "2026-11-09"
+docs:
+  - label: "DirectQuery in Power BI"
+    url: "https://learn.microsoft.com/en-us/power-bi/connect-data/desktop-directquery-about"
+  - label: "Direct Lake overview"
+    url: "https://learn.microsoft.com/en-us/fabric/fundamentals/direct-lake-overview"
+  - label: "On-premises data gateway"
+    url: "https://learn.microsoft.com/en-us/power-bi/connect-data/service-gateway-onprem"
+---
+
+## What it is
+
+Power BI is Microsoft's business-intelligence platform.
+
+| Component | Role |
+| --- | --- |
+| Power BI Desktop | Author models and reports on Windows |
+| Power BI Service | Publish, share, refresh and secure content |
+| On-premises gateway | Secure bridge to private data sources |
+| Semantic model | Tables, relationships, measures and security |
+| Report | Interactive pages built on a model |
+| Dashboard | Pinned tiles in the service |
+
+## Why it exists
+
+It joins data preparation, a calculation engine and governed sharing into one tool, so everyone can use the same definitions.
+
+## How it works
+
+Storage mode determines where the data lives when a visual runs.
+
+| Mode | Data location | Speed | Freshness | Limits |
+| --- | --- | --- | --- | --- |
+| Import | Compressed in-memory (VertiPaq) | Fast | At each refresh | Memory, refresh time |
+| DirectQuery | Stays in source | Depends on source | Near real time | 1,000,000-row intermediate results, source load |
+| Direct Lake | OneLake Delta tables, loaded on demand | Close to Import | Framing on data change | Fabric only, capacity guardrails |
+
+A Direct Lake refresh, or **framing**, copies only metadata. Models on OneLake don't fall back, and models on SQL endpoints may fall back to DirectQuery. The gateway makes only outbound connections, and each model uses a single gateway connection.
+
+## Syntax and key APIs
+
+Typical choice logic:
+
+```text
+Import       default for most models
+DirectQuery  source too large to import, or strict real-time needs
+Direct Lake  data already in Fabric OneLake at large scale
+Composite    mix Import dimensions with DirectQuery facts
+```
+
+## Simple example
+
+A retail company imports two years of daily sales from a SQL database nightly. Business users open reports in the service, and a gateway provides the path back to the on-premises server. Reports are fast because visuals query the in-memory copy.
+
+## Industry examples
+
+Finance uses Import with scheduled refresh for month-end reporting. Operations teams use DirectQuery for near-real-time status, with a well-indexed source. Large-scale analytics on Fabric uses Direct Lake.
+
+## Patterns and best practices
+
+- Default to Import unless a real constraint rules it out.
+- Keep models thin, reports separate and semantic models shared.
+- Optimize the source and limit visuals when using DirectQuery.
+
+## Alternatives and trade-offs
+
+Tableau and Looker offer similar goals with different modelling approaches. Excel suits personal analysis and smaller audiences.
+
+## Common mistakes
+
+- Choosing DirectQuery only because data "must be fresh", when an hourly refresh would be enough.
+- Assuming a report has its own data rather than using a model.
+- Using a personal gateway for shared production.
+- Ignoring source performance in DirectQuery.
+
+## Interview questions
+
+<Question q="Import vs DirectQuery?">Import stores compressed data for speed and needs refresh. DirectQuery queries the source each time, giving fresher data with performance dependent on the source.</Question>
+
+<Question q="What is framing in Direct Lake?">A low-cost metadata update that points the model at the latest Delta table versions.</Question>

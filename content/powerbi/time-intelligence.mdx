@@ -1,0 +1,73 @@
+---
+title: "Time Intelligence"
+summary: "Build year-to-date, prior-year and rolling calculations on a proper Date table."
+level: intermediate
+section: dax
+order: 4
+tags: ["DAX","TOTALYTD","SAMEPERIODLASTYEAR","DATEADD","DATESINPERIOD","date table"]
+requires: ["powerbi/calculate-and-filter-functions"]
+related: ["statistics/time-series-fundamentals","excel/text-and-date-functions"]
+versions: "DAX as documented in November 2026"
+tested: "Not executable here. Checked against Microsoft documentation"
+verified: "2026-11-09"
+docs:
+  - label: "Time intelligence functions"
+    url: "https://learn.microsoft.com/en-us/dax/time-intelligence-functions-dax"
+  - label: "Create date tables"
+    url: "https://learn.microsoft.com/en-us/power-bi/guidance/model-date-tables"
+---
+
+## What it is
+
+Time intelligence functions shift or expand the date filter context to calculate measures like year-to-date and same-period-last-year.
+
+## Why it exists
+
+Nearly every business report compares time periods, and manually writing filters for this is error-prone.
+
+## How it works
+
+Create a Date table with one row for each day, covering complete years with no gaps, and mark it as a date table. Relationship to the fact uses the date column.
+
+The standard functions return a table of dates that are then passed to `CALCULATE`. Fiscal years use a year-end date argument, such as `"3/31"`. Custom calendars, such as 4-4-5 retail weeks, need custom logic or calendar-based options where available.
+
+## Syntax and key APIs
+
+```text
+Sales YTD = CALCULATE ( [Revenue], DATESYTD ( DimDate[Date] ) )
+Sales FYTD = CALCULATE ( [Revenue], DATESYTD ( DimDate[Date], "3/31" ) )
+Sales LY = CALCULATE ( [Revenue], SAMEPERIODLASTYEAR ( DimDate[Date] ) )
+Sales 3M = CALCULATE ( [Revenue], DATESINPERIOD ( DimDate[Date], MAX ( DimDate[Date] ), -3, MONTH ) )
+Sales PM = CALCULATE ( [Revenue], DATEADD ( DimDate[Date], -1, MONTH ) )
+```
+
+## Simple example
+
+A monthly visual with `Sales YTD` accumulates from January, then resets the next year. For a partial current month, comparing to a full prior month misleads, so limit prior-period dates to those matching the data available.
+
+## Industry examples
+
+Finance reports use fiscal YTD and variance to prior year, and operations uses rolling 7- and 28-day windows.
+
+## Patterns and best practices
+
+- Always use a separate, complete Date table.
+- Hide future dates in charts, where sensible.
+- Build a small set of base time measures, or a calculation group.
+
+## Alternatives and trade-offs
+
+Calculation groups apply a time transformation across many measures. Pre-aggregated period tables are faster but less flexible.
+
+## Common mistakes
+
+- Using the fact table's date column.
+- Gaps in the Date table.
+- Comparing incomplete periods.
+- Not setting the fiscal year-end.
+
+## Interview questions
+
+<Question q="Why must the Date table be continuous?">Time functions shift and compare dates by position across a contiguous calendar.</Question>
+
+<Question q="How do you build a rolling 3-month measure?">Use DATESINPERIOD from the latest visible date back three months inside CALCULATE.</Question>

@@ -1,0 +1,158 @@
+---
+title: "Proxy and Route Handlers"
+summary: "Intercepting requests before routing with proxy.ts, and building API endpoints with route handlers in Next.js 16."
+level: intermediate
+section: platform
+order: 10
+tags: [proxy, middleware, route-handlers, api, cookies, headers, redirects, webhooks]
+related: [nextjs/server-actions, nextjs/request-lifecycle-and-streaming, express/routing-requests-and-responses]
+versions: "Next.js 16 renames middleware to proxy. Proxy uses the Node.js runtime only."
+tested: "Built on Next.js 16.4.5 in a scratch app."
+verified: "2026-11-09"
+docs:
+  - label: "Next.js: Proxy"
+    url: "https://nextjs.org/docs/app/getting-started/proxy"
+  - label: "Next.js: Route Handlers"
+    url: "https://nextjs.org/docs/app/getting-started/route-handlers"
+  - label: "Next.js: Version 16 upgrade guide"
+    url: "https://nextjs.org/docs/app/guides/upgrading/version-16"
+---
+
+## What it is
+
+`proxy.ts` runs before a request reaches a route, and can redirect, rewrite or modify headers. A **Route Handler** (`route.ts`) defines an HTTP endpoint using web `Request` and `Response` objects.
+
+## Why it exists
+
+Some decisions apply before rendering, such as locale redirects. Other clients, such as webhooks and mobile apps, need plain HTTP endpoints.
+
+## How it works
+
+Only one proxy file is supported per project, placed at the project root or in `src`. The `matcher` config limits which paths it runs on. Route Handlers export functions named after HTTP methods, and any other method returns 405.
+
+<Callout type="deprecated">
+The `middleware` file convention and the named `middleware` export are deprecated in Next.js 16 and replaced by `proxy`. Proxy runs on the Node.js runtime only, so keep `middleware` if you need the edge runtime.
+</Callout>
+
+## Syntax and key APIs
+
+```ts
+// proxy.ts
+import { NextResponse, type NextRequest } from "next/server";
+
+export function proxy(request: NextRequest) {
+  if (!request.cookies.has("session")) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+  return NextResponse.next();
+}
+
+export const config = { matcher: "/dashboard/:path*" };
+```
+
+```ts
+// app/api/health/route.ts
+export function GET() {
+  return Response.json({ ok: true });
+}
+```
+
+## Simple example
+
+```ts
+// app/api/users/[id]/route.ts
+export async function GET(_request: Request, ctx: RouteContext<"/api/users/[id]">) {
+  const { id } = await ctx.params;
+  return Response.json({ id });
+}
+```
+
+## Industry examples
+
+### Verify a webhook signature
+
+Read the raw body before parsing, since the signature covers exact bytes.
+
+```ts
+// app/api/webhook/route.ts
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+export async function POST(request: Request) {
+  const body = await request.text();
+  const received = Buffer.from(request.headers.get("x-signature") ?? "", "hex");
+  const expected = createHmac("sha256", process.env.WEBHOOK_SECRET!).update(body).digest();
+
+  if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
+    return new Response("Invalid signature", { status: 401 });
+  }
+
+  return Response.json({ received: true });
+}
+```
+
+### Add a request ID
+
+```ts
+import { NextResponse, type NextRequest } from "next/server";
+
+export function proxy(request: NextRequest) {
+  const headers = new Headers(request.headers);
+  headers.set("x-request-id", crypto.randomUUID());
+  return NextResponse.next({ request: { headers } });
+}
+```
+
+### Cache a Route Handler result
+
+With Cache Components, GET handlers run at request time. Put `use cache` in a helper, not in the handler body.
+
+```ts
+// app/api/products/route.ts
+import { cacheLife } from "next/cache";
+
+async function getProducts() {
+  "use cache";
+  cacheLife("hours");
+  return [{ id: 1 }];
+}
+
+export async function GET() {
+  return Response.json(await getProducts());
+}
+```
+
+## Patterns and best practices
+
+- Keep the proxy fast, and do only quick checks there.
+- Do real authorization next to the data, not only in the proxy.
+- Use `matcher` to skip static assets.
+- Validate every Route Handler input.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Redirect before rendering | Proxy | No slow work, no caching features |
+| Mutation from your own UI | Server Action | Not suited to external clients |
+| External API | Route Handler | Manual validation and errors |
+| Large standalone API | Express or similar | Separate deployment |
+
+## Common mistakes
+
+**Expecting caching in the proxy.** `use cache`, `use server` and fetch cache options have no effect there.
+
+**Relying on the proxy alone for authorization.** Treat it as an optimistic check.
+
+**Putting `use cache` directly in a Route Handler function.** Use a helper.
+
+**Trying to use the edge runtime with `proxy`.** It isn't supported.
+
+## Interview questions
+
+<Question q="What changed from middleware to proxy?">
+The file and function name changed to `proxy` in Next.js 16, and it runs on Node.js only. Functionality is otherwise the same.
+</Question>
+
+<Question q="Route Handler or Server Action?">
+Server Actions fit mutations from your own React UI. Route Handlers fit webhooks and any client that needs a normal HTTP API.
+</Question>

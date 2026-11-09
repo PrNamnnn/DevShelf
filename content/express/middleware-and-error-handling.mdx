@@ -1,0 +1,259 @@
+---
+title: "Middleware and Error Handling"
+summary: "How a request moves through the Express stack, what each form of next() does, and how to build one reliable error path in Express 5."
+level: intermediate
+section: pipeline
+order: 10
+tags: [middleware, error-handling, next, async, validation, routing, express-5]
+related: [javascript/event-loop, postgresql/explain-analyze]
+versions: "Express 5, which needs Node.js 18 or higher. Express 4 differences are noted."
+tested: "Express 5.3.0 on Node.js 24.17.0"
+verified: "2026-11-09"
+docs:
+  - label: "Express: Writing middleware"
+    url: "https://expressjs.com/en/guide/writing-middleware.html"
+  - label: "Express: Using middleware"
+    url: "https://expressjs.com/en/guide/using-middleware.html"
+  - label: "Express: Error handling"
+    url: "https://expressjs.com/en/guide/error-handling.html"
+  - label: "Express: Migrating to Express 5"
+    url: "https://expressjs.com/en/guide/migrating-5.html"
+  - label: "Express 5 API reference"
+    url: "https://expressjs.com/en/5x/api.html"
+---
+
+## What it is
+
+An Express app is mostly an ordered list of functions. Each middleware function receives the request, the response and `next`, and it can do four things: run any code, change `req` and `res`, end the response, or pass control on.
+
+## Why it exists
+
+Most endpoints share the same concerns: logging, body parsing, authentication, validation and error formatting. Middleware keeps those in one place and leaves route handlers with only their own job.
+
+## How it works
+
+Express walks the stack in registration order. Each function must either end the response or call `next()`. If it does neither, the request hangs.
+
+Passing an error changes the mode. Express skips all normal middleware and looks for the next function with four parameters. Pick a request and follow it.
+
+<MiddlewareViz />
+
+## Syntax and key APIs
+
+```js
+app.use(fn);                       // every request
+app.use("/api", fn);               // paths starting with /api
+app.get("/orders/:id", fn1, fn2);  // middleware for one route
+app.use((err, req, res, next) => {}); // error middleware
+```
+
+| Call | Result |
+| --- | --- |
+| `next()` | Continue to the next matching function |
+| `next(err)` | Skip to error-handling middleware |
+| `next("route")` | Skip the remaining callbacks of this route. Only works in `app.METHOD` and `router.METHOD` callbacks |
+| `next("router")` | Leave the current router |
+
+<Callout type="version">
+**Express 5 forwards async failures for you.** If middleware or a handler returns a promise that rejects, Express calls `next` with the rejected value. Express 4 ignored the returned promise, so handlers needed try/catch or a wrapper.
+</Callout>
+
+| Express 5 change | Before | Now |
+| --- | --- | --- |
+| Wildcards must be named | `/*` | `/*splat` |
+| Optional segments | `/:file.:ext?` | `/:file{.:ext}` |
+| `req.body` when not parsed | `{}` | `undefined` |
+| Default query parser | `extended` | `simple` |
+| `express.urlencoded` `extended` default | `true` | `false` |
+| `app.listen` errors | Thrown as an event | Passed to the callback |
+
+<Callout type="deprecated">
+Removed in Express 5: `app.del`, `req.param(name)`, `res.sendfile`, `res.send(status)`, `res.json(obj, status)` and `res.redirect("back")`. Use `app.delete`, `req.params` or `req.body` or `req.query`, `res.sendFile`, `res.sendStatus`, `res.status(code).json(obj)`, and `req.get("Referrer")` respectively.
+</Callout>
+
+## Simple example
+
+Order matters. A middleware registered after a route that responds never sees that request.
+
+```js
+import express from "express";
+
+const app = express();
+
+app.use((req, res, next) => {
+  console.log(req.method, req.originalUrl);
+  next();
+});
+
+app.get("/health", (req, res) => res.json({ ok: true }));
+
+app.listen(3000, (error) => {
+  if (error) throw error;
+});
+```
+
+## Industry examples
+
+### Give every error the same shape
+
+One error class and one final handler give clients a consistent format, including for 404s.
+
+```js
+class HttpError extends Error {
+  constructor(status, message, code) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+// After all routes:
+app.use((req, res, next) => {
+  next(new HttpError(404, "Not found", "NOT_FOUND"));
+});
+
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+
+  const status = err.status ?? err.statusCode ?? 500;
+  res.status(status).json({
+    error: {
+      code: err.code ?? err.type ?? "INTERNAL",
+      message: status < 500 ? err.message : "Internal error",
+    },
+  });
+});
+```
+
+`res.headersSent` matters. Once a response has started, you can't change its status, so delegate to the default handler, which closes the connection.
+
+### Write middleware as factories
+
+A function that returns middleware can take configuration, which is how `express.json(options)` works.
+
+```js
+const validate = (check) => (req, res, next) => {
+  const problem = check(req.body);
+  if (problem) return next(new HttpError(422, problem, "VALIDATION"));
+  next();
+};
+
+app.post(
+  "/orders",
+  validate((body) => (body?.sku ? null : "sku required")),
+  (req, res) => res.status(201).json(req.body),
+);
+```
+
+### Authenticate per route
+
+```js
+function requireAuth(req, res, next) {
+  const user = verifyToken(req.get("authorization"));
+  if (!user) return next(new HttpError(401, "Unauthorized", "AUTH"));
+
+  req.user = user;
+  next();
+}
+
+app.get("/orders/:id", requireAuth, async (req, res) => {
+  const order = await db.findOrder(req.params.id, req.user.id);
+  if (!order) throw new HttpError(404, "Order not found", "NOT_FOUND");
+  res.json(order);
+});
+```
+
+The `throw` inside the async handler needs no try/catch on Express 5. If a handler like this is slow, the query is the usual cause. See [Reading EXPLAIN ANALYZE](/postgresql/explain-analyze).
+
+### Log the final status
+
+When the logger runs, the status isn't known yet. Subscribe to the response's `finish` event to record it.
+
+```js
+function requestLogger(req, res, next) {
+  const started = performance.now();
+
+  res.on("finish", () => {
+    const ms = (performance.now() - started).toFixed(1);
+    console.log(req.method, req.originalUrl, res.statusCode, `${ms}ms`);
+  });
+
+  next();
+}
+```
+
+## Patterns and best practices
+
+Register in this order:
+
+1. Security headers and request logging
+2. Body parsers
+3. Routers, with authentication attached per router or route
+4. The 404 fallback
+5. Error-handling middleware
+
+Other habits that pay off:
+
+- Write `return next(err)` so that execution stops at that line.
+- Hide internal messages on 5xx responses, as the handler above does.
+- Set `NODE_ENV=production`. The default handler then leaves out stack traces, and Express caches view templates.
+- Know what the parser produces. In testing, malformed JSON produced an error with status 400 and `type` of `entity.parse.failed`, and a body over the default 100kb limit produced a 413.
+
+## Alternatives and trade-offs
+
+| Approach | Good for | Trade-off |
+| --- | --- | --- |
+| App-level `app.use` | Concerns that apply to every request | Runs even where it isn't needed |
+| Router-level middleware | Feature areas like `/admin` | More wiring |
+| Route-level middleware | Specific rules such as permissions | Repetition across routes |
+| Fastify | Built-in schema validation and plugin encapsulation | A different ecosystem and API |
+| NestJS | Larger teams wanting enforced structure | More abstraction to learn |
+
+Express stays simple and widely known, but it leaves project structure and validation up to you.
+
+## Common mistakes
+
+**Declaring an error handler with three parameters.** Express identifies error middleware by its four parameters. Keep `next` even when it's unused.
+
+**Registering the error handler too early.** It has to come after the routes it should handle.
+
+**Using callback APIs without forwarding errors.** Only promise rejections and synchronous throws are automatic. An error in a callback or `setTimeout` needs `next(err)`.
+
+```js
+app.get("/file", (req, res, next) => {
+  readFile("/missing", (err, data) => {
+    if (err) return next(err);
+    res.send(data);
+  });
+});
+```
+
+**Not returning a promise chain.** If the handler doesn't return it, Express doesn't know the promise exists. Return it, or end the chain with `.catch(next)`.
+
+**Reading `req.body` without a parser.** On Express 5 it's `undefined`, so `req.body.sku` throws a `TypeError`. The same happens when the `Content-Type` doesn't match the parser.
+
+**Expecting `next("route")` to work in `app.use`.** It only applies to route callbacks.
+
+**Using unnamed wildcards after upgrading.** `/*` must become `/*splat`, and the matched value is an array of path segments.
+
+## Interview questions
+
+<Question q="How does Express know a function is error-handling middleware?">
+It has four declared parameters: `(err, req, res, next)`.
+</Question>
+
+<Question q="What happens if middleware neither responds nor calls next?">
+The request stays open and the client hangs until something times out.
+</Question>
+
+<Question q="What is the difference between next('route') and next('router')?">
+`next('route')` skips the remaining callbacks of the current route and moves to the next matching route. `next('router')` skips the rest of the current router and returns control to the parent.
+</Question>
+
+<Question q="How do async errors differ between Express 4 and 5?">
+Express 5 forwards a rejected promise from a handler to the error middleware. Express 4 didn't look at the returned promise, so you needed try/catch and `next(err)` or a wrapper.
+</Question>
+
+<Question q="Why check res.headersSent in an error handler?">
+After the response has started, the status and headers can't change. Calling `next(err)` lets the default handler close the connection instead of raising a second error.
+</Question>

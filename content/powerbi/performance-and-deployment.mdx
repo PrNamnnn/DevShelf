@@ -1,0 +1,85 @@
+---
+title: "Performance, Refresh, Workspaces and Deployment"
+summary: "Diagnose slow reports with Performance Analyzer, manage refresh limits and promote content through workspaces."
+level: advanced
+section: production
+order: 2
+tags: ["performance","refresh","workspaces","deployment pipelines","incremental refresh"]
+requires: ["powerbi/platform-and-storage-modes"]
+related: ["powerbi/real-world-project","data-engineering/airflow-orchestration"]
+versions: "Power BI service as documented in November 2026"
+tested: "Not executable here. Limits checked against Microsoft documentation"
+verified: "2026-11-09"
+docs:
+  - label: "Optimization guide"
+    url: "https://learn.microsoft.com/en-us/power-bi/guidance/power-bi-optimization"
+  - label: "Data refresh"
+    url: "https://learn.microsoft.com/en-us/power-bi/connect-data/refresh-data"
+  - label: "Performance Analyzer"
+    url: "https://learn.microsoft.com/en-us/power-bi/create-reports/desktop-performance-analyzer"
+  - label: "Deployment pipelines"
+    url: "https://learn.microsoft.com/en-us/fabric/cicd/deployment-pipelines/intro-to-deployment-pipelines"
+---
+
+## What it is
+
+Operations covers making reports fast, keeping data fresh and promoting changes safely.
+
+## Why it exists
+
+A model that works on an analyst's laptop may fail under real users, real data sizes and governed release processes.
+
+## How it works
+
+**Performance Analyzer** (View ribbon) times each visual's DAX, visual display and other work. Copy the query into DAX Studio to investigate further.
+
+Optimization order is: remove unnecessary columns and rows, reduce cardinality, build a star schema, simplify measures, and limit visuals per page.
+
+| Refresh | Shared capacity | Premium, PPU or Fabric |
+| --- | --- | --- |
+| Scheduled refreshes per day | 8 | 48 |
+| Duration limit | Under 2 hours | 5 hours (XMLA endpoint can bypass it) |
+
+A full refresh can need about twice the model's memory, because old and new copies exist together. **Incremental refresh** partitions data and only reloads recent periods.
+
+**Workspaces** hold content, and **deployment pipelines** promote it through development, test and production stages.
+
+## Syntax and key APIs
+
+A refresh pipeline can be triggered through the REST API:
+
+```text
+POST https://api.powerbi.com/v1.0/myorg/groups/{groupId}/datasets/{datasetId}/refreshes
+```
+
+## Simple example
+
+A page takes 12 seconds. Performance Analyzer shows one matrix measure consuming 9 seconds. Replacing a `FILTER` over the whole fact with a column filter, and removing high-cardinality fields from the visual, brings the page under 2 seconds.
+
+## Industry examples
+
+Enterprises separate dev, test and production workspaces, version models in PBIP format with Git integration, and monitor refresh failures.
+
+## Patterns and best practices
+
+- Reduce high-cardinality columns such as raw timestamps.
+- Avoid many visuals loading at once.
+- Use incremental refresh for large history.
+- Use the Apply button on slicers for expensive pages.
+
+## Alternatives and trade-offs
+
+Aggregation tables accelerate DirectQuery. Direct Lake reduces refresh time on Fabric. Warehouse pre-aggregation can lower model complexity.
+
+## Common mistakes
+
+- Optimizing DAX before removing unneeded data.
+- Scheduling all refreshes for the same hour.
+- Publishing straight to production.
+- Importing unneeded GUID columns.
+
+## Interview questions
+
+<Question q="How would you diagnose a slow visual?">Use Performance Analyzer to determine if the time is in DAX, visual rendering or a DirectQuery source, then investigate the query.</Question>
+
+<Question q="Why might a refresh run out of memory?">A full refresh keeps both old and new data until completion.</Question>

@@ -1,0 +1,97 @@
+---
+title: "Conversion, Retention and Churn"
+summary: "Compute the core product rates precisely, including denominators, windows and the differences between user and revenue churn."
+level: fundamental
+section: business
+order: 2
+tags: ["conversion","retention","churn","product analytics"]
+requires: ["statistics/kpis-and-north-star"]
+related: ["statistics/funnel-analysis","statistics/cohort-and-retention-curves","statistics/revenue-ltv-cac"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "pandas: Time series"
+    url: "https://pandas.pydata.org/docs/user_guide/timeseries.html"
+  - label: "PostgreSQL: Aggregate Functions"
+    url: "https://www.postgresql.org/docs/current/functions-aggregate.html"
+---
+
+## What it is
+
+- **Conversion rate**: the share of eligible units completing a goal.
+- **Retention rate**: the share of a defined group still active after some period.
+- **Churn rate**: the share lost in a period, usually 1 − retention.
+
+## Why it exists
+
+Growth built on poor retention is expensive, since new users simply replace those leaving. Small rate changes compound substantially over time.
+
+## How it works
+
+The denominator is most of the definition. Conversion may be per visitor, per session or per product view. Retention can be classic (active on exactly day N), rolling (active on day N or later), or bracket (active in a range).
+
+Customer churn counts accounts. Revenue churn weights by money. **Net revenue retention** includes expansion, so it can exceed 100%.
+
+Constant monthly churn has a simple consequence: expected lifetime is 1 ÷ churn. Monthly churn of 5% implies an average lifetime of 20 months, and annual retention of 0.95¹² ≈ 54%.
+
+## Intuition and formula
+
+<Formula>churn rate = customers lost in period / customers at start of period</Formula>
+
+## Worked example
+
+A subscription product starts January with 1,000 customers. 50 cancel and 120 join. Customer churn is 5%. New joiners are excluded from the denominator. Using the ending customer count would give a misleading rate.
+
+## Python
+
+```python
+start, lost, new = 1_000, 50, 120
+churn = lost / start
+assert churn == 0.05
+assert 1 / churn == 20
+assert round((1 - churn) ** 12, 2) == 0.54
+assert start - lost + new == 1_070
+```
+
+## SQL
+
+```sql
+WITH s(customer, m1, m2) AS (
+  VALUES ('a', true, true), ('b', true, false), ('c', true, true), ('d', false, true)
+)
+SELECT count(*) FILTER (WHERE m1) AS start_customers,
+       count(*) FILTER (WHERE m1 AND NOT m2) AS lost,
+       round(count(*) FILTER (WHERE m1 AND NOT m2)::numeric / count(*) FILTER (WHERE m1), 3) AS churn
+FROM s;
+-- rows: [{"start_customers":3,"lost":1,"churn":"0.333"}]
+```
+
+## Excel or Power BI
+
+Use `COUNTIFS` with date ranges in Excel, and, in DAX, `DISTINCTCOUNT` with `CALCULATE` over date filters. Keep the denominator's filter logic as a separate measure.
+
+## In industry
+
+Subscription businesses report monthly or annual churn, consumer apps report D1, D7 and D30 retention, and marketplaces report repeat purchase rates.
+
+## Assumptions and limitations
+
+Constant-churn formulas rarely hold, since new users churn faster. Annual contracts delay visible churn. Definitions of "active" must match the product's natural use cycle.
+
+## Common mistakes
+
+- Including new customers in the churn denominator.
+- Comparing rates built with different windows.
+- Reporting logo churn while revenue churn tells another story.
+- Counting incomplete windows.
+
+## Alternatives
+
+Survival analysis handles varying tenure and incomplete observation, and cohort tables show how churn depends on age.
+
+## Interview questions
+
+<Question q="Why can net revenue retention exceed 100%?">Expansion revenue from existing customers can outweigh losses from churn and contraction.</Question>
+
+<Question q="Your churn improved but revenue fell. How?">Perhaps fewer small accounts left while larger ones did, or remaining customers downgraded.</Question>

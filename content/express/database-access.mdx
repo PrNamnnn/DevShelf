@@ -1,0 +1,162 @@
+---
+title: "Database Access and Transactions"
+summary: "Connecting safely with pools, parameterized queries, transactions across steps, and avoiding N+1 queries."
+level: intermediate
+section: data
+order: 10
+tags: [database, postgres, connection-pool, transactions, n-plus-one, sql-injection]
+requires: [express/middleware-and-error-handling]
+related: ["postgresql/transactions-and-mvcc", "postgresql/explain-analyze", "mongodb/python-node-and-mongoose"]
+versions: "Express 5 with a PostgreSQL client."
+tested: "Queries run on PGlite (PostgreSQL 18.6) with Express 5.3.0. Connection pooling wasn't run."
+verified: "2026-11-09"
+docs:
+  - label: "node-postgres: Pooling"
+    url: "https://node-postgres.com/features/pooling"
+  - label: "node-postgres: Transactions"
+    url: "https://node-postgres.com/features/transactions"
+  - label: "Express: Database integration"
+    url: "https://expressjs.com/en/guide/database-integration.html"
+---
+
+## What it is
+
+An Express app talks to a database through a client library. A **pool** reuses a limited set of connections across requests.
+
+## Why it exists
+
+Opening a connection for every request is slow, and a database accepts a finite number of them.
+
+## How it works
+
+<LanesViz
+  title="A request using a pooled transaction"
+  actors={["Handler", "Pool", "PostgreSQL"]}
+  steps={[
+    { from: 0, to: 1, label: "connect()", note: "The handler borrows one connection for the transaction." },
+    { from: 1, to: 2, label: "BEGIN", note: "Every statement in a transaction must use the same connection." },
+    { from: 0, to: 2, label: "UPDATE, INSERT", note: "Parameters are sent separately from the SQL text." },
+    { from: 1, to: 2, label: "COMMIT or ROLLBACK", note: "Any error triggers a rollback." },
+    { from: 0, to: 1, label: "release()", note: "The connection returns to the pool in a finally block." },
+  ]}
+/>
+
+## Syntax and key APIs
+
+```javascript
+const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 10 });
+
+const { rows } = await pool.query("SELECT * FROM users WHERE id = $1", [id]);
+
+const client = await pool.connect();
+try {
+  await client.query("BEGIN");
+  await client.query("COMMIT");
+} catch (error) {
+  await client.query("ROLLBACK");
+  throw error;
+} finally {
+  client.release();
+}
+```
+
+## Simple example
+
+```js
+import assert from "node:assert";
+import express from "express";
+import request from "supertest";
+import { PGlite } from "@electric-sql/pglite";
+
+const db = new PGlite();
+await db.exec("CREATE TABLE users (id int PRIMARY KEY, name text); INSERT INTO users VALUES (1, 'Ada');");
+
+const app = express();
+app.get("/users/:id", async (req, res) => {
+  const { rows } = await db.query("SELECT name FROM users WHERE id = $1", [Number(req.params.id)]);
+  if (rows.length === 0) return res.sendStatus(404);
+  res.json(rows[0]);
+});
+
+assert.equal((await request(app).get("/users/1")).body.name, "Ada");
+assert.equal((await request(app).get("/users/2")).status, 404);
+await db.close();
+```
+
+## Industry examples
+
+### Reuse transaction boilerplate
+
+```js
+import assert from "node:assert";
+import { PGlite } from "@electric-sql/pglite";
+
+const db = new PGlite();
+await db.exec("CREATE TABLE accounts (id int PRIMARY KEY, balance int CHECK (balance >= 0)); INSERT INTO accounts VALUES (1, 10), (2, 0);");
+
+async function transfer(amount) {
+  await db.transaction(async (tx) => {
+    await tx.query("UPDATE accounts SET balance = balance + $1 WHERE id = 2", [amount]);
+    await tx.query("UPDATE accounts SET balance = balance - $1 WHERE id = 1", [amount]);
+  });
+}
+
+await assert.rejects(transfer(50));
+const { rows } = await db.query("SELECT balance FROM accounts WHERE id = 2");
+assert.equal(rows[0].balance, 0);
+await db.close();
+```
+
+The second update breaks the `CHECK`, and the first is rolled back too.
+
+### Replace N+1 queries with one
+
+```js
+import assert from "node:assert";
+import { PGlite } from "@electric-sql/pglite";
+
+const db = new PGlite();
+await db.exec("CREATE TABLE orders (id int, customer int); INSERT INTO orders VALUES (1, 7), (2, 8), (3, 7);");
+
+const ids = [7, 8];
+const { rows } = await db.query("SELECT customer, count(*)::int AS n FROM orders WHERE customer = ANY($1) GROUP BY customer ORDER BY customer", [ids]);
+
+assert.deepEqual(rows, [{ customer: 7, n: 2 }, { customer: 8, n: 1 }]);
+await db.close();
+```
+
+## Patterns and best practices
+
+- Use one pool per process, created at startup.
+- Always use parameters, never string concatenation.
+- Release connections in `finally`.
+- Keep transactions short, and never call external services within one.
+- Close the pool during graceful shutdown.
+
+## Alternatives and trade-offs
+
+| Option | Strength | Trade-off |
+| --- | --- | --- |
+| Raw SQL client | Full control | Manual mapping |
+| Query builder | Composable | Another API |
+| ORM | Fast development | Generated queries need review |
+
+## Common mistakes
+
+**Running `BEGIN` through `pool.query`.** Later statements may use another connection.
+
+**Forgetting to release a client.** The pool runs out and requests hang.
+
+**A query per list item.** It's the N+1 problem.
+
+**Interpolating user input into SQL.** That's injection.
+
+## Interview questions
+
+<Question q="Why use a connection pool?">
+Connections are costly and limited. A pool reuses a bounded number of them.
+</Question>
+
+<Question q="What is the N+1 problem?">
+Running one query for a list and another per item. Fix it with a join or a batched `IN` or `ANY` query.
+</Question>

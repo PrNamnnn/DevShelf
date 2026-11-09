@@ -1,0 +1,164 @@
+---
+title: "Joins, APPLY and Set Operations"
+summary: "Combining data in T-SQL, per-row logic with CROSS and OUTER APPLY, set operators, and safe use of MERGE."
+level: fundamental
+section: querying
+order: 10
+tags: [joins, cross-apply, outer-apply, union, except, intersect, merge, string_agg]
+related: [sqlserver/tsql-and-ssms-basics, sqlserver/window-functions-and-ctes, postgresql/queries-and-joins]
+versions: "STRING_AGG needs SQL Server 2017+."
+tested: "SQL Server 2025 Developer Edition, using temporary tables"
+verified: "2026-11-09"
+docs:
+  - label: "T-SQL: FROM clause and APPLY"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/queries/from-transact-sql"
+  - label: "T-SQL: MERGE"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/statements/merge-transact-sql"
+  - label: "T-SQL: STRING_AGG"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/functions/string-agg-transact-sql"
+  - label: "T-SQL: Set operators"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/language-elements/set-operators-except-and-intersect-transact-sql"
+---
+
+## What it is
+
+Joins combine tables by a condition. `APPLY` runs a table expression once for each row on its left. Set operators combine whole result sets.
+
+## Why it exists
+
+Joins can't reference a left row inside a right subquery. `APPLY` can, which makes "top N per group" and calling table-valued functions straightforward.
+
+## How it works
+
+`CROSS APPLY` drops a left row when the right side returns nothing, like an inner join. `OUTER APPLY` keeps it with NULLs, like a left join.
+
+<StepFlow
+  title="CROSS APPLY for the latest order"
+  code={["SELECT c.name, x.total", "FROM customers c", "CROSS APPLY (", "  SELECT TOP (1) total FROM orders o", "  WHERE o.customer_id = c.id", "  ORDER BY o.id DESC", ") x;"]}
+  nodes={["left row", "evaluate right side", "row returned?", "output or drop"]}
+  steps={[
+    { line: 1, active: [0], note: "Take the left row for Ada.", state: { row: "Ada" } },
+    { line: 4, active: [1], note: "The subquery runs with c.id available.", state: { "right rows": "1" } },
+    { line: 6, active: [2, 3], note: "One row came back, so Ada appears with her latest total.", state: { output: "Ada, 20" } },
+    { line: 1, active: [0, 1], note: "Now Bo. The subquery finds no orders.", state: { row: "Bo", "right rows": "0" } },
+    { line: 2, active: [3], note: "CROSS APPLY drops Bo. OUTER APPLY would return Bo with NULL." },
+  ]}
+/>
+
+## Syntax and key APIs
+
+| Operator | Result |
+| --- | --- |
+| `UNION` | Combined, duplicates removed |
+| `UNION ALL` | Combined, faster |
+| `INTERSECT` | In both |
+| `EXCEPT` | In the first but not the second |
+
+## Simple example
+
+```sql
+CREATE TABLE #customers (id int PRIMARY KEY, name varchar(20));
+CREATE TABLE #orders (id int PRIMARY KEY, customer_id int, total int);
+
+INSERT #customers VALUES (1, 'Ada'), (2, 'Bo');
+INSERT #orders VALUES (1, 1, 10), (2, 1, 20);
+
+SELECT c.name, x.total
+FROM #customers c
+CROSS APPLY (
+  SELECT TOP (1) o.total FROM #orders o
+  WHERE o.customer_id = c.id
+  ORDER BY o.id DESC
+) x;
+-- output: Ada|20
+```
+
+## Industry examples
+
+### Keep customers without orders
+
+```sql
+SELECT c.name, x.total
+FROM #customers c
+OUTER APPLY (
+  SELECT TOP (1) o.total FROM #orders o WHERE o.customer_id = c.id ORDER BY o.id DESC
+) x
+ORDER BY c.id;
+-- output: Ada|20
+-- output: Bo|NULL
+```
+
+### Build a delimited list
+
+NULLs are ignored, and no separator is added at the end.
+
+```sql
+SELECT STRING_AGG(name, ', ') WITHIN GROUP (ORDER BY name)
+FROM #customers;
+-- output: Ada, Bo
+```
+
+### Find differences between tables
+
+`EXCEPT` compares NULLs as equal, making it handy for reconciliation.
+
+```sql
+SELECT id FROM (VALUES (1), (2), (NULL)) a(id)
+EXCEPT
+SELECT id FROM (VALUES (1), (NULL)) b(id);
+-- output: 2
+```
+
+### Synchronize tables with care
+
+Microsoft warns that `MERGE` can cause concurrency issues at scale and recommends thorough testing. A semicolon terminator is required.
+
+```sql
+CREATE TABLE #target (id int PRIMARY KEY, v int);
+INSERT #target VALUES (1, 1);
+
+MERGE #target AS t
+USING (VALUES (1, 9), (2, 5)) AS s(id, v)
+ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET v = s.v
+WHEN NOT MATCHED THEN INSERT (id, v) VALUES (s.id, s.v);
+
+SELECT SUM(v) FROM #target;
+-- output: 14
+```
+
+## Patterns and best practices
+
+- Use `UNION ALL` unless you need deduplication.
+- Use `APPLY` for top-N-per-group with a supporting index.
+- Under heavy concurrency, prefer separate `UPDATE` and `INSERT` logic to `MERGE`.
+- Add `HOLDLOCK` to an upsert `MERGE` where unique keys may be both inserted and updated.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Per-row subquery | `APPLY` | Can be a nested loop |
+| Latest per group across all rows | `ROW_NUMBER` | Sorts whole partitions |
+| One-direction sync | Separate statements | More code |
+| Multi-action sync | `MERGE` | Concurrency complexity |
+
+## Common mistakes
+
+**Filtering a target in `MERGE`'s `ON` clause.** Microsoft warns against this, and it can give unexpected results.
+
+**Assuming `MERGE` is atomic against races.** Without `HOLDLOCK`, concurrent sessions can still collide.
+
+**Using `UNION` by habit.** It adds a costly duplicate-removal step.
+
+**Forgetting the MERGE semicolon.** Error 10713 is raised without one.
+
+## Interview questions
+
+<Question q="CROSS APPLY versus INNER JOIN?">
+`APPLY` lets the right side reference the left row, which suits functions and per-row subqueries with `TOP`.
+</Question>
+
+<Question q="UNION versus UNION ALL?">
+`UNION` removes duplicates, which adds work. `UNION ALL` returns everything.
+</Question>

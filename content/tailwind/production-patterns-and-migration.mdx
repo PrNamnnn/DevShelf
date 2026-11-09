@@ -1,0 +1,166 @@
+---
+title: "Production Patterns and Migrating from v3"
+summary: "Keeping large Tailwind codebases maintainable, component variants, and each breaking change when moving to v4."
+level: advanced
+section: production
+order: 10
+tags: [components, variants, migration, v3, v4, upgrade, maintainability, accessibility]
+related: [tailwind/custom-utilities-and-directives, react/components-jsx-and-props]
+versions: "Migration from Tailwind v3 to v4. The upgrade tool needs Node.js 20+."
+tested: "v4 class output compiled with Tailwind 4.3.5. The upgrade tool wasn't run."
+verified: "2026-11-09"
+docs:
+  - label: "Tailwind: Upgrade guide"
+    url: "https://tailwindcss.com/docs/upgrade-guide"
+  - label: "Tailwind: Styling with utility classes"
+    url: "https://tailwindcss.com/docs/styling-with-utility-classes"
+  - label: "Tailwind: Detecting classes in source files"
+    url: "https://tailwindcss.com/docs/detecting-classes-in-source-files"
+---
+
+## What it is
+
+This chapter covers organizing Tailwind at scale, and the concrete changes needed to move a v3 project to v4.
+
+## Why it exists
+
+Long class lists stay manageable only with component boundaries, and v4 changed defaults enough that silent visual regressions are possible.
+
+## How it works
+
+Reuse belongs in your components or loops rather than CSS abstractions. For a component with options, map each option to complete class strings, so the scanner can see them.
+
+v4 moved configuration into CSS, and several utilities shifted one step along their scale.
+
+| v3 | v4 |
+| --- | --- |
+| `shadow-sm` | `shadow-xs` |
+| `shadow` | `shadow-sm` |
+| `rounded-sm` | `rounded-xs` |
+| `rounded` | `rounded-sm` |
+| `blur-sm` | `blur-xs` |
+| `blur` | `blur-sm` |
+| `outline-none` | `outline-hidden` |
+| `ring` | `ring-3` |
+| `bg-opacity-50` | `bg-black/50` |
+| `flex-shrink-0` | `shrink-0` |
+| `flex-grow` | `grow` |
+| `!font-bold` | `font-bold!` |
+
+## Syntax and key APIs
+
+```bash
+npx @tailwindcss/upgrade
+```
+
+```css
+/* v3 */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* v4 */
+@import "tailwindcss";
+```
+
+Behaviour changes worth checking:
+
+| Change | Restore if needed |
+| --- | --- |
+| Default border color is `currentColor`, was gray-200 | Set in `@layer base` |
+| `ring` width 1px, was 3px, and color `currentColor` | `--default-ring-width`, `--default-ring-color` |
+| Buttons use `cursor: default` | Add `cursor-pointer` |
+| Hover only applies on hover-capable devices | `@custom-variant hover (&:hover);` |
+| Prefix format is `tw:flex` | Update classes |
+
+## Simple example
+
+```css
+@import "tailwindcss";
+
+@layer base {
+  *, ::after, ::before, ::backdrop, ::file-selector-button {
+    border-color: var(--color-gray-200, currentColor);
+  }
+}
+```
+
+## Industry examples
+
+### A variant map for buttons
+
+```tsx
+const base = "inline-flex items-center rounded-md font-medium focus-visible:outline-2";
+
+const intent = {
+  primary: "bg-sky-600 text-white hover:bg-sky-700",
+  ghost: "text-gray-700 hover:bg-gray-100",
+};
+
+const size = { sm: "px-2 py-1 text-sm", md: "px-4 py-2" };
+
+type Props = {
+  variant?: keyof typeof intent;
+  scale?: keyof typeof size;
+} & React.ButtonHTMLAttributes<HTMLButtonElement>;
+
+export function Button({ variant = "primary", scale = "md", className = "", ...rest }: Props) {
+  return <button className={`${base} ${intent[variant]} ${size[scale]} ${className}`} {...rest} />;
+}
+```
+
+### Accessible focus and motion
+
+```html
+<a class="rounded focus-visible:outline-2 focus-visible:outline-offset-2 motion-safe:transition-colors" href="/">
+  Home
+</a>
+```
+
+### Migrate a container config
+
+The `container` config option was removed, so customize with `@utility`.
+
+```css
+@import "tailwindcss";
+
+@utility container {
+  margin-inline: auto;
+  padding-inline: 2rem;
+}
+```
+
+## Patterns and best practices
+
+- Extract components, then loops, before reaching for `@apply`.
+- Merge caller-supplied classes deliberately, because the later class in the attribute doesn't necessarily win.
+- Review the visual diff of every page after upgrading.
+- Lint for removed classes in CI.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Simple variants | Object maps | Manual |
+| Complex variants | A variants library | Dependency |
+| Resolve conflicting classes | A class-merge library | Runtime cost |
+
+## Common mistakes
+
+**Assuming the upgrade tool catches everything.** Dynamic strings and CSS files can need manual attention.
+
+**Leaving `border` without a color.** It now uses the text color.
+
+**Expecting `theme()` and `resolveConfig` to remain.** `theme()` is deprecated, and `resolveConfig` was removed. Use CSS variables.
+
+**Using Sass, Less or Stylus with v4.** They aren't supported.
+
+## Interview questions
+
+<Question q="What is the main configuration change in v4?">
+Configuration moved to CSS with `@import "tailwindcss"` and `@theme`, and a JavaScript config has to be loaded explicitly with `@config`.
+</Question>
+
+<Question q="Why can later classes fail to override earlier ones?">
+CSS precedence depends on the generated stylesheet's order, not on the order of names in the class attribute.
+</Question>

@@ -1,0 +1,89 @@
+---
+title: "Continuous Distributions and the Normal Curve"
+summary: "Uniform, exponential, normal and standard normal distributions, with densities, areas and z-tables made intuitive."
+level: intermediate
+section: probability
+order: 3
+tags: ["normal distribution","standard normal","uniform","exponential"]
+requires: ["statistics/random-variables-and-discrete-distributions"]
+related: ["statistics/sampling-distributions-clt","statistics/t-chi-square-f-distributions"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "SciPy: norm"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.norm.html"
+  - label: "SciPy: expon"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.expon.html"
+---
+
+## What it is
+
+A continuous random variable is described by a **probability density function**. Probability is the area under the curve across a range, and the chance of any exact value is zero.
+
+## Why it exists
+
+Durations, amounts and measurement errors are modelled more naturally as continuous quantities. The normal distribution also appears through the Central Limit Theorem when averages are involved.
+
+## How it works
+
+<DistributionExplorer only={["normal", "uniform", "exponential"]} title="Continuous distributions" />
+
+| Distribution | Models | Mean | Variance |
+| --- | --- | --- | --- |
+| Uniform(a, b) | Equally likely values in a range | (a + b)/2 | (b − a)²/12 |
+| Exponential(λ) | Time between independent events | 1/λ | 1/λ² |
+| Normal(μ, σ) | Sums of many small effects | μ | σ² |
+
+A density value can exceed 1, since only area must total 1. The exponential distribution is **memoryless**: having waited already doesn't change the distribution of the remaining wait. Standardizing with z = (x − μ)/σ turns any normal variable into the standard normal.
+
+## Intuition and formula
+
+<Formula>f(x) = (1 / (σ√(2π))) · exp(−(x − μ)² / (2σ²))</Formula>
+
+About 68% of a normal distribution lies within 1σ, 95% within 1.96σ, and 99.7% within 3σ.
+
+## Worked example
+
+Daily orders are approximately normal with mean 500 and SD 80. For 600 orders, z = 1.25, so the chance of exceeding 600 is 10.6%. If customers arrive at 2 per minute, the chance of a gap longer than 2 minutes is e⁻⁴ = 1.8%.
+
+## Python
+
+```python
+from scipy import stats
+
+assert round(stats.norm.sf(600, loc=500, scale=80), 3) == 0.106
+assert round(stats.norm.cdf(1.96), 3) == 0.975
+assert round(stats.expon.sf(2, scale=1 / 2), 4) == 0.0183
+```
+
+<Callout type="warning">SciPy's exponential distribution uses `scale`, which is 1/λ, instead of the rate λ.</Callout>
+
+## Excel or Power BI
+
+`NORM.DIST(x, mean, sd, TRUE)` gives a cumulative probability, `NORM.INV(p, mean, sd)` finds a quantile, and `NORM.S.INV(0.975)` returns 1.96. `EXPON.DIST` takes the rate λ.
+
+## In industry
+
+Process control limits, confidence intervals and many tests depend on normal approximations. Exponential waiting times are the basis of simple queueing models, used in staffing and capacity planning.
+
+## Assumptions and limitations
+
+Few raw business metrics are normal. Tails are often heavier, so a normal model underestimates extreme events. Rates vary in time, so exponential waits typically only apply within short, stable windows.
+
+## Common mistakes
+
+- Treating density height as probability.
+- Assuming a variable is normal because it's continuous.
+- Mixing up rate and scale.
+- Applying the 68-95-99.7 rule to skewed data.
+
+## Alternatives
+
+Log-normal models fit positive skewed amounts, Weibull models flexible waiting times, and empirical distributions or a bootstrap avoid parametric assumptions.
+
+## Interview questions
+
+<Question q="What does it mean that the exponential distribution is memoryless?">The probability of waiting a further t units doesn't depend on how long you've already waited.</Question>
+
+<Question q="Why does the normal distribution appear so often?">Because averages and sums of many independent small effects tend toward it, as the Central Limit Theorem describes.</Question>

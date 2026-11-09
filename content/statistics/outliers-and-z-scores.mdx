@@ -1,0 +1,114 @@
+---
+title: "Outliers and Z-Scores"
+summary: "Detect unusual values with z-scores, modified z-scores and IQR fences, then decide what they mean before removing anything."
+level: fundamental
+section: descriptive
+order: 5
+tags: ["outliers","z-score","IQR fences","robust statistics"]
+requires: ["statistics/quantiles-and-five-number-summary"]
+related: ["statistics/specialized-analyses","statistics/inconsistent-data-and-validation"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "SciPy: zscore"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.zscore.html"
+  - label: "NIST: Detection of outliers"
+    url: "https://www.itl.nist.gov/div898/handbook/eda/section3/eda35h.htm"
+---
+
+## What it is
+
+An **outlier** is an observation far from the rest. A **z-score** states how many standard deviations a value lies from the mean, which puts variables on a common scale.
+
+## Why it exists
+
+Extreme values distort means, variances and regression slopes. They can also be the most important rows in the file, such as a fraud attempt, an enterprise deal or a production incident. Detection flags them, and judgement decides what they are.
+
+## How it works
+
+Three common rules, with different strengths:
+
+| Rule | Flag when | Weakness |
+| --- | --- | --- |
+| Z-score | Absolute z above 3 | Outliers inflate the mean and SD that define it |
+| Tukey fences | Below Q1 − 1.5·IQR or above Q3 + 1.5·IQR | Flags many values on skewed data |
+| Modified z | 0.6745·(x − median) ÷ MAD above 3.5 | MAD is 0 if most values are identical |
+
+## Intuition and formula
+
+<Formula>z = (x − x̄) / s</Formula>
+
+<Formula>modified z = 0.6745 (x − median) / MAD</Formula>
+
+MAD is the median absolute deviation. The constant 0.6745 makes it comparable to a z-score on normal data.
+
+## Worked example
+
+In the order sample, 2,900 has z = 2.84, below the common cutoff of 3, because that one value inflated the standard deviation to 766.5. This is **masking**: the outlier hides itself. The fences are 383.75 and 583.75, which flag it easily, and the modified z is 59.2, which is unmistakable.
+
+Next, investigate. If the order is a real corporate purchase, keep it and possibly analyze B2B separately. If it was a test or a data-entry error, fix or exclude it, and record the rule.
+
+## Python
+
+```python
+import numpy as np
+from scipy import stats
+
+orders = np.array([420, 510, 480, 455, 530, 495, 2900, 470, 505, 440])
+
+z = stats.zscore(orders, ddof=1)
+assert round(z[6], 2) == 2.84
+
+q1, q3 = np.percentile(orders, [25, 75])
+iqr = q3 - q1
+flags = (orders < q1 - 1.5 * iqr) | (orders > q3 + 1.5 * iqr)
+assert orders[flags].tolist() == [2900]
+
+median = np.median(orders)
+mad = np.median(np.abs(orders - median))
+assert round(0.6745 * (2900 - median) / mad, 1) == 59.2
+```
+
+## SQL
+
+```sql
+WITH bounds AS (
+  SELECT percentile_cont(0.25) WITHIN GROUP (ORDER BY v) AS q1,
+         percentile_cont(0.75) WITHIN GROUP (ORDER BY v) AS q3
+  FROM unnest(ARRAY[420, 510, 480, 455, 530, 495, 2900, 470, 505, 440]) AS v
+)
+SELECT v
+FROM unnest(ARRAY[420, 510, 480, 455, 530, 495, 2900, 470, 505, 440]) AS v, bounds
+WHERE v > q3 + 1.5 * (q3 - q1) OR v < q1 - 1.5 * (q3 - q1);
+-- rows: [{"v":2900}]
+```
+
+## Excel or Power BI
+
+`STANDARDIZE(x, mean, sd)` returns a z-score, and `QUARTILE.INC` builds fences. Combine them with conditional formatting to highlight rows for review. In Power BI, the Analytics pane on scatter charts and the anomaly detection feature on line charts can highlight unusual values.
+
+## In industry
+
+Payment systems treat outliers as signals to review. Revenue reporting often caps or separates enterprise deals so one contract doesn't dominate a trend. Experimentation platforms frequently winsorize continuous metrics at a high percentile to reduce variance.
+
+## Assumptions and limitations
+
+Z-score cutoffs assume approximate normality. With many observations some extreme values are expected, since around 0.27% of a normal distribution lies beyond three standard deviations. Univariate rules miss rows that are only unusual in combination.
+
+## Common mistakes
+
+- Removing outliers automatically.
+- Applying rules once, recomputing, and repeating until the data looks clean.
+- Applying normal-based cutoffs to very skewed metrics.
+- Removing values after seeing which choice gives the desired test result.
+
+## Alternatives
+
+Winsorizing caps extremes, and robust regression reduces their influence. A log transform may make a value unremarkable. For multivariate detection, use Mahalanobis distance or Isolation Forest.
+
+## Interview questions
+
+<Question q="Why can the z-score fail to detect an outlier?">The extreme value inflates the standard deviation used to compute it. Median and MAD based scores don't suffer the same masking.</Question>
+
+<Question q="When should you keep an outlier?">When it's a valid observation of the process you're studying. Separating or modelling it may be better than removal, and the decision should be documented.</Question>

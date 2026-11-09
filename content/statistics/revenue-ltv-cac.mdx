@@ -1,0 +1,104 @@
+---
+title: "Revenue, AOV, Customer Lifetime Value and CAC"
+summary: "Calculate revenue metrics, a margin-based CLV, CAC and payback period, and avoid the most common errors in unit economics."
+level: intermediate
+section: business
+order: 3
+tags: ["revenue","AOV","CLV","CAC","payback"]
+requires: ["statistics/conversion-retention-churn"]
+related: ["statistics/growth-accounting-and-decomposition","excel/dashboards-and-business-analysis"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "Excel: NPV function"
+    url: "https://support.microsoft.com/en-us/office/npv-function-8672cb67-2576-4d07-b67b-ac28acf2a568"
+  - label: "pandas: Group by"
+    url: "https://pandas.pydata.org/docs/user_guide/groupby.html"
+---
+
+## What it is
+
+- **AOV**: revenue ÷ orders.
+- **ARPU**: revenue ÷ users.
+- **CAC**: acquisition spend ÷ new customers.
+- **CLV (or LTV)**: the expected margin from a customer over the relationship.
+- **Payback**: months needed to recover CAC from margin.
+
+## Why it exists
+
+Revenue alone doesn't reveal whether growth is profitable. Unit economics connect marketing, retention and pricing.
+
+## How it works
+
+Use contribution margin, not revenue, in CLV. Calculate CLV by acquisition cohort and channel. Include all relevant costs in fully loaded CAC.
+
+An LTV:CAC ratio of 3 is often quoted as healthy. It's a rule of thumb, and it doesn't replace looking at payback and cash.
+
+## Intuition and formula
+
+For retention r per period, margin m per period, discount rate d, with the first payment arriving after one period:
+
+<Formula>CLV = m · r / (1 + d − r)</Formula>
+
+<Formula>CAC payback = CAC / monthly margin per customer</Formula>
+
+## Worked example
+
+Monthly margin is ₹40 and retention is 0.8. Without discounting, CLV = 40 × 0.8 ÷ 0.2 = ₹160. With 1% monthly discounting it's ₹152.38.
+
+₹120,000 of spend acquired 400 customers, so CAC is ₹300. With ₹35 monthly margin, payback is 8.6 months. ₹250,000 from 1,000 orders gives an AOV of ₹250.
+
+## Python
+
+```python
+margin, retention = 40, 0.8
+clv = margin * retention / (1 - retention)
+discounted = margin * retention / (1 + 0.01 - retention)
+assert round(clv, 2) == 160
+assert round(discounted, 2) == 152.38
+
+cac = 120_000 / 400
+assert cac == 300
+assert round(cac / 35, 1) == 8.6
+assert 250_000 / 1_000 == 250
+```
+
+## SQL
+
+```sql
+SELECT channel,
+       round(spend / customers, 2) AS cac
+FROM (VALUES ('search', 60000.0, 300), ('social', 60000.0, 100)) AS t(channel, spend, customers)
+ORDER BY cac;
+-- rows: [{"channel":"search","cac":"200.00"},{"channel":"social","cac":"600.00"}]
+```
+
+## Excel or Power BI
+
+Use `NPV` for discounted cash flows, and a data table to show CLV sensitivity to retention and margin. In DAX, CAC is a `DIVIDE` of spend and distinct new customers.
+
+## In industry
+
+Investors and finance teams use cohort CLV, and marketing budgets are allocated by channel payback. Short payback protects cash in tight periods.
+
+## Assumptions and limitations
+
+Constant retention overstates or understates true value. Young cohorts need projections. Attributing CAC across channels is itself uncertain.
+
+## Common mistakes
+
+- Using revenue instead of margin.
+- Blended CAC hiding an unprofitable channel.
+- Using a long-run CLV for a young business.
+- Averaging AOV across segments without weights.
+
+## Alternatives
+
+Survival or BG/NBD models estimate purchasing for non-contractual businesses, and uplift models value the incremental effect of marketing.
+
+## Interview questions
+
+<Question q="Why is margin better than revenue in CLV?">Revenue ignores the cost of delivering value, and can make an unprofitable customer look valuable.</Question>
+
+<Question q="What's wrong with blended CAC?">It averages paid and organic customers, hiding the actual cost of the marginal customer.</Question>

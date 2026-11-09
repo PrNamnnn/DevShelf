@@ -1,0 +1,205 @@
+---
+title: "Classes and the Data Model"
+summary: "How attribute lookup, special methods, inheritance and dataclasses let your objects work with Python's own syntax."
+level: intermediate
+section: oop
+order: 10
+tags: [classes, oop, dunder, data-model, dataclasses, inheritance, mro, properties, slots]
+related: [python/functions-and-scope, python/decorators-and-context-managers]
+versions: "dataclass slots and kw_only need Python 3.10+."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python tutorial: Classes"
+    url: "https://docs.python.org/3/tutorial/classes.html"
+  - label: "Python reference: Data model"
+    url: "https://docs.python.org/3/reference/datamodel.html"
+  - label: "Python library: dataclasses"
+    url: "https://docs.python.org/3/library/dataclasses.html"
+  - label: "Python HOWTO: Method resolution order"
+    url: "https://docs.python.org/3/howto/mro.html"
+---
+
+## What it is
+
+A class is an object that creates instances and holds their shared behaviour. The **data model** is the set of special methods, such as `__len__` and `__eq__`, that connects your classes to syntax like `len(x)` and `x == y`.
+
+## Why it exists
+
+Classes group state with the operations that keep it valid. Special methods let a custom type behave like a built-in one, so callers don't need to learn a new interface.
+
+## How it works
+
+Reading `obj.name` looks through the instance, then the class, then its bases in **method resolution order** (MRO). Functions on a class become bound methods when accessed through an instance. That's why `self` is passed automatically.
+
+The MRO comes from C3 linearization, which keeps every class ahead of its parents and preserves the order of base classes. `super()` follows this order, so it means "next in the MRO", not simply "my parent".
+
+Data descriptors, which define `__set__` or `__delete__`, take priority over the instance dictionary. `property` is built on this mechanism.
+
+## Syntax and key APIs
+
+| Protocol | Enables |
+| --- | --- |
+| `__init__` | Instance setup |
+| `__repr__` | Debug text |
+| `__eq__`, `__hash__` | Equality, and use in sets and dict keys |
+| `__len__`, `__getitem__`, `__iter__` | Container behaviour |
+| `__enter__`, `__exit__` | The `with` statement |
+| `__call__` | Calling an instance |
+
+## Simple example
+
+```python
+class Money:
+    def __init__(self, cents):
+        self.cents = cents
+
+    def __add__(self, other):
+        return Money(self.cents + other.cents)
+
+    def __eq__(self, other):
+        return isinstance(other, Money) and self.cents == other.cents
+
+    def __repr__(self):
+        return f"Money({self.cents})"
+
+assert Money(100) + Money(50) == Money(150)
+assert repr(Money(1)) == "Money(1)"
+```
+
+## Industry examples
+
+### Replace boilerplate with a dataclass
+
+`field(default_factory=...)` is required for mutable defaults, and `frozen=True` gives immutability.
+
+```python
+from dataclasses import dataclass, field, FrozenInstanceError
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Order:
+    id: int
+    items: tuple[str, ...] = ()
+    tags: list[str] = field(default_factory=list)
+
+order = Order(id=1, items=("a",))
+assert order == Order(id=1, items=("a",))
+
+try:
+    order.id = 2
+except FrozenInstanceError:
+    pass
+else:
+    raise AssertionError
+```
+
+### Validate with a property
+
+```python
+class Account:
+    def __init__(self, balance):
+        self.balance = balance
+
+    @property
+    def balance(self):
+        return self._balance
+
+    @balance.setter
+    def balance(self, value):
+        if value < 0:
+            raise ValueError("balance cannot be negative")
+        self._balance = value
+
+account = Account(10)
+try:
+    account.balance = -1
+except ValueError:
+    assert account.balance == 10
+else:
+    raise AssertionError
+```
+
+### Cooperative multiple inheritance
+
+Each `super()` call moves along the MRO, so every class runs once.
+
+```python
+class Base:
+    def setup(self):
+        return ["Base"]
+
+class Cache(Base):
+    def setup(self):
+        return ["Cache"] + super().setup()
+
+class Log(Base):
+    def setup(self):
+        return ["Log"] + super().setup()
+
+class Service(Cache, Log):
+    pass
+
+assert Service().setup() == ["Cache", "Log", "Base"]
+assert [c.__name__ for c in Service.__mro__] == ["Service", "Cache", "Log", "Base", "object"]
+```
+
+## Patterns and best practices
+
+- Prefer composition, and use inheritance for true "is a" relationships.
+- Always define a useful `__repr__`.
+- Reach for `dataclass` for data-focused classes.
+- Return `NotImplemented` from binary methods when you can't handle the other type.
+- Use `__slots__` or `slots=True` when millions of instances make memory matter.
+
+## Alternatives and trade-offs
+
+| Option | Choose when | Trade-off |
+| --- | --- | --- |
+| Plain class | Behaviour and invariants dominate | More boilerplate |
+| `dataclass` | Mostly data | Generated methods need understanding |
+| `NamedTuple` | Immutable tuple-compatible records | Still acts like a tuple |
+| Pydantic | Validating external input | External dependency and runtime cost |
+
+## Common mistakes
+
+**Putting a mutable value on the class.** Every instance shares it.
+
+```python
+class Dog:
+    tricks = []
+
+a, b = Dog(), Dog()
+a.tricks.append("sit")
+assert b.tricks == ["sit"]
+```
+
+**Defining `__eq__` and expecting hashing to still work.** Python sets `__hash__` to `None` unless you define it.
+
+```python
+class Key:
+    def __eq__(self, other):
+        return True
+
+try:
+    {Key()}
+except TypeError:
+    pass
+else:
+    raise AssertionError
+```
+
+**Using a double underscore for privacy.** `__x` is name-mangled to `_Class__x` to avoid subclass clashes. It isn't access control.
+
+## Interview questions
+
+<Question q="What is the MRO?">
+The linear order in which Python searches classes for an attribute, computed with C3. You can read it through `Class.__mro__` or `Class.mro()`.
+</Question>
+
+<Question q="What is the difference between a staticmethod and a classmethod?">
+A `classmethod` receives the class as its first argument and suits alternative constructors. A `staticmethod` receives nothing automatically and is a plain function in the class namespace.
+</Question>
+
+<Question q="Why does a class with __eq__ become unhashable?">
+Equal objects must have equal hashes. Python can't assume the default identity hash still fits, so it sets `__hash__` to `None` unless you provide one.
+</Question>

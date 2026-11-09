@@ -1,0 +1,153 @@
+---
+title: "Security, Backup and Replication"
+summary: "Roles and row-level security, backup strategies you can restore from, and how streaming replication keeps copies in sync."
+level: advanced
+section: operations
+order: 20
+tags: [roles, row-level-security, pg_dump, backups, wal, replication, pitr]
+requires: [postgresql/transactions-and-mvcc]
+related: [postgresql/partitioning-and-maintenance]
+versions: "All supported PostgreSQL versions."
+tested: "Roles and row-level security run on PostgreSQL 18.6 through PGlite. Backup and replication commands weren't run."
+verified: "2026-11-09"
+docs:
+  - label: "PostgreSQL: Row security policies"
+    url: "https://www.postgresql.org/docs/current/ddl-rowsecurity.html"
+  - label: "PostgreSQL: Backup and restore"
+    url: "https://www.postgresql.org/docs/current/backup.html"
+  - label: "PostgreSQL: pg_dump"
+    url: "https://www.postgresql.org/docs/current/app-pgdump.html"
+  - label: "PostgreSQL: High availability and replication"
+    url: "https://www.postgresql.org/docs/current/high-availability.html"
+---
+
+## What it is
+
+Roles control who can do what. Row-level security restricts which rows a role can see. Backups and replication protect against data loss and downtime.
+
+## Why it exists
+
+A database holds the most valuable state in a system. A backup you've never restored is only a hope.
+
+## How it works
+
+Every change is first written to the **write-ahead log (WAL)**. Replicas replay it, and archived WAL enables point-in-time recovery.
+
+<LanesViz
+  title="A commit with streaming replication"
+  actors={["Client", "Primary", "WAL", "Standby"]}
+  steps={[
+    { from: 0, to: 1, label: "COMMIT", note: "The client asks to commit." },
+    { from: 1, to: 2, label: "flush WAL", note: "Changes are durable once the WAL reaches disk." },
+    { from: 2, to: 3, label: "stream WAL", note: "The standby receives WAL records and replays them." },
+    { from: 1, to: 0, label: "OK", note: "With asynchronous replication, the client doesn't wait for the standby, so a small window of loss is possible." },
+    { from: 3, to: 3, label: "replay", note: "The standby catches up and can serve reads." },
+  ]}
+/>
+
+| Backup type | Tool | Restore granularity |
+| --- | --- | --- |
+| Logical | `pg_dump` | Table or database |
+| Physical | `pg_basebackup` | Whole cluster |
+| Continuous | Base backup + WAL archive | Any point in time |
+
+## Syntax and key APIs
+
+```bash
+pg_dump -Fc -d app -f app.dump
+pg_restore -d app_new -j 4 app.dump
+pg_basebackup -D /backup -X stream -P
+```
+
+## Simple example
+
+```sql
+CREATE ROLE reporting NOLOGIN;
+CREATE TABLE sales (id int, amount int);
+INSERT INTO sales VALUES (1, 10);
+GRANT SELECT ON sales TO reporting;
+
+SET ROLE reporting;
+SELECT amount FROM sales;
+-- rows: [{"amount":10}]
+```
+
+```sql
+RESET ROLE;
+```
+
+## Industry examples
+
+### Multi-tenant isolation
+
+Policies apply to every query from that role. The application sets the current tenant per transaction.
+
+```sql
+CREATE ROLE app NOLOGIN;
+CREATE TABLE notes (tenant int, body text);
+INSERT INTO notes VALUES (1, 'mine'), (2, 'theirs');
+
+ALTER TABLE notes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_only ON notes
+  USING (tenant = current_setting('app.tenant')::int);
+GRANT SELECT ON notes TO app;
+
+SET app.tenant = '1';
+SET ROLE app;
+SELECT body FROM notes;
+-- rows: [{"body":"mine"}]
+```
+
+```sql
+RESET ROLE;
+```
+
+### Check replication lag
+
+```plsql
+SELECT client_addr, state, replay_lag FROM pg_stat_replication;
+```
+
+### Least privilege
+
+```plsql
+CREATE ROLE app_rw LOGIN PASSWORD '...';
+GRANT CONNECT ON DATABASE app TO app_rw;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_rw;
+```
+
+## Patterns and best practices
+
+- Test restores on a schedule.
+- Use continuous archiving for production point-in-time recovery.
+- Give applications a role without DDL or superuser rights.
+- Monitor replication lag and disk use for WAL.
+
+## Alternatives and trade-offs
+
+| Option | Benefit | Cost |
+| --- | --- | --- |
+| Async replication | Fast commits | Possible small data loss |
+| Sync replication | No acknowledged loss | Slower commits |
+| `pg_dump` | Simple, portable | Slow restore at scale |
+| Physical backup | Fast, full | All or nothing |
+
+## Common mistakes
+
+**Connecting the app as a superuser.** Superusers bypass row-level security.
+
+**Treating a replica as a backup.** Mistakes replicate too.
+
+**Never testing a restore.** You find problems at the worst moment.
+
+**Forgetting table owners bypass RLS by default.** Use `FORCE ROW LEVEL SECURITY` when needed.
+
+## Interview questions
+
+<Question q="What is the WAL?">
+A log of changes written before data files, providing durability, crash recovery and replication.
+</Question>
+
+<Question q="Is a replica a backup?">
+No. Accidental deletes replicate immediately. You still need point-in-time recovery.
+</Question>

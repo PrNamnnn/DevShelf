@@ -1,0 +1,185 @@
+---
+title: "Designing REST APIs"
+summary: "Resource naming, status codes, pagination, idempotency, and error shapes that make an API pleasant to use."
+level: intermediate
+section: data
+order: 20
+tags: [rest, api-design, status-codes, pagination, idempotency, versioning, etag]
+requires: [express/routing-requests-and-responses]
+related: ["express/database-access", "express/validation-and-security", "mlops/model-serving-and-inference"]
+versions: "HTTP semantics from RFC 9110."
+tested: "Express 5.3.0 and supertest on Node.js 24.17.0"
+verified: "2026-11-09"
+docs:
+  - label: "RFC 9110: HTTP Semantics"
+    url: "https://www.rfc-editor.org/rfc/rfc9110.html"
+  - label: "MDN: HTTP response status codes"
+    url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status"
+  - label: "RFC 9457: Problem Details"
+    url: "https://www.rfc-editor.org/rfc/rfc9457.html"
+---
+
+## What it is
+
+REST APIs expose resources at URLs and use HTTP methods and status codes with their standard meanings.
+
+## Why it exists
+
+Consistent semantics let clients, caches and proxies behave correctly with no custom documentation for each endpoint.
+
+## How it works
+
+| Method | Meaning | Idempotent |
+| --- | --- | --- |
+| `GET` | Read | Yes |
+| `PUT` | Replace | Yes |
+| `DELETE` | Remove | Yes |
+| `PATCH` | Partial update | Not necessarily |
+| `POST` | Create or act | No |
+
+| Status | Use |
+| --- | --- |
+| 200, 201, 204 | Success, created, no content |
+| 400, 422 | Malformed or invalid input |
+| 401, 403 | Unauthenticated, forbidden |
+| 404, 409 | Not found, conflict |
+| 429 | Rate limited |
+| 500, 503 | Server fault, unavailable |
+
+## Syntax and key APIs
+
+```text
+GET    /orders?status=open&limit=20
+POST   /orders
+GET    /orders/42
+PATCH  /orders/42
+DELETE /orders/42
+GET    /customers/7/orders
+```
+
+## Simple example
+
+```js
+import assert from "node:assert";
+import express from "express";
+import request from "supertest";
+
+const app = express();
+app.use(express.json());
+const orders = new Map();
+
+app.post("/orders", (req, res) => {
+  const id = orders.size + 1;
+  orders.set(id, { id, ...req.body });
+  res.status(201).location(`/orders/${id}`).json(orders.get(id));
+});
+
+const created = await request(app).post("/orders").send({ sku: "a" });
+assert.equal(created.status, 201);
+assert.equal(created.headers.location, "/orders/1");
+```
+
+## Industry examples
+
+### Keyset pagination
+
+Offsets get slower as they grow, and they skip rows when data changes. A cursor doesn't.
+
+```js
+import assert from "node:assert";
+import express from "express";
+import request from "supertest";
+
+const rows = Array.from({ length: 5 }, (_, i) => ({ id: i + 1 }));
+const app = express();
+
+app.get("/items", (req, res) => {
+  const after = Number(req.query.after ?? 0);
+  const limit = Math.min(Number(req.query.limit ?? 2), 100);
+  const page = rows.filter((r) => r.id > after).slice(0, limit);
+  res.json({ data: page, next: page.length === limit ? page.at(-1).id : null });
+});
+
+const first = await request(app).get("/items");
+assert.equal(first.body.next, 2);
+
+const second = await request(app).get(`/items?after=${first.body.next}`);
+assert.deepEqual(second.body.data.map((r) => r.id), [3, 4]);
+```
+
+### Idempotent POST
+
+A retried payment must not charge twice.
+
+```js
+import assert from "node:assert";
+import express from "express";
+import request from "supertest";
+
+const seen = new Map();
+let charges = 0;
+const app = express();
+
+app.post("/payments", (req, res) => {
+  const key = req.get("idempotency-key");
+  if (!key) return res.status(400).json({ error: "Idempotency-Key required" });
+  if (!seen.has(key)) seen.set(key, { charge: ++charges });
+  res.status(201).json(seen.get(key));
+});
+
+const send = () => request(app).post("/payments").set("Idempotency-Key", "abc");
+assert.deepEqual((await send()).body, (await send()).body);
+assert.equal(charges, 1);
+```
+
+### Conditional requests
+
+Express generates weak ETags for `res.json`, and answers a match with 304.
+
+```js
+import assert from "node:assert";
+import express from "express";
+import request from "supertest";
+
+const app = express();
+app.get("/profile", (req, res) => res.json({ name: "Ada" }));
+
+const first = await request(app).get("/profile");
+const second = await request(app).get("/profile").set("If-None-Match", first.headers.etag);
+assert.equal(second.status, 304);
+```
+
+## Patterns and best practices
+
+- Use plural nouns for collections.
+- Return one consistent error format.
+- Cap `limit` on the server.
+- Version only for breaking changes.
+
+## Alternatives and trade-offs
+
+| Style | Strength | Trade-off |
+| --- | --- | --- |
+| REST | Simple, cacheable | Over-fetching |
+| GraphQL | Client-shaped queries | Caching and complexity |
+| RPC, tRPC | Type-safe calls | Coupled to clients |
+
+## Common mistakes
+
+**200 with an error body.** Clients and monitors can't see the failure.
+
+**Verbs in URLs.** `POST /createOrder` duplicates HTTP's method.
+
+**Unbounded lists.** Always paginate.
+
+**Confusing 401 and 403.** 401 means not authenticated, 403 means not allowed.
+
+## Interview questions
+
+<Question q="What does idempotent mean?">
+Repeating a request has the same effect on the server as making it once.
+</Question>
+
+<Question q="Why prefer keyset over offset pagination?">
+It stays fast on deep pages and doesn't skip or repeat rows when data changes.
+</Question>

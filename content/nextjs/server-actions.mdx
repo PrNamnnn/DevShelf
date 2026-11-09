@@ -1,0 +1,186 @@
+---
+title: "Server Actions and Mutations"
+summary: "Calling server code from forms, how the response updates the page, and why every action is a public endpoint."
+level: advanced
+section: data
+order: 20
+tags: [server-actions, use-server, forms, mutations, security, csrf, revalidation]
+related: [nextjs/data-fetching-and-caching, react/concurrent-features-and-actions, express/validation-and-security]
+versions: "Next.js 16."
+tested: "Built on Next.js 16.4.5 in a scratch app. The zod example was run separately."
+verified: "2026-11-09"
+docs:
+  - label: "Next.js: Server Actions guide"
+    url: "https://nextjs.org/docs/app/guides/server-actions"
+  - label: "Next.js: updateTag"
+    url: "https://nextjs.org/docs/app/api-reference/functions/updateTag"
+  - label: "React: useActionState"
+    url: "https://react.dev/reference/react/useActionState"
+---
+
+## What it is
+
+A Server Action is an async function marked `"use server"` that runs on the server and can be invoked from a form, a button or a transition.
+
+## Why it exists
+
+Actions remove the hand-written API route, fetch call and loading state for most mutations, and forms can work before JavaScript has loaded.
+
+## How it works
+
+The action is invoked with a POST request. Its reference is encrypted, and unused actions are removed from client bundles. Actions run one at a time per client.
+
+<StepFlow
+  title="A form submission through a Server Action"
+  nodes={["form submit", "POST with action ID", "auth + validation", "database write", "updateTag", "response with new RSC Payload"]}
+  steps={[
+    { active: [0], note: "The user submits. React runs the action inside a Transition, so the pending state is available." },
+    { active: [1], note: "Next.js sends a POST. The CSRF check compares Origin with Host." },
+    { active: [2], note: "Your code must authenticate, authorize and validate. Nothing else does this for you." },
+    { active: [3], note: "The mutation is performed." },
+    { active: [4], note: "The relevant cache entries are expired so the next read is fresh." },
+    { active: [5], note: "One response can carry both the return value and the re-rendered page." },
+  ]}
+/>
+
+Render-time checks aren't a security boundary, because an action can be called directly.
+
+## Syntax and key APIs
+
+```tsx
+// app/actions.ts
+"use server";
+
+export async function createPost(formData: FormData) {
+  const title = formData.get("title");
+  return { title };
+}
+```
+
+| Framework protection | Detail |
+| --- | --- |
+| CSRF | `Origin` is compared with `Host` or `X-Forwarded-Host` |
+| Body limit | 1 MB by default, `serverActions.bodySizeLimit` |
+| Closure variables | Encrypted |
+| Multi-instance | Set `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` |
+
+## Simple example
+
+```tsx
+import { createPost } from "./actions";
+
+export default function NewPost() {
+  return (
+    <form action={createPost}>
+      <input name="title" />
+      <button>Create</button>
+    </form>
+  );
+}
+```
+
+## Industry examples
+
+### Validate input as untrusted
+
+```js
+import assert from "node:assert";
+import { z } from "zod";
+
+const Schema = z.object({ title: z.string().min(3) });
+
+function parse(formData) {
+  const result = Schema.safeParse({ title: formData.get("title") });
+  if (!result.success) return { errors: z.flattenError(result.error).fieldErrors };
+  return { data: result.data };
+}
+
+const bad = new FormData();
+bad.set("title", "x");
+assert.ok(parse(bad).errors.title);
+
+const good = new FormData();
+good.set("title", "Hello");
+assert.equal(parse(good).data.title, "Hello");
+```
+
+### Authorize against a trusted record
+
+Take an ID, then re-read ownership from your database instead of trusting anything the form sends.
+
+```tsx
+"use server";
+
+import { updateTag } from "next/cache";
+
+export async function deletePost(id: string) {
+  const session = await requireSession();
+  const post = await db.post.find(id);
+
+  if (!post || post.authorId !== session.userId) {
+    throw new Error("Forbidden");
+  }
+
+  await db.post.delete(id);
+  updateTag("posts");
+}
+```
+
+### Show pending and field errors
+
+```tsx
+"use client";
+
+import { useActionState } from "react";
+import { save } from "./actions";
+
+export function Form() {
+  const [state, action, pending] = useActionState(save, { errors: {} });
+  return (
+    <form action={action}>
+      <input name="title" />
+      {state.errors.title && <p role="alert">{state.errors.title}</p>}
+      <button disabled={pending}>Save</button>
+    </form>
+  );
+}
+```
+
+## Patterns and best practices
+
+- Authenticate and authorize inside every action.
+- Validate shape first, then check business rules against trusted data.
+- Return only what the UI needs.
+- Handle "Failed to find Server Action" after deployments, since action IDs rotate.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Mutations from your own UI | Server Action | Sequential per client |
+| Webhooks, public APIs, other clients | Route Handler | More boilerplate |
+| Parallel reads | Server Component fetching | Not for writes |
+
+## Common mistakes
+
+**Trusting that only your form can call the action.** It's reachable as a POST endpoint.
+
+**Using actions to fetch data.** They run sequentially, so don't expect `Promise.all` to parallelize them.
+
+**Trusting hidden form fields.** The client controls all form data.
+
+**Forgetting to configure `allowedOrigins` behind proxies.** Legitimate requests can then fail the origin check.
+
+## Interview questions
+
+<Question q="How are Server Actions invoked?">
+By a POST request that references an encrypted action ID. React dispatches them from a form action or a transition.
+</Question>
+
+<Question q="Why validate input if the form already validates it?">
+Actions are callable directly, so client-side checks don't protect the server.
+</Question>
+
+<Question q="When should you still use a Route Handler?">
+For webhooks, external consumers, or endpoints that aren't tied to your React UI.
+</Question>

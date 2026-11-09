@@ -1,0 +1,112 @@
+---
+title: "Encoding Categorical Features"
+summary: "One-hot, ordinal and target encoding, how to avoid leakage, and how to handle high cardinality."
+level: intermediate
+section: features
+order: 1
+tags: ["one-hot encoding","ordinal encoding","target encoding","feature engineering"]
+requires: ["statistics/data-types-and-scales","statistics/data-quality-and-leakage"]
+related: ["statistics/scaling-binning-and-transforms","statistics/feature-selection-and-pipelines"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Encoding categorical features"
+    url: "https://scikit-learn.org/stable/modules/preprocessing.html#encoding-categorical-features"
+  - label: "scikit-learn: TargetEncoder"
+    url: "https://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.TargetEncoder.html"
+---
+
+## What it is
+
+Encoding turns categories into numbers that a model can use.
+
+| Encoding | Output | Fits |
+| --- | --- | --- |
+| One-hot | One binary column per category | Nominal, low cardinality |
+| Ordinal | Integers in a meaningful order | Ordinal, or tree models |
+| Target | Smoothed average outcome per category | High cardinality |
+| Frequency | Share of rows | Quick high-cardinality baseline |
+| Embeddings | Learned vectors | Very high cardinality, neural networks |
+
+## Why it exists
+
+Most algorithms need numeric input. Arbitrary integers imply order and distance that don't exist for a nominal feature, and one-hot fails with thousands of categories.
+
+## How it works
+
+For one-hot, set handling for categories unseen in training. With an unregularized linear model, drop one column to avoid perfect collinearity, known as the dummy-variable trap.
+
+Target encoding replaces a category with a blend of its outcome mean and the global mean. Naive target encoding leaks the target, so cross-fitting is used: each row's encoding is computed from other folds.
+
+## Intuition and formula
+
+<Formula>encoding = (n · category mean + m · global mean) / (n + m)</Formula>
+
+n is the category's row count and m controls smoothing. Rare categories shrink toward the global mean.
+
+## Worked example
+
+A `city` column with 4,000 values would add 4,000 columns if one-hot encoded. Target encoding with cross-fitting produces a single column. A city with 3 buyers out of 3 doesn't get an encoding of 1.0, because smoothing pulls it toward the overall 10% rate.
+
+## Python
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, TargetEncoder
+
+plans = pd.DataFrame({"plan": ["basic", "pro", "team"]})
+one_hot = OneHotEncoder(handle_unknown="ignore", sparse_output=False).fit(plans)
+assert one_hot.transform(pd.DataFrame({"plan": ["new"]})).sum() == 0
+
+sizes = pd.DataFrame({"size": ["s", "l", "m"]})
+ordered = OrdinalEncoder(categories=[["s", "m", "l"]]).fit_transform(sizes)
+assert ordered.ravel().tolist() == [0, 2, 1]
+
+rng = np.random.default_rng(0)
+X = pd.DataFrame({"city": rng.choice(list("abcdefgh"), 800)})
+y = rng.integers(0, 2, 800)
+encoded = TargetEncoder(smooth="auto", cv=5, random_state=0).fit_transform(X, y)
+assert encoded.shape == (800, 1)
+```
+
+## SQL
+
+```sql
+SELECT plan,
+       (plan = 'basic')::int AS is_basic,
+       (plan = 'pro')::int AS is_pro
+FROM (VALUES ('basic'), ('pro')) AS t(plan)
+ORDER BY plan;
+-- rows: [{"plan":"basic","is_basic":1,"is_pro":0},{"plan":"pro","is_basic":0,"is_pro":1}]
+```
+
+## Excel or Power BI
+
+`=--(A2="basic")` creates a dummy variable. Power Query's Pivot Column can do one-hot encoding. Power BI handles categories natively for reporting, so encoding is only relevant for modelling.
+
+## In industry
+
+Tabular models commonly use CatBoost's internal handling, or target encoding, for high-cardinality features such as merchant or product identifiers.
+
+## Assumptions and limitations
+
+Target encoding can leak despite precautions on small datasets and it drifts as categories change. One-hot can make very sparse feature spaces.
+
+## Common mistakes
+
+- Fitting encoders on all the data.
+- Integer encoding nominal features for linear models.
+- Failing on unseen categories in production.
+- Target encoding without cross-fitting.
+
+## Alternatives
+
+Feature hashing limits dimensionality without storing a vocabulary. CatBoost uses ordered target statistics. Embeddings capture similarity.
+
+## Interview questions
+
+<Question q="How does target encoding leak?">A row's own label contributes to the encoded value, so the model learns the label directly. Cross-fitting solves this.</Question>
+
+<Question q="What is the dummy variable trap?">Including every category plus an intercept makes the columns perfectly collinear in linear regression.</Question>

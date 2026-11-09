@@ -1,0 +1,111 @@
+---
+title: "Regression Assumptions, Diagnostics and Metrics"
+summary: "Check residuals, heteroscedasticity and multicollinearity with VIF, and evaluate fit with MAE, MSE, RMSE and R²."
+level: advanced
+section: regression
+order: 4
+tags: ["residuals","heteroscedasticity","multicollinearity","VIF","RMSE"]
+requires: ["statistics/multiple-linear-regression"]
+related: ["statistics/assumption-and-exact-tests","machine-learning/regression-metrics"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "statsmodels: Regression diagnostics"
+    url: "https://www.statsmodels.org/stable/diagnostic.html"
+  - label: "statsmodels: variance_inflation_factor"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.stats.outliers_influence.variance_inflation_factor.html"
+---
+
+## What it is
+
+Diagnostics check whether a fitted regression's assumptions are reasonable, and error metrics report how far predictions miss.
+
+## Why it exists
+
+Software will always produce coefficients and p-values. Diagnostics tell you whether they mean anything.
+
+## How it works
+
+| Assumption | Problem | Check | Remedy |
+| --- | --- | --- | --- |
+| Linearity | Curved residuals | Residual vs fitted | Transform, add terms |
+| Independence | Clustered or time-ordered errors | Durbin-Watson, design knowledge | Cluster-robust errors, time-series models |
+| Constant variance | Fan-shaped residuals | Breusch-Pagan | Robust (HC) errors, transform |
+| Normal errors | Bad small-sample intervals | Q-Q plot | Bootstrap, larger n |
+| Low multicollinearity | Unstable coefficients | VIF | Remove or combine, regularize |
+
+**VIF** indicates how much a coefficient's variance inflates because of correlation with the other predictors. Values above 5 to 10 are the commonly cited warnings.
+
+Multicollinearity harms interpretation of individual coefficients but generally doesn't hurt prediction.
+
+Metrics: MAE is the average absolute miss, MSE squares it, RMSE returns to original units, and R² compares against a mean-only baseline.
+
+## Intuition and formula
+
+<Formula>VIFⱼ = 1 / (1 − Rⱼ²)</Formula>
+
+<Formula>RMSE = √((1/n) Σ(yᵢ − ŷᵢ)²)</Formula>
+
+MAE treats a miss of 10 as twice a miss of 5. RMSE weighs large misses more.
+
+## Worked example
+
+With visits and tenure partly collinear, VIF for each is about 4.97, and for discount it's 1.00. No predictor crosses the usual limit, but the visits and tenure coefficients are less precise as a result. For the ad-spend line, MAE is 2.05, MSE is 5.58 and RMSE is 2.36.
+
+## Python
+
+```python
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+from statsmodels.stats.outliers_influence import variance_inflation_factor as vif
+
+rng = np.random.default_rng(7)
+n = 500
+visits = rng.normal(20, 5, n)
+tenure = visits * 0.8 + rng.normal(0, 2, n)
+discount = rng.uniform(0, 1, n)
+X = sm.add_constant(pd.DataFrame({"visits": visits, "tenure": tenure, "discount": discount}))
+vifs = [vif(X.values, i) for i in range(1, 4)]
+assert [round(v, 2) for v in vifs] == [4.97, 4.97, 1.0]
+
+spend = np.array([10, 14, 18, 22, 25, 30, 34, 38, 42, 47.0])
+revenue = np.array([38, 44, 50, 62, 64, 72, 86, 90, 104, 110.0])
+fit = sm.OLS(revenue, sm.add_constant(spend)).fit()
+residual = revenue - fit.fittedvalues
+assert round(np.abs(residual).mean(), 2) == 2.05
+assert round(np.sqrt((residual**2).mean()), 2) == 2.36
+
+robust = fit.get_robustcov_results(cov_type="HC3")
+assert robust.bse.shape == (2,)
+```
+
+## Excel or Power BI
+
+The ToolPak's Regression tool includes residuals and plots. Calculate MAE with `=AVERAGE(ABS(range))` in dynamic-array Excel, and RMSE with `=SQRT(AVERAGE(range^2))`.
+
+## In industry
+
+Credit, insurance and other regulated models require documented diagnostics. Applied teams typically use robust standard errors and hold-out checks.
+
+## Assumptions and limitations
+
+Diagnostics can't detect omitted variables. In-sample fit is optimistic, so evaluate prediction on new data.
+
+## Common mistakes
+
+- Worrying about VIF when only prediction matters.
+- Using R² alone to compare models with different outcomes.
+- Using MAPE when actual values can be near zero.
+- Checking normality of the raw outcome instead of the residuals.
+
+## Alternatives
+
+Quantile regression for tails, Huber loss for outliers, regularization for collinearity and generalized linear models when the variance depends on the mean.
+
+## Interview questions
+
+<Question q="What is heteroscedasticity and how do you handle it?">Non-constant error variance. Coefficients stay unbiased but standard errors are wrong, so use robust errors or transform the outcome.</Question>
+
+<Question q="RMSE or MAE?">RMSE when large errors are disproportionately costly. MAE when errors cost linearly, or outliers shouldn't dominate.</Question>

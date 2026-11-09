@@ -1,0 +1,79 @@
+---
+title: "Iterators and Variables"
+summary: "SUMX, AVERAGEX and RANKX evaluate row by row, and VAR makes measures faster and easier to read."
+level: intermediate
+section: dax
+order: 3
+tags: ["SUMX","AVERAGEX","iterators","VAR","RANKX"]
+requires: ["powerbi/calculate-and-filter-functions"]
+related: ["powerbi/context-transition-and-advanced-patterns","statistics/central-tendency"]
+versions: "DAX as documented in November 2026"
+tested: "Not executable here. Hand-checked against the sample table and Microsoft documentation"
+verified: "2026-11-09"
+docs:
+  - label: "SUMX"
+    url: "https://learn.microsoft.com/en-us/dax/sumx-function-dax"
+  - label: "AVERAGEX"
+    url: "https://learn.microsoft.com/en-us/dax/averagex-function-dax"
+  - label: "Use variables"
+    url: "https://learn.microsoft.com/en-us/dax/best-practices/dax-variables"
+---
+
+## What it is
+
+**Iterators** such as `SUMX`, `AVERAGEX`, `MINX`, `MAXX` and `COUNTX` evaluate an expression for each row of a table and aggregate the results. **Variables** store an intermediate value.
+
+## Why it exists
+
+Some calculations have to happen per row before they aggregate, and revenue is the classic case. Variables stop you repeating calculations and show the logic in steps.
+
+## How it works
+
+The iterator creates a row context for each row of its table argument. `SUM(Col)` is effectively `SUMX(T, T[Col])`.
+
+Variables are evaluated in the filter context where they're **defined**, not at `RETURN`, and they're computed only once. This can be surprising when a `CALCULATE` later attempts to change a variable's context, since a variable's value is already fixed.
+
+## Syntax and key APIs
+
+```text
+Revenue = SUMX ( Sales, Sales[Units] * Sales[Price] )
+Avg Region Units = AVERAGEX ( VALUES ( Sales[Region] ), [Total Units] )
+
+YoY % =
+VAR Current = [Revenue]
+VAR Prior = CALCULATE ( [Revenue], SAMEPERIODLASTYEAR ( DimDate[Date] ) )
+RETURN
+    DIVIDE ( Current - Prior, Prior )
+```
+
+## Simple example
+
+`Avg Region Units` averages 13, 17 and 8, returning 12.67, the average of region totals. Averaging the raw rows returns 7.6, a different question. Choosing the iteration table defines the unit of analysis.
+
+## Industry examples
+
+Weighted averages, per-customer metrics and currency conversion row by row are typical uses of iterators.
+
+## Patterns and best practices
+
+- Iterate over the smallest table that answers the question.
+- Use `VAR` for anything repeated or complex.
+- Use `VAR` during debugging by temporarily returning an intermediate value.
+- Avoid nested iterators on large tables.
+
+## Alternatives and trade-offs
+
+Adding a calculated revenue column at refresh may help where row expressions are expensive, in exchange for more memory.
+
+## Common mistakes
+
+- Using `SUM` on a calculated product of columns that doesn't exist.
+- Using `AVERAGE` when `AVERAGEX` over a dimension is needed.
+- Expecting `CALCULATE` to change an already-evaluated variable.
+- Iterating over a big fact table with a measure inside.
+
+## Interview questions
+
+<Question q="When does a VAR get evaluated?">Once, in the filter context where it's defined.</Question>
+
+<Question q="Why is SUMX needed for revenue?">Units and price have to be multiplied per row before summing.</Question>

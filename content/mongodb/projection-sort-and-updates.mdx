@@ -1,0 +1,106 @@
+---
+title: "Projection, Sorting and Update Operators"
+summary: "Return only what you need, page safely, and change documents atomically with $set, $inc, $push and array filters."
+level: fundamental
+section: foundations
+order: 3
+tags: ["projection","sort","update operators","$set","$inc","$push","upsert"]
+requires: ["mongodb/crud-and-query-operators"]
+related: ["mongodb/aggregation-pipeline","mongodb/transactions"]
+versions: "Documentation for MongoDB 9.0. Examples executed on MongoDB 8.0.12"
+tested: "JavaScript examples executed against a temporary MongoDB 8.0.12 replica set"
+verified: "2026-11-09"
+docs:
+  - label: "MongoDB: Update operators"
+    url: "https://www.mongodb.com/docs/manual/reference/mql/update/"
+  - label: "MongoDB: Project fields"
+    url: "https://www.mongodb.com/docs/manual/tutorial/project-fields-from-query-results/"
+---
+
+## What it is
+
+**Projection** chooses which fields a query returns. **Sort**, **skip** and **limit** control ordering and paging. **Update operators** modify parts of a document rather than replacing it.
+
+## Why it exists
+
+Returning less data reduces network and memory use. Field-level updates are atomic on a single document, so a counter can increase without a read-modify-write race.
+
+## How it works
+
+A projection includes or excludes fields, and you can't mix those modes except for `_id`.
+
+| Operator | Effect |
+| --- | --- |
+| `$set`, `$unset` | Set or remove a field |
+| `$inc` | Atomically add |
+| `$min`, `$max` | Update if lower or higher |
+| `$push`, `$addToSet`, `$pull` | Modify arrays |
+| `$` and `arrayFilters` | Target specific array elements |
+
+An **upsert** inserts when nothing matches. Large `skip` values scan past documents, so keyset pagination using the last seen value is better for deep paging.
+
+## Syntax and key APIs
+
+```text
+find(filter, { projection: { name: 1, _id: 0 } }).sort({ createdAt: -1 }).limit(20)
+updateOne(filter, { $inc: { views: 1 } }, { upsert: true })
+```
+
+## Simple example
+
+```js
+import assert from "node:assert/strict";
+import { MongoClient } from "mongodb";
+
+const client = new MongoClient(process.env.MONGODB_URI);
+const db = client.db("shelf_updates");
+await db.dropDatabase();
+const carts = db.collection("carts");
+
+await carts.insertOne({ _id: 1, views: 0, items: [{ sku: "A", qty: 1 }, { sku: "B", qty: 1 }] });
+await carts.updateOne({ _id: 1 }, { $inc: { views: 1 }, $set: { status: "open" } });
+await carts.updateOne(
+  { _id: 1 },
+  { $inc: { "items.$[line].qty": 2 } },
+  { arrayFilters: [{ "line.sku": "B" }] },
+);
+
+const cart = await carts.findOne({ _id: 1 }, { projection: { views: 1, items: 1, _id: 0 } });
+assert.equal(cart.views, 1);
+assert.equal(cart.items[1].qty, 3);
+assert.equal(cart._id, undefined);
+
+const up = await carts.updateOne({ _id: 2 }, { $setOnInsert: { views: 0 } }, { upsert: true });
+assert.equal(up.upsertedCount, 1);
+
+await db.dropDatabase();
+await client.close();
+```
+
+## Industry examples
+
+Counters, leaderboards and shopping carts use atomic operators. Keyset pagination powers infinite-scroll feeds.
+
+## Patterns and best practices
+
+- Use field updates rather than rewriting the document.
+- Use `$setOnInsert` for fields that should be created only once.
+- Add a unique index to make upserts safe from duplicates under concurrency.
+- Sort with a unique tiebreaker for stable pages.
+
+## Alternatives and trade-offs
+
+Aggregation-pipeline updates allow computed values within an update. Replacing the whole document can overwrite concurrent changes.
+
+## Common mistakes
+
+- Omitting an update operator and replacing the document.
+- Deep paging with `skip`.
+- Upserting without a unique index.
+- Unstable sorts on non-unique fields.
+
+## Interview questions
+
+<Question q="Are single-document updates atomic?">Yes, including updates to nested fields and arrays within that document.</Question>
+
+<Question q="Why is deep skip slow?">The server still walks through the skipped entries.</Question>

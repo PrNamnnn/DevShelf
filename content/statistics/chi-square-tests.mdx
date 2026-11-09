@@ -1,0 +1,125 @@
+---
+title: "Chi-Square Tests"
+summary: "Goodness of fit, independence and homogeneity tests on categorical counts, with expected counts and effect sizes."
+level: intermediate
+section: tests
+order: 3
+tags: ["chi-square","contingency table","goodness of fit","independence","homogeneity"]
+requires: ["statistics/choosing-the-right-test","statistics/t-chi-square-f-distributions"]
+related: ["statistics/bivariate-analysis","statistics/srm-and-aa-tests","statistics/assumption-and-exact-tests"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "SciPy: chi2_contingency"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.chi2_contingency.html"
+  - label: "SciPy: chisquare"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.chisquare.html"
+---
+
+## What it is
+
+Chi-square tests compare observed category counts with those expected under a null hypothesis.
+
+| Test | Question | H₀ |
+| --- | --- | --- |
+| Goodness of fit | Does one variable match a claimed mix? | Proportions equal the claim |
+| Independence | Are two variables related in one sample? | They're independent |
+| Homogeneity | Do separate populations have the same mix? | Distributions are equal |
+
+## Why it exists
+
+Many business variables are categories. These tests answer "does this mix differ?" without requiring anything to be numeric.
+
+## How it works
+
+**When to use:** counts of mutually exclusive categories. **Data type:** nominal or ordinal treated as nominal. **Assumptions:** independent observations, and expected counts generally at least 5. Use raw counts, never percentages.
+
+**H₁:** the distribution differs from what's expected. **P-value:** from the upper tail of chi-square. **Business meaning:** inspect which cells differ the most. Chi-square alone doesn't say where or how large.
+
+Independence and homogeneity share arithmetic, and differ in how the data was collected.
+
+## Intuition and formula
+
+<Formula>χ² = Σ (O − E)² / E</Formula>
+
+<Formula>E = (row total × column total) / grand total</Formula>
+
+Degrees of freedom are k − 1 for goodness of fit and (r − 1)(c − 1) for a table. **Cramér's V** gives effect size: V = √(χ² / (n · min(r − 1, c − 1))).
+
+## Worked example
+
+| Plan | Renewed | Cancelled |
+| --- | --- | --- |
+| A | 310 | 190 |
+| B | 260 | 240 |
+
+Each expected count is 285 or 215. χ² = 10.20, df = 1, p = 0.0014, and V = 0.10. Renewal is related to plan, and the association is modest: 62% against 52%.
+
+Goodness of fit: 1,000 users across four colours with counts of 248, 265, 239 and 248 against an expected 250 give χ² = 1.42, p = 0.70, so random assignment looks fine.
+
+Homogeneity: three support tiers compared across two regions, with counts of 60, 40, 50 and 45, 55, 50, give χ² = 4.51, p = 0.105. The mix doesn't clearly differ between regions.
+
+## Python
+
+```python
+import numpy as np
+from scipy import stats
+
+table = np.array([[310, 190], [260, 240]])
+result = stats.chi2_contingency(table, correction=False)
+v = np.sqrt(result.statistic / table.sum())
+assert (round(result.statistic, 2), round(result.pvalue, 4)) == (10.2, 0.0014)
+assert round(v, 2) == 0.10
+
+gof = stats.chisquare([248, 265, 239, 248], [250] * 4)
+assert round(gof.statistic, 2) == 1.42
+
+homog = stats.chi2_contingency([[60, 40, 50], [45, 55, 50]])
+assert round(homog.pvalue, 3) == 0.105
+```
+
+<Callout type="note">`chi2_contingency` applies Yates' continuity correction by default on 2×2 tables. Pass `correction=False` to match the plain formula.</Callout>
+
+## SQL
+
+```sql
+WITH o(plan, outcome, n) AS (
+  VALUES ('A','renewed',310.0), ('A','cancelled',190.0), ('B','renewed',260.0), ('B','cancelled',240.0)
+), e AS (
+  SELECT n,
+         sum(n) OVER (PARTITION BY plan) * sum(n) OVER (PARTITION BY outcome) / sum(n) OVER () AS expected
+  FROM o
+)
+SELECT round(sum((n - expected) ^ 2 / expected), 2) AS chi_square FROM e;
+-- rows: [{"chi_square":"10.20"}]
+```
+
+## Excel or Power BI
+
+Build a table of expected counts, then `CHISQ.TEST(observed, expected)` returns the p-value, and `CHISQ.INV.RT` provides the critical value.
+
+## In industry
+
+Used for sample ratio mismatch checks, survey cross-tabs and comparing category mixes between periods.
+
+## Assumptions and limitations
+
+With huge samples almost any difference is significant, so report effect size. Small expected counts distort the approximation. One user must appear in only one cell.
+
+## Common mistakes
+
+- Running the test on percentages.
+- Letting one user contribute many rows.
+- Treating significance as strength of relationship.
+- Skipping the check of which cells drive the result, using standardized residuals.
+
+## Alternatives
+
+Fisher's exact test for small counts, McNemar's test for paired yes/no data, G-tests as a likelihood-ratio equivalent, and logistic regression to control for other variables.
+
+## Interview questions
+
+<Question q="What is the difference between independence and homogeneity tests?">Independence samples one population and measures two variables. Homogeneity samples several populations and compares one variable. The formula is the same.</Question>
+
+<Question q="When is chi-square inappropriate?">When expected counts are very small, observations aren't independent, or the inputs aren't counts.</Question>

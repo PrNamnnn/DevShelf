@@ -1,0 +1,155 @@
+---
+title: "Transition, KeepAlive and Teleport"
+summary: "Vue's built-in components for animating elements, caching views and rendering outside the parent."
+level: intermediate
+section: components
+order: 20
+tags: [transition, keep-alive, teleport, animation, modal, built-ins]
+requires: [vue/component-communication]
+related: [vue/rendering-and-performance, tailwind/animations-and-transitions]
+versions: "Teleport defer needs Vue 3.5+."
+tested: "Not executed. Checked against the Vue docs."
+verified: "2026-11-09"
+docs:
+  - label: "Vue: Transition"
+    url: "https://vuejs.org/guide/built-ins/transition.html"
+  - label: "Vue: KeepAlive"
+    url: "https://vuejs.org/guide/built-ins/keep-alive.html"
+  - label: "Vue: Teleport"
+    url: "https://vuejs.org/guide/built-ins/teleport.html"
+---
+
+## What it is
+
+`<Transition>` animates an element entering or leaving. `<KeepAlive>` caches component instances. `<Teleport>` renders content elsewhere in the DOM.
+
+## Why it exists
+
+Elements removed by `v-if` vanish before CSS can animate them. Switching tabs normally destroys state. Modals need to escape parents that clip them.
+
+## How it works
+
+Vue adds classes at each moment of a transition, then waits for the CSS to finish.
+
+<StepFlow
+  title="A leave transition"
+  code={[".v-leave-active { transition: opacity .3s }", ".v-leave-to { opacity: 0 }"]}
+  nodes={["v-leave-from", "v-leave-active", "v-leave-to", "element removed"]}
+  steps={[
+    { active: [0, 1], note: "On leaving, the start state and active class are added for one frame." },
+    { line: 0, active: [1], note: "The active class defines duration and easing for the whole phase." },
+    { line: 1, active: [1, 2], note: "Next frame, the from-class is replaced by the to-class, so the transition runs." },
+    { active: [3], note: "When the transition ends, Vue removes the element." },
+  ]}
+/>
+
+| Prop | Purpose |
+| --- | --- |
+| `name` | Changes the class prefix |
+| `mode="out-in"` | Finish leaving before entering |
+| `appear` | Animate on first render |
+| `:duration` | Explicit timing |
+
+## Syntax and key APIs
+
+```vue
+<Transition name="fade" mode="out-in">
+  <component :is="view" :key="view" />
+</Transition>
+
+<KeepAlive :include="['Search']" :max="5">
+  <component :is="tab" />
+</KeepAlive>
+
+<Teleport to="body" :disabled="isMobile">
+  <div class="modal">...</div>
+</Teleport>
+```
+
+## Simple example
+
+```vue
+<template>
+  <Transition name="fade">
+    <p v-if="show">Hello</p>
+  </Transition>
+</template>
+
+<style>
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+</style>
+```
+
+## Industry examples
+
+### A modal outside overflow
+
+Props, events and injected values still follow the logical parent.
+
+```vue
+<template>
+  <button @click="open = true">Open</button>
+  <Teleport to="body">
+    <div v-if="open" class="modal" role="dialog">
+      <button @click="open = false">Close</button>
+    </div>
+  </Teleport>
+</template>
+```
+
+### Keep tab state with a limit
+
+`max` turns the cache into least-recently-used eviction.
+
+```vue
+<KeepAlive :max="10">
+  <component :is="currentTab" />
+</KeepAlive>
+```
+
+Use `onActivated` and `onDeactivated` to resume and pause work.
+
+### Animate list changes
+
+```vue
+<TransitionGroup name="list" tag="ul">
+  <li v-for="item in items" :key="item.id">{{ item.text }}</li>
+</TransitionGroup>
+```
+
+## Patterns and best practices
+
+- Respect reduced motion with a media query.
+- Animate `opacity` and `transform`, which are cheap.
+- Bound `KeepAlive` with `max`.
+- Manage focus when opening modals.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Simple animation | `Transition` | One child only |
+| Complex timelines | JS hooks or a library | More code |
+| Preserve state | `KeepAlive` | Memory |
+| Overlay | `Teleport` | Target must exist |
+
+## Common mistakes
+
+**Multiple root children inside `Transition`.** It accepts one element or component.
+
+**Teleporting to a target not yet in the DOM.** Use `defer` in 3.5+ for targets rendered later in the same tick.
+
+**Forgetting a `key` on dynamic content.** Vue can reuse the element without animating.
+
+**Cleaning up in `onUnmounted` under `KeepAlive`.** Use `onDeactivated` for paused work.
+
+## Interview questions
+
+<Question q="What does KeepAlive do?">
+It caches inactive component instances so state survives switching, with `onActivated` and `onDeactivated` hooks.
+</Question>
+
+<Question q="Why use Teleport for a modal?">
+It renders at another DOM location, avoiding clipping and stacking problems from ancestors.
+</Question>

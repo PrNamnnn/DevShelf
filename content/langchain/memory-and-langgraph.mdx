@@ -1,0 +1,178 @@
+---
+title: "Memory and LangGraph"
+summary: "Persisting conversations with checkpointers, and modelling custom agent workflows as stateful graphs."
+level: advanced
+section: state
+order: 10
+tags: [memory, checkpointer, thread_id, langgraph, stategraph, persistence, human-in-the-loop]
+related: [langchain/tools-and-agents, langchain/evaluation-and-observability]
+versions: "LangGraph 1.x. LangChain agents are built on LangGraph."
+tested: "langgraph 1.2.20 and langchain 1.4.9 with fake models. No real provider was called."
+verified: "2026-11-09"
+docs:
+  - label: "LangChain: Short-term memory"
+    url: "https://docs.langchain.com/oss/python/langchain/short-term-memory"
+  - label: "LangGraph: Overview"
+    url: "https://docs.langchain.com/oss/python/langgraph/overview"
+  - label: "LangGraph: Persistence"
+    url: "https://docs.langchain.com/oss/python/langgraph/persistence"
+---
+
+## What it is
+
+**Short-term memory** keeps a conversation's state between calls, using a checkpointer and a `thread_id`. **LangGraph** is the lower-level runtime for building workflows as graphs of steps over shared state.
+
+## Why it exists
+
+Models are stateless. Real assistants need to continue a conversation, resume after a failure and pause for approval. Graphs make loops and branches explicit where a linear chain can't express them.
+
+## How it works
+
+A graph has a state schema, nodes that are functions returning state updates, and edges that choose what runs next. A checkpointer saves state after each step, keyed by thread.
+
+<StepFlow
+  title="A graph with a review loop"
+  code={["graph.add_edge(START, 'draft')", "graph.add_conditional_edges('draft', route)", "graph.add_edge('revise', 'draft')"]}
+  nodes={["START", "draft", "route", "revise", "END"]}
+  steps={[
+    { line: 0, active: [0, 1], note: "Execution enters draft with the initial state.", state: { attempts: "0" } },
+    { line: 1, active: [1, 2], note: "draft returns an update. The router inspects the state.", state: { attempts: "1", quality: "low" } },
+    { line: 1, active: [3], note: "Quality is low, so the edge goes to revise.", state: { attempts: "1" } },
+    { line: 2, active: [1], note: "An ordinary edge loops back to draft. This is a cycle a chain can't express.", state: { attempts: "2", quality: "ok" } },
+    { line: 1, active: [2, 4], note: "The router now returns END. A checkpointer would have saved state after every step.", state: { attempts: "2" } },
+  ]}
+/>
+
+## Syntax and key APIs
+
+```py
+from langgraph.graph import StateGraph, MessagesState, START, END
+from langgraph.checkpoint.memory import InMemorySaver
+
+agent = create_agent(model, tools=[], checkpointer=InMemorySaver())
+config = {"configurable": {"thread_id": "user-1"}}
+agent.invoke({"messages": [...]}, config)
+```
+
+| Checkpointer | Use |
+| --- | --- |
+| `InMemorySaver` | Tests and demos |
+| `SqliteSaver` | Local development |
+| `PostgresSaver` | Production |
+
+## Simple example
+
+```python
+from typing import TypedDict
+from langgraph.graph import END, START, StateGraph
+
+class State(TypedDict):
+    attempts: int
+    quality: str
+
+def draft(state: State):
+    attempts = state["attempts"] + 1
+    return {"attempts": attempts, "quality": "ok" if attempts >= 2 else "low"}
+
+def revise(state: State):
+    return {}
+
+def route(state: State):
+    return END if state["quality"] == "ok" else "revise"
+
+builder = StateGraph(State)
+builder.add_node("draft", draft)
+builder.add_node("revise", revise)
+builder.add_edge(START, "draft")
+builder.add_conditional_edges("draft", route)
+builder.add_edge("revise", "draft")
+
+graph = builder.compile()
+assert graph.invoke({"attempts": 0, "quality": ""})["attempts"] == 2
+```
+
+## Industry examples
+
+### Keep conversations separate by thread
+
+```python
+from langchain.agents import create_agent
+from langchain.messages import AIMessage
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langgraph.checkpoint.memory import InMemorySaver
+
+class Scripted(GenericFakeChatModel):
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+replies = iter([AIMessage(content="one"), AIMessage(content="two"), AIMessage(content="three")])
+agent = create_agent(Scripted(messages=replies), tools=[], checkpointer=InMemorySaver())
+
+a = {"configurable": {"thread_id": "a"}}
+b = {"configurable": {"thread_id": "b"}}
+
+agent.invoke({"messages": [{"role": "user", "content": "first"}]}, a)
+second = agent.invoke({"messages": [{"role": "user", "content": "again"}]}, a)
+other = agent.invoke({"messages": [{"role": "user", "content": "hello"}]}, b)
+
+assert len(second["messages"]) == 4
+assert len(other["messages"]) == 2
+```
+
+### Control long histories
+
+```py
+from langchain.agents.middleware import SummarizationMiddleware
+
+agent = create_agent(
+    model,
+    tools=[],
+    checkpointer=checkpointer,
+    middleware=[SummarizationMiddleware(model=summary_model, trigger=("tokens", 4000), keep=("messages", 20))],
+)
+```
+
+### Use Postgres in production
+
+```py
+from langgraph.checkpoint.postgres import PostgresSaver
+
+with PostgresSaver.from_conn_string(DB_URI) as checkpointer:
+    checkpointer.setup()
+    agent = create_agent(model, tools=[], checkpointer=checkpointer)
+```
+
+## Patterns and best practices
+
+- Use a stable `thread_id` per conversation.
+- Keep state small, and store large artifacts elsewhere.
+- Make nodes safe to re-run, since execution can resume.
+- Add a maximum iteration count to any loop.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Standard tool loop | `create_agent` | Less custom routing |
+| Custom control flow | `StateGraph` | More code |
+| Cross-conversation facts | A store (long-term memory) | Needs retrieval and privacy design |
+
+## Common mistakes
+
+**Omitting `thread_id`.** A checkpointed graph needs it to find its state.
+
+**Using `InMemorySaver` in production.** State is lost on restart.
+
+**Letting history grow without limit.** Token cost and latency rise steadily.
+
+**Assuming tools run once.** Retries and resumes can repeat a node, so write idempotent side effects.
+
+## Interview questions
+
+<Question q="What does a checkpointer do?">
+It saves graph state at each step under a thread ID, enabling conversation memory, recovery and human-in-the-loop pauses.
+</Question>
+
+<Question q="When would you use LangGraph rather than create_agent?">
+When you need custom branching, multiple coordinated steps, or control flow the standard agent loop doesn't provide.
+</Question>

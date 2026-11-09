@@ -1,0 +1,99 @@
+---
+title: "Neural Networks, Perceptrons and Activations"
+summary: "From the perceptron to multi-layer networks, forward propagation and why nonlinearity matters."
+level: intermediate
+section: foundations
+order: 1
+tags: ["neural network","perceptron","activation function","forward propagation"]
+requires: ["statistics/logistic-regression"]
+related: ["deep-learning/backpropagation-and-gradient-descent","machine-learning/ml-foundations"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "NumPy examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "PyTorch: Neural networks tutorial"
+    url: "https://docs.pytorch.org/tutorials/beginner/blitz/neural_networks_tutorial.html"
+  - label: "PyTorch: Non-linear activations"
+    url: "https://docs.pytorch.org/docs/stable/nn.html#non-linear-activations-weighted-sum-nonlinearity"
+---
+
+## What it is
+
+A **neuron** computes a weighted sum plus a bias, and passes the result through an **activation function**. A **perceptron** uses a step activation. Stacking layers forms a neural network.
+
+## Why it exists
+
+Neural networks learn hierarchical representations from raw inputs such as pixels, audio and text.
+
+## How it works
+
+| Activation | Output | Use |
+| --- | --- | --- |
+| Sigmoid | 0 to 1 | Binary output |
+| Softmax | Probabilities summing to 1 | Multi-class output |
+| Tanh | −1 to 1 | Some recurrent units |
+| ReLU | 0 or x | Default for hidden layers |
+| GELU | Smooth | Transformers |
+
+Without nonlinear activations, any stack of layers reduces to a single linear transform. A single perceptron can't solve XOR because the classes aren't linearly separable.
+
+**Forward propagation** computes outputs layer by layer.
+
+## Intuition and formula
+
+<Formula>h = σ(W x + b)</Formula>
+
+## Worked example
+
+Inputs (1, 1) with weights of 20 and 20 and bias of −30 yield 10, so a sigmoid gives about 1. That implements AND. Combining an OR unit and a NAND unit with AND gives XOR, which shows why hidden layers matter.
+
+## Python
+
+```python
+import numpy as np
+
+step = lambda x: (x > 0).astype(int)
+inputs = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
+
+or_gate = step(inputs @ np.array([20, 20]) - 10)
+nand_gate = step(inputs @ np.array([-20, -20]) + 30)
+xor = step(np.c_[or_gate, nand_gate] @ np.array([20, 20]) - 30)
+assert xor.tolist() == [0, 1, 1, 0]
+
+def softmax(z):
+    e = np.exp(z - z.max())
+    return e / e.sum()
+
+probabilities = softmax(np.array([2.0, 1.0, 0.1]))
+assert round(probabilities.sum(), 6) == 1 and probabilities.argmax() == 0
+
+W = np.array([[2.0, -1.0], [0.0, 1.0]])
+assert np.allclose(W @ (W @ np.array([1.0, 1.0])), (W @ W) @ np.array([1.0, 1.0]))
+```
+
+The last line shows that stacked linear layers collapse into one matrix.
+
+## In industry
+
+Neural networks power speech, vision, recommendation and language systems. For small tabular problems, tree ensembles usually remain the first choice.
+
+## Assumptions and limitations
+
+Networks need more data, compute and tuning, and they're harder to interpret.
+
+## Common mistakes
+
+- Sigmoid in deep hidden layers, causing vanishing gradients.
+- Applying softmax before a loss function that expects logits.
+- Skipping input normalization.
+- Using a deep model before trying a baseline.
+
+## Alternatives
+
+Gradient-boosted trees for tabular data, and pretrained models when data is limited.
+
+## Interview questions
+
+<Question q="Why do networks need nonlinear activations?">Otherwise any stack of layers is equivalent to a single linear transformation.</Question>
+
+<Question q="Why can't a single perceptron learn XOR?">XOR isn't linearly separable.</Question>

@@ -1,0 +1,87 @@
+---
+title: "Peeking and Sequential Testing"
+summary: "Why repeatedly checking a fixed-horizon test inflates false positives, and how sequential methods fix it."
+level: advanced
+section: experimentation
+order: 6
+tags: ["peeking","optional stopping","sequential testing","alpha spending"]
+requires: ["statistics/sample-size-and-duration"]
+related: ["statistics/multiple-testing-and-fdr","statistics/interpreting-experiments"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "statsmodels: Multiple tests and multiple comparison procedures"
+    url: "https://www.statsmodels.org/stable/stats.html#multiple-tests-and-multiple-comparison-procedures"
+  - label: "NIST: Hypothesis tests"
+    url: "https://www.itl.nist.gov/div898/handbook/prc/section1/prc13.htm"
+---
+
+## What it is
+
+**Peeking** means checking results repeatedly and stopping as soon as significance appears. **Sequential testing** is a class of methods designed to permit valid early decisions.
+
+## Why it exists
+
+A p-value assumes the sample size was fixed in advance. With repeated looks, a random walk has many chances to cross the threshold, so the real false-positive rate climbs well above α.
+
+## How it works
+
+Three common solutions are:
+
+| Method | Idea |
+| --- | --- |
+| Group sequential | A few planned looks with stricter thresholds, such as O'Brien-Fleming |
+| Alpha spending | Spends α over time, permitting flexible look times |
+| Always-valid inference | Confidence sequences that hold at every moment |
+
+Early boundaries are strict, so a test ends early only with very strong evidence, and the final threshold stays near 0.05.
+
+Peeking for **safety** is fine as long as stopping only follows severe harm, with pre-agreed rules, and doesn't decide a success.
+
+## Worked example
+
+A simulation of 4,000 A/A tests has no true effect. Each test looks every 100 users until 2,000, 20 looks in all, using a threshold of |z| > 1.96. Roughly 25% of tests falsely reach significance at some look, five times the intended 5%.
+
+## Python
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(1)
+trials, false_positives = 2_000, 0
+looks = np.arange(100, 2_001, 100)
+
+for _ in range(trials):
+    a, b = rng.normal(0, 1, (2, 2_000)).cumsum(axis=1)
+    z = (b[looks - 1] - a[looks - 1]) / looks / np.sqrt(2 / looks)
+    false_positives += np.any(np.abs(z) > 1.96)
+
+rate = false_positives / trials
+assert 0.20 < rate < 0.30
+```
+
+## In industry
+
+Commercial experiment platforms frequently provide sequential confidence intervals, since people will look at dashboards regardless of what they're told.
+
+## Assumptions and limitations
+
+Sequential procedures pay for flexibility in the form of wider intervals or slightly larger maximum samples. Early results can be exaggerated, so estimates may need correction, and stopping early misses a full weekly cycle.
+
+## Common mistakes
+
+- Treating a dashboard's fixed-horizon p-value as valid at any moment.
+- Extending a test because it's "almost significant".
+- Stopping at first significance.
+- Skipping a guardrail check because the primary goal has already passed.
+
+## Alternatives
+
+Fix the horizon and don't act before it. Bayesian methods are also sensitive to stopping rules in terms of frequentist error, though they're often claimed not to be.
+
+## Interview questions
+
+<Question q="Why does peeking inflate false positives?">Each look gives another chance for noise to cross the threshold, so across looks the total chance is larger than α.</Question>
+
+<Question q="How does O'Brien-Fleming work?">It sets very strict boundaries at early looks and approaches the normal threshold at the end.</Question>

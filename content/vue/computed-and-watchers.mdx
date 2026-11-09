@@ -1,0 +1,180 @@
+---
+title: "Computed Properties and Watchers"
+summary: "Cached derived state, side effects that follow changes, and how watch, watchEffect and flush timing differ."
+level: intermediate
+section: reactivity
+order: 20
+tags: [computed, watch, watchEffect, flush, onWatcherCleanup, deep, side-effects]
+related: [vue/reactivity-in-depth, vue/composables-pinia-and-router]
+versions: "Computed previous value and watch once need 3.4+. onWatcherCleanup and numeric deep need 3.5+."
+tested: "Vue 3.5.45 in Node.js"
+verified: "2026-11-09"
+docs:
+  - label: "Vue: Computed properties"
+    url: "https://vuejs.org/guide/essentials/computed.html"
+  - label: "Vue: Watchers"
+    url: "https://vuejs.org/guide/essentials/watchers.html"
+  - label: "Vue API: Reactivity core"
+    url: "https://vuejs.org/api/reactivity-core.html"
+---
+
+## What it is
+
+A `computed` value derives data from other reactive state and caches the result. A watcher runs a side effect in response to a change.
+
+## Why it exists
+
+Derived values should stay in sync without being stored separately. Some changes also need effects outside Vue, like network calls or saving to storage.
+
+## How it works
+
+A computed value records its dependencies while it evaluates and returns its cached result until one changes. From Vue 3.4, a computed triggers effects only when its value actually changes.
+
+`watch` tracks an explicit source and passes new and old values to a callback. It doesn't track reads inside the callback. `watchEffect` runs immediately and tracks everything read during its **synchronous** execution.
+
+By default, callbacks use `flush: 'pre'`: after parent updates and before the owner component's DOM updates.
+
+## Syntax and key APIs
+
+```javascript
+const full = computed(() => `${first.value} ${last.value}`);
+const editable = computed({ get: () => x.value, set: (v) => (x.value = v) });
+
+watch(source, (next, prev) => {}, { immediate: true, deep: 2, once: true, flush: "post" });
+watch(() => obj.count, handler);
+const stop = watchEffect(() => {});
+```
+
+| Tool | Tracks | Runs immediately | Old value |
+| --- | --- | --- | --- |
+| `computed` | Reads in the getter | Lazily | Getter's argument, 3.4+ |
+| `watch` | Declared source | No, unless `immediate` | Yes |
+| `watchEffect` | Sync reads | Yes | No |
+
+## Simple example
+
+```js
+import assert from "node:assert";
+import { computed, ref } from "vue";
+
+const price = ref(10);
+let calculations = 0;
+
+const withTax = computed(() => {
+  calculations++;
+  return price.value * 1.2;
+});
+
+assert.equal(withTax.value, 12);
+assert.equal(withTax.value, 12);
+assert.equal(calculations, 1);
+
+price.value = 20;
+assert.equal(withTax.value, 24);
+assert.equal(calculations, 2);
+```
+
+## Industry examples
+
+### Cancel stale requests
+
+`onWatcherCleanup` must be called synchronously during the callback.
+
+```js
+import assert from "node:assert";
+import { nextTick, onWatcherCleanup, ref, watch } from "vue";
+
+const id = ref(1);
+const aborted = [];
+
+watch(id, (value) => {
+  const controller = new AbortController();
+  onWatcherCleanup(() => {
+    controller.abort();
+    aborted.push(value);
+  });
+});
+
+id.value = 2;
+await nextTick();
+id.value = 3;
+await nextTick();
+
+assert.deepEqual(aborted, [2]);
+```
+
+### Watch part of an object
+
+A property has to be passed through a getter, and a getter returning an object is shallow unless `deep` is set.
+
+```js
+import assert from "node:assert";
+import { nextTick, reactive, watch } from "vue";
+
+const state = reactive({ filter: { q: "" } });
+const seen = [];
+
+watch(() => state.filter.q, (q) => seen.push(q));
+
+state.filter.q = "vue";
+await nextTick();
+assert.deepEqual(seen, ["vue"]);
+```
+
+### Writable computed for form binding
+
+```js
+import assert from "node:assert";
+import { computed, ref } from "vue";
+
+const cents = ref(1000);
+const dollars = computed({
+  get: () => cents.value / 100,
+  set: (value) => { cents.value = Math.round(value * 100); },
+});
+
+dollars.value = 12.5;
+assert.equal(cents.value, 1250);
+```
+
+## Patterns and best practices
+
+- Use `computed` for values and watchers for effects.
+- Keep computed getters free of side effects. Don't mutate state, make requests or change the DOM in them.
+- Prefer a getter source over `deep: true`, since deep traversal is costly.
+- Use `flush: 'post'` when a callback needs the updated DOM.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Derived display value | `computed` | Must be pure |
+| Simple recalculated call | Method | Runs on every render |
+| Explicit source, old value | `watch` | Dependencies listed manually |
+| Many implicit reads | `watchEffect` | Less explicit |
+
+## Common mistakes
+
+**Using `computed` for time.** `computed(() => Date.now())` never updates, because `Date.now` isn't reactive.
+
+**Passing a property directly to `watch`.** `watch(obj.count, fn)` passes a number. Use `() => obj.count`.
+
+**Reading dependencies after `await` in `watchEffect`.** Only synchronous reads are tracked.
+
+**Creating watchers in async callbacks.** Those won't stop automatically on unmount.
+
+**Using `flush: 'sync'` by default.** It disables batching, so the docs advise caution.
+
+## Interview questions
+
+<Question q="How does computed differ from a method?">
+A computed value is cached until a dependency changes. A method runs each time it's called during rendering.
+</Question>
+
+<Question q="watch versus watchEffect?">
+`watch` tracks a declared source and provides old and new values. `watchEffect` runs immediately and tracks whatever it reads synchronously.
+</Question>
+
+<Question q="When do watcher callbacks run by default?">
+After parent component updates and before the owner component's DOM updates.
+</Question>

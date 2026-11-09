@@ -1,0 +1,208 @@
+---
+title: "Asyncio and Structured Concurrency"
+summary: "How coroutines share one thread, and how TaskGroup, timeouts and to_thread make concurrent code safe to cancel."
+level: advanced
+section: concurrency
+order: 20
+tags: [asyncio, coroutines, await, taskgroup, timeout, cancellation, concurrency, threads]
+related: [python/generators, javascript/event-loop, python/errors-logging-and-typing]
+versions: "TaskGroup and asyncio.timeout need Python 3.11+. Free-threaded builds are officially supported from 3.14."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python library: Coroutines and tasks"
+    url: "https://docs.python.org/3/library/asyncio-task.html"
+  - label: "Python library: asyncio"
+    url: "https://docs.python.org/3/library/asyncio.html"
+  - label: "What's new in Python 3.14"
+    url: "https://docs.python.org/3/whatsnew/3.14.html"
+---
+
+## What it is
+
+`asyncio` runs many tasks on one thread using an event loop. A coroutine, defined with `async def`, can pause at `await` and let another task run.
+
+## Why it exists
+
+Network programs spend most of their time waiting. One thread per connection wastes memory and adds locking hazards. Coroutines switch only at `await`, so thousands of waits can share a single thread.
+
+## How it works
+
+Calling an `async def` function only creates a coroutine object. A **Task** schedules it on the loop. When a task awaits something unfinished, it suspends and the loop runs another ready task.
+
+<StepFlow
+  title="Two tasks sharing one thread"
+  code={["async def fetch(name, delay):", "    print('start', name)", "    await asyncio.sleep(delay)", "    print('done', name)", "", "async with asyncio.TaskGroup() as tg:", "    tg.create_task(fetch('A', 0.2))", "    tg.create_task(fetch('B', 0.1))"]}
+  nodes={["event loop", "task A", "task B", "timer"]}
+  steps={[
+    { line: 5, active: [0], note: "Both tasks are scheduled. Neither has started, because the current task still holds the thread." },
+    { line: 2, active: [1, 3], note: "A runs until its first await. It registers a 0.2 s timer and yields.", state: { output: "start A" } },
+    { line: 2, active: [2, 3], note: "With A suspended, the loop runs B, which registers a 0.1 s timer.", state: { output: "start A, start B" } },
+    { line: 3, active: [2], note: "After 0.1 s, B's timer is ready, so B resumes first.", state: { output: "… done B" } },
+    { line: 3, active: [1], note: "After 0.2 s, A resumes. Total time is about 0.2 s, not 0.3 s.", state: { output: "… done B, done A" } },
+  ]}
+/>
+
+Cancellation raises `CancelledError` at the task's current `await`. It subclasses `BaseException`, so `except Exception` won't catch it by accident.
+
+## Syntax and key APIs
+
+| API | Use |
+| --- | --- |
+| `asyncio.run(main())` | Entry point |
+| `asyncio.TaskGroup()` | Run tasks with shared failure handling |
+| `asyncio.timeout(seconds)` | Time-limit a block |
+| `asyncio.gather(...)` | Collect results in order |
+| `asyncio.to_thread(fn, ...)` | Run blocking code in a thread |
+| `asyncio.Semaphore(n)` | Limit concurrency |
+
+## Simple example
+
+```python
+import asyncio
+
+async def double(x):
+    await asyncio.sleep(0)
+    return x * 2
+
+async def main():
+    async with asyncio.TaskGroup() as tg:
+        a = tg.create_task(double(1))
+        b = tg.create_task(double(2))
+    return a.result(), b.result()
+
+assert asyncio.run(main()) == (2, 4)
+```
+
+## Industry examples
+
+### Fail fast and cancel siblings
+
+When one task in a `TaskGroup` fails, the others are cancelled and the failures are raised as an `ExceptionGroup`.
+
+```python
+import asyncio
+
+cancelled = []
+
+async def slow():
+    try:
+        await asyncio.sleep(10)
+    except asyncio.CancelledError:
+        cancelled.append(True)
+        raise
+
+async def bad():
+    raise ValueError("boom")
+
+failures = []
+
+async def main():
+    try:
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(slow())
+            tg.create_task(bad())
+    except* ValueError as group:
+        failures.extend(group.exceptions)
+
+asyncio.run(main())
+assert len(failures) == 1
+assert cancelled == [True]
+```
+
+### Set a deadline
+
+`TimeoutError` can only be caught outside the `timeout` block, because the cancellation is converted as the block exits.
+
+```python
+import asyncio
+
+async def main():
+    try:
+        async with asyncio.timeout(0.01):
+            await asyncio.sleep(10)
+    except TimeoutError:
+        return "timed out"
+
+assert asyncio.run(main()) == "timed out"
+```
+
+### Limit concurrent requests
+
+```python
+import asyncio
+
+async def main():
+    limit = asyncio.Semaphore(2)
+    active = peak = 0
+
+    async def work():
+        nonlocal active, peak
+        async with limit:
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+
+    async with asyncio.TaskGroup() as tg:
+        for _ in range(6):
+            tg.create_task(work())
+    return peak
+
+assert asyncio.run(main()) == 2
+```
+
+### Keep the loop responsive
+
+A blocking call stops every task. Move it to a thread.
+
+```python
+import asyncio
+import time
+
+async def main():
+    return await asyncio.to_thread(lambda: (time.sleep(0.01), "done")[1])
+
+assert asyncio.run(main()) == "done"
+```
+
+## Patterns and best practices
+
+- Prefer `TaskGroup` for related tasks, so no task outlives its scope.
+- Put a timeout on every external call.
+- Let `CancelledError` propagate. Cleaning up is fine, swallowing it isn't.
+- Keep a reference to any background task you create outside a group.
+
+## Alternatives and trade-offs
+
+| Workload | Choose | Reason |
+| --- | --- | --- |
+| Many network waits | `asyncio` | Low overhead per task |
+| Blocking libraries | Threads | No rewrite required |
+| CPU work | `multiprocessing` or free-threaded builds | Uses several cores |
+
+`gather` doesn't cancel the remaining awaitables when one raises, unlike `TaskGroup`. Use it when you want independent results, with `return_exceptions=True`.
+
+## Common mistakes
+
+**Forgetting `await`.** The coroutine is never run, and Python warns about it.
+
+**Calling blocking functions in a coroutine.** `time.sleep` or a synchronous HTTP call freezes the whole loop.
+
+**Sequential awaits by accident.** `await a(); await b()` runs one after the other. Create tasks to overlap them.
+
+**Swallowing cancellation.** The docs warn that `TaskGroup` and `timeout` might misbehave if a coroutine swallows `CancelledError`.
+
+## Interview questions
+
+<Question q="Is asyncio parallel?">
+It's concurrent, not parallel. Tasks interleave on one thread and only switch at `await`.
+</Question>
+
+<Question q="What is the difference between TaskGroup and gather?">
+A `TaskGroup` cancels its other tasks on the first failure and raises an `ExceptionGroup`. By default `gather` propagates the first exception and leaves the other awaitables running.
+</Question>
+
+<Question q="Why does CancelledError inherit from BaseException?">
+So that general `except Exception` handlers don't accidentally stop cancellation from propagating.
+</Question>

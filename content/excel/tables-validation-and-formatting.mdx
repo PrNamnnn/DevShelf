@@ -1,0 +1,95 @@
+---
+title: "Tables, Validation, Conditional Formatting and Filtering"
+summary: "Structure data with Excel Tables, stop bad input with validation and highlight what matters."
+level: intermediate
+section: structure
+order: 2
+tags: ["Excel Tables","structured references","data validation","conditional formatting","sort","filter"]
+requires: ["excel/workbooks-cells-and-references"]
+related: ["excel/pivot-tables-and-charts","statistics/inconsistent-data-and-validation"]
+versions: "Excel 2016 onward"
+tested: "Structured references evaluated in Excel build 20527"
+verified: "2026-11-09"
+docs:
+  - label: "Excel: Overview of Excel tables"
+    url: "https://support.microsoft.com/en-us/office/overview-of-excel-tables-7ab0bb7d-3a9e-4b56-a3c9-6c94334e492c"
+  - label: "Excel: Structured references"
+    url: "https://support.microsoft.com/en-us/office/using-structured-references-with-excel-tables-f5ed2452-2337-4f71-bed3-c8ae6d2b276e"
+  - label: "Excel: Apply data validation"
+    url: "https://support.microsoft.com/en-us/office/apply-data-validation-to-cells-29fecbcc-d1b9-42c1-9d76-eff3ce5f7249"
+---
+
+## What it is
+
+An **Excel Table** is a named, self-expanding data range. **Data validation** restricts what can be entered. **Conditional formatting** styles cells based on rules. **Sort and filter** reorganize the view of the data.
+
+## Why it exists
+
+Most spreadsheet errors begin with inconsistent structure and bad input. Tables and validation prevent these at the source.
+
+## How it works
+
+Press Ctrl+T to create a Table. New rows join automatically, formulas become calculated columns, and references use names.
+
+| Reference | Meaning |
+| --- | --- |
+| `Orders[Units]` | The Units column |
+| `[@Units]` | Units in this row |
+| `Orders[#Headers]` | The header row |
+| `Orders[[Units]:[Price]]` | Column range |
+
+Validation types include whole number, decimal, list, date, text length and custom formula. Validation applies to typing, not to pasted values.
+
+## Syntax and key APIs
+
+```text
+=SUM(Orders[Units])                               38
+=SUMIFS(Orders[Units],Orders[Region],"North")     13
+=[@Units]*[@Price]                                calculated column
+```
+
+A custom validation rule that blocks duplicates in column A:
+
+```text
+=COUNTIF($A:$A,A2)=1
+```
+
+A conditional format rule to highlight an entire row:
+
+```text
+=$C2>=10
+```
+
+The `$` keeps the column fixed so each cell in the row checks column C.
+
+## Simple example
+
+Create an `Orders` Table, add a list validation on Region pointing to a Regions Table, and add a rule to highlight orders below a target. New data inherits all of that automatically.
+
+## Industry examples
+
+Teams distribute planning templates with locked formulas and validated input fields. Credit-control sheets flag overdue invoices through conditional formatting.
+
+## Patterns and best practices
+
+- One header row, one fact per row, no blank rows or merged cells.
+- Name your tables with meaningful nouns.
+- Limit conditional formats on huge ranges, since they recalculate often.
+- Use slicers on Tables for a friendlier filter experience.
+
+## Alternatives and trade-offs
+
+Power Apps or a real database are better for many concurrent users and strict validation.
+
+## Common mistakes
+
+- Assuming validation also checks pasted data.
+- Inconsistent formulas in a calculated column.
+- Filtering a range that contains a blank row, which truncates the filter.
+- Sorting one column instead of the whole table.
+
+## Interview questions
+
+<Question q="Why use Excel Tables instead of ranges?">They expand automatically and provide readable references, and they feed downstream formulas, Pivot Tables and Power Query.</Question>
+
+<Question q="Does data validation stop pasted values?">No. Pasting bypasses it.</Question>

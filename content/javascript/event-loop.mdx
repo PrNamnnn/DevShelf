@@ -1,0 +1,230 @@
+---
+title: "The Event Loop: Tasks, Microtasks and Rendering"
+summary: "Why a 0 ms timer runs after a promise, how microtasks can freeze a page, and where Node.js differs from the browser."
+level: intermediate
+section: async
+order: 10
+tags: [event-loop, promises, microtasks, async, setTimeout, queueMicrotask, nodejs, performance]
+related: [python/generators, express/middleware-and-error-handling]
+versions: "Browsers per the HTML Standard. Node.js 20+ for the timer ordering described."
+tested: "Node.js 24.17.0. Rendering behaviour is from the specification and was not run."
+verified: "2026-11-09"
+docs:
+  - label: "MDN: JavaScript execution model"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Execution_model"
+  - label: "MDN: Using microtasks"
+    url: "https://developer.mozilla.org/en-US/docs/Web/API/HTML_DOM_API/Microtask_guide"
+  - label: "HTML Standard: Event loop processing model"
+    url: "https://html.spec.whatwg.org/multipage/webappapis.html#event-loop-processing-model"
+  - label: "HTML Standard: Timers"
+    url: "https://html.spec.whatwg.org/multipage/timers-and-user-prompts.html#timers"
+  - label: "Node.js: The event loop, timers and nextTick"
+    url: "https://nodejs.org/en/learn/asynchronous-work/event-loop-timers-and-nexttick"
+---
+
+## What it is
+
+JavaScript runs your code on one thread with one call stack. The event loop is the host's scheduler around that thread. It repeatedly picks a job, runs it until the stack is empty, and then picks the next one.
+
+The host is the browser or Node.js. Promises are defined by the language, while timers, DOM events and network callbacks come from the host.
+
+## Why it exists
+
+A single thread can't wait. If a network call blocked the stack, the page couldn't paint or respond to clicks. So slow work happens outside JavaScript, and its result returns later as a callback in a queue.
+
+Understanding the queues explains output ordering bugs, frozen pages, and why `await` doesn't block anything.
+
+## How it works
+
+The HTML Standard has two kinds of queue with very different rules:
+
+- **Task queues.** An event loop has one or more of them, and the browser chooses which queue to serve. One task runs per turn of the loop.
+- **The microtask queue.** There is one per event loop. After each task, a microtask checkpoint runs until the queue is empty, including microtasks added during the checkpoint.
+
+Step through this script and predict each line before you reveal it.
+
+<EventLoopViz />
+
+The final output is `A F C E D B`. Two details decide it. D waits behind E because its promise wasn't fulfilled until C finished. B comes last because a task can never interrupt a microtask checkpoint.
+
+| Queued as a task | Queued as a microtask |
+| --- | --- |
+| `setTimeout`, `setInterval` callbacks | Promise reactions (`.then`, `.catch`, `.finally`) |
+| DOM events such as clicks | Code after `await` |
+| Network and message callbacks | `queueMicrotask` |
+| | `MutationObserver` callbacks |
+
+Rendering is scheduled by the browser as its own work on the rendering task source, so it can't happen in the middle of a task or a microtask checkpoint. `requestAnimationFrame` callbacks run as part of that update.
+
+## Syntax and key APIs
+
+```js
+setTimeout(callback, delayMs);     // task, after at least delayMs
+queueMicrotask(callback);          // microtask, after the current job
+requestAnimationFrame(callback);   // browser only, before the next paint
+promise.then(callback);            // microtask once the promise settles
+await value;                       // resumes the function in a microtask
+```
+
+<Callout type="note">
+The delay in `setTimeout` is a minimum, not a schedule. The HTML Standard also clamps timers: when the nesting level is above 5 and the delay is under 4 ms, the delay becomes 4 ms.
+</Callout>
+
+## Simple example
+
+`await` splits a function in two. Everything before the first `await` runs synchronously in the caller's turn, and the rest is scheduled.
+
+```js
+const log = [];
+
+async function load() {
+  log.push("start");
+  await null;
+  log.push("after await");
+}
+
+load();
+log.push("sync after call");
+// log order: start, sync after call, after await
+```
+
+## Industry examples
+
+### Keep long work from freezing the UI
+
+A microtask yield doesn't help here, because rendering and input wait for microtasks too. Yield with a task instead, so that the browser gets a turn.
+
+```js
+async function processInChunks(items, handle, chunkMs = 8) {
+  let deadline = performance.now() + chunkMs;
+
+  for (const item of items) {
+    handle(item);
+
+    if (performance.now() >= deadline) {
+      await new Promise((resolve) => setTimeout(resolve));
+      deadline = performance.now() + chunkMs;
+    }
+  }
+}
+```
+
+### Coalesce many synchronous writes into one flush
+
+Frameworks use this idea to batch updates. All calls in the current job land in one batch, and the flush still runs before the next paint or task.
+
+```js
+function createBatcher(flush) {
+  let pending = [];
+  let scheduled = false;
+
+  return (item) => {
+    pending.push(item);
+    if (scheduled) return;
+
+    scheduled = true;
+    queueMicrotask(() => {
+      const batch = pending;
+      pending = [];
+      scheduled = false;
+      flush(batch);
+    });
+  };
+}
+
+const add = createBatcher((batch) => console.log(batch));
+add(1);
+add(2);
+add(3);
+// logs [ 1, 2, 3 ] once
+```
+
+### Node.js has phases instead of a rendering step
+
+Node's loop moves through phases, each with its own FIFO callback queue: timers, pending callbacks, idle/prepare, poll, check (`setImmediate`), and close callbacks.
+
+```js
+const fs = require("node:fs");
+
+fs.readFile(__filename, () => {
+  setTimeout(() => console.log("timeout"), 0);
+  setImmediate(() => console.log("immediate"));
+});
+// Inside an I/O callback, always: immediate, timeout
+```
+
+From the main module, the order of those two is non-deterministic. Only the I/O case is guaranteed.
+
+<Callout type="version">
+Starting with libuv 1.45 (Node.js 20), timers run after the poll phase in each iteration rather than before it. They still run once before the loop is entered. Code that relied on the older timing of `setImmediate` relative to timers can change behaviour.
+</Callout>
+
+`process.nextTick` isn't part of the loop phases. Its queue runs after the current operation, and its order against promises depends on how the module was loaded. On Node 24.17, the same script printed `nextTick promise` as CommonJS and `promise nextTick` as an ES module. Treat that order as unreliable and don't build logic on it.
+
+## Patterns and best practices
+
+- Yield with a task, such as `setTimeout`, when the goal is letting the page paint or respond.
+- Use `queueMicrotask` for work that must finish before anything else observes the state.
+- Use `requestAnimationFrame` for visual updates. The HTML Standard names it as the right tool for code that must run before the next rendering cycle.
+- Prefer `setImmediate` over `process.nextTick` in Node. The Node.js docs describe `nextTick` as firing in the same phase, so recursive use starves I/O.
+- Keep each job short. Everything else on the thread waits for it.
+
+## Alternatives and trade-offs
+
+| Need | Tool | Trade-off |
+| --- | --- | --- |
+| Run before other queued work | `queueMicrotask` | Blocks rendering and input until drained |
+| Let the browser paint between chunks | `setTimeout` | Timer clamping adds latency in deep nesting |
+| Sync with the next frame | `requestAnimationFrame` | Browser only, and may be paused in background tabs |
+| Heavy CPU work | Web Workers, `worker_threads` | Separate thread, with data passed by message |
+| Follow I/O in Node | `setImmediate` | Node only |
+
+## Common mistakes
+
+**Believing `setTimeout(fn, 0)` runs next.** It runs after the current task, all microtasks, and any tasks chosen ahead of it.
+
+**Starving the loop with microtasks.** Each microtask that queues another extends the same checkpoint, so timers and rendering never get a turn.
+
+```js
+let count = 0;
+setTimeout(() => console.log("timer saw", count), 0);
+
+(function loop() {
+  if (++count < 100000) queueMicrotask(loop);
+})();
+// timer saw 100000: the timer could not run until the chain ended
+```
+
+**Using `forEach` with an async callback.** `forEach` ignores returned promises, so the code after it runs before the saves finish.
+
+```js
+// Wrong: "saved" is logged before any save completes.
+items.forEach(async (item) => { await save(item); });
+console.log("saved");
+
+// Sequential:
+for (const item of items) await save(item);
+
+// Concurrent:
+await Promise.all(items.map(save));
+```
+
+**Assuming `await` moves work off the thread.** A CPU-heavy loop after `await` still blocks everything.
+
+## Interview questions
+
+<Question q="Why does a resolved promise's callback run before a 0 ms timeout?">
+Promise reactions are microtasks and timers are tasks. After the current task ends, the microtask checkpoint drains completely before the event loop takes another task.
+</Question>
+
+<Question q="What happens if a microtask keeps queueing microtasks?">
+The checkpoint doesn't end, so tasks and rendering are starved and the page appears frozen. Timers and clicks wait until the chain stops.
+</Question>
+
+<Question q="Does the browser render after every task?">
+No. The browser decides when a rendering opportunity exists, based on factors like the display's refresh rate and throttling. Several tasks can run between paints.
+</Question>
+
+<Question q="How does the Node.js event loop differ from the browser's?">
+Node has ordered phases (timers, pending callbacks, poll, check, close), `setImmediate` and `process.nextTick`, and no rendering step. Browsers have task sources and rendering opportunities.
+</Question>

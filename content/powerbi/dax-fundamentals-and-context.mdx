@@ -1,0 +1,96 @@
+---
+title: "DAX Fundamentals: Measures and Evaluation Context"
+summary: "The most important idea in DAX, filter context and row context, plus measures versus calculated columns."
+level: intermediate
+section: dax
+order: 1
+tags: ["DAX","filter context","row context","measures","calculated columns"]
+requires: ["powerbi/star-schema-and-relationships"]
+related: ["powerbi/calculate-and-filter-functions","statistics/kpis-and-north-star","excel/conditional-aggregation"]
+versions: "DAX as documented in November 2026"
+tested: "Not executable here. Results reasoned from Microsoft's evaluation rules and checked by hand on the sample table"
+verified: "2026-11-09"
+docs:
+  - label: "DAX overview"
+    url: "https://learn.microsoft.com/en-us/dax/dax-overview"
+  - label: "Measures in Power BI"
+    url: "https://learn.microsoft.com/en-us/power-bi/transform-model/desktop-measures"
+  - label: "Calculated columns"
+    url: "https://learn.microsoft.com/en-us/power-bi/transform-model/desktop-calculated-columns"
+---
+
+## What it is
+
+DAX is the formula language of Power BI semantic models. A **measure** is computed at query time in the current filter context. A **calculated column** is computed row by row at refresh and stored.
+
+## Why it exists
+
+A model must answer unforeseen questions: one `Total Sales` definition has to work by month, product, region and any combination. DAX achieves that by computing based on context instead of cell positions.
+
+## How it works
+
+**Filter context** is the set of filters on the model when a measure is evaluated. It comes from rows and columns in a visual, slicers, page filters and `CALCULATE`.
+
+**Row context** is "the current row", which exists inside calculated columns and iterators. A row context doesn't filter other tables on its own.
+
+<TableViz
+  title="The same measure, different filter contexts"
+  code={["Total Units := SUM(Sales[Units])"]}
+  tables={[{ name: "Sales", columns: ["Region", "Product", "Units"], rows: [["North", "Pen", 10], ["South", "Book", 5], ["North", "Book", 3], ["East", "Pen", 8], ["South", "Pen", 12]] }]}
+  outputColumns={["Visual cell", "Result"]}
+  steps={[
+    { line: 0, highlight: { Sales: [0, 2] }, note: "The visual's North row places a filter on Region, and SUM runs only over rows that survive.", output: [["North", 13]] },
+    { line: 0, highlight: { Sales: [1, 4] }, note: "The same measure on the South row sees a different filter context.", output: [["North", 13], ["South", 17]] },
+    { line: 0, highlight: { Sales: [0, 1, 2, 3, 4] }, note: "The total row has no Region filter. It isn't the sum of displayed cells, but a new evaluation over all visible rows.", output: [["North", 13], ["South", 17], ["East", 8], ["Total", 38]] }
+  ]}
+/>
+
+| | Measure | Calculated column |
+| --- | --- | --- |
+| Evaluated | When queried | At refresh |
+| Context | Filter context | Row context |
+| Storage | Formula only | Stored in the model |
+| Good for | Aggregations and KPIs | Row-level attributes for slicing |
+
+## Syntax and key APIs
+
+```text
+Total Units = SUM ( Sales[Units] )
+Revenue = SUMX ( Sales, Sales[Units] * Sales[Price] )
+Avg Price = DIVIDE ( [Revenue], [Total Units] )
+Size Band = IF ( Sales[Units] >= 10, "Bulk", "Small" )   -- calculated column
+```
+
+`DIVIDE` handles division by zero safely. Reference measures as `[Measure]` and columns as `Table[Column]`.
+
+## Simple example
+
+Revenue on the sample table is 1,800 in total, and 650 for North. `Avg Price` at the total is 1800 ÷ 38 = 47.37. A column-averaged price would give a different and incorrect number, since it ignores units.
+
+## Industry examples
+
+Finance builds a base measure library, such as Revenue, COGS, and Margin %, and layers time-based analysis on top. Certified shared semantic models expose those definitions across the company.
+
+## Patterns and best practices
+
+- Prefer measures to calculated columns for aggregations.
+- Build simple base measures, then reuse them.
+- Format measures once, in the model.
+- Store numbers as additive facts in the source when you can.
+
+## Alternatives and trade-offs
+
+Compute stable row-level attributes in Power Query or the warehouse, rather than as DAX columns. SQL views offer shared logic, but they cannot react dynamically to report filters.
+
+## Common mistakes
+
+- Using a calculated column for something that should react to slicers.
+- Assuming totals are sums of displayed rows.
+- Dividing with `/` where `DIVIDE` is safer.
+- Implicit measures from dragging numeric fields around.
+
+## Interview questions
+
+<Question q="What is the difference between filter and row context?">Filter context restricts the data that a calculation sees. Row context identifies a current row during iteration, and doesn't propagate through relationships without context transition.</Question>
+
+<Question q="Why doesn't a measure total equal the sum of its rows?">The total is calculated independently in its own filter context, which is correct for non-additive calculations such as ratios.</Question>

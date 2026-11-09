@@ -1,0 +1,169 @@
+---
+title: "Components, JSX and Props"
+summary: "How React describes UI with functions, what JSX compiles to, how data flows down through props, and how to render lists and conditions."
+level: fundamental
+section: foundations
+order: 10
+tags: [components, jsx, props, children, conditional-rendering, lists, purity, basics]
+related: [react/state-and-rendering, javascript/values-and-types]
+versions: "React 19. Passing ref as a prop needs React 19."
+tested: "Core rendering behaviour run on React 19.3.1 with jsdom. Not every snippet was executed."
+verified: "2026-11-09"
+docs:
+  - label: "React: Your first component"
+    url: "https://react.dev/learn/your-first-component"
+  - label: "React: Passing props to a component"
+    url: "https://react.dev/learn/passing-props-to-a-component"
+  - label: "React: Keeping components pure"
+    url: "https://react.dev/learn/keeping-components-pure"
+  - label: "React 19 release post"
+    url: "https://react.dev/blog/2024/12/05/react-19"
+---
+
+## What it is
+
+A React component is a function that returns a description of UI. JSX is syntax that looks like HTML and compiles to JavaScript calls creating those descriptions. Props are the inputs a parent passes to a child.
+
+## Why it exists
+
+Instead of writing step-by-step DOM updates, you describe what the screen should look like for the current data. Components let you split that description into reusable pieces.
+
+## How it works
+
+JSX compiles into element objects, which are plain descriptions. React decides when to call your components and what DOM work is needed. Because React may call a component at any time, a component must be **pure**: same inputs, same output, with no side effects during rendering.
+
+Data flows one way, from parent to child. A child can't change its props. It calls a function passed by its parent instead.
+
+## Syntax and key APIs
+
+```jsx
+function Avatar({ name, size = 40, children }) {
+  return (
+    <figure>
+      <img alt={name} width={size} />
+      <figcaption>{children}</figcaption>
+    </figure>
+  );
+}
+
+<Avatar name="Ada" size={64}>Mathematician</Avatar>
+```
+
+| JSX rule | Detail |
+| --- | --- |
+| One root | Wrap siblings in a fragment: `<>...</>` |
+| Close all tags | `<img />` |
+| camelCase attributes | `className`, `onClick` |
+| Expressions in braces | `{user.name}` |
+
+## Simple example
+
+```jsx
+function Greeting({ name }) {
+  return <h1>Hello, {name}</h1>;
+}
+
+export default function App() {
+  return (
+    <main>
+      <Greeting name="Ada" />
+      <Greeting name="Linus" />
+    </main>
+  );
+}
+```
+
+## Industry examples
+
+### Conditional rendering
+
+```jsx
+function Orders({ orders, error }) {
+  if (error) return <p role="alert">{error.message}</p>;
+  if (orders.length === 0) return <p>No orders yet.</p>;
+
+  return (
+    <ul>
+      {orders.map((order) => (
+        <li key={order.id}>
+          {order.number} {order.isLate && <strong>Late</strong>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Composition with children
+
+A layout component doesn't need to know its content, which avoids passing props through layers.
+
+```jsx
+function Card({ title, actions, children }) {
+  return (
+    <section className="card">
+      <header>
+        <h2>{title}</h2>
+        {actions}
+      </header>
+      {children}
+    </section>
+  );
+}
+```
+
+### Passing a ref in React 19
+
+<Callout type="version">
+In React 19, function components receive `ref` as a normal prop. `forwardRef` is no longer needed for new code, and React plans to deprecate it in a future release.
+</Callout>
+
+```jsx
+function TextField({ label, ref }) {
+  return (
+    <label>
+      {label}
+      <input ref={ref} />
+    </label>
+  );
+}
+```
+
+## Patterns and best practices
+
+- Keep components small and named after what they represent.
+- Derive display values during render instead of storing them.
+- Lift state only as high as the nearest common parent.
+- Pass data as props, and pass behaviour as callback props.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Share markup | Component | Simple and explicit |
+| Share stateful logic | Custom Hook | No markup included |
+| Fill layout slots | `children` or element props | More props at the call site |
+
+## Common mistakes
+
+**Mutating during render.** Changing an outside variable makes output depend on how many times React rendered.
+
+**`{count && <Badge />}` with a number.** When `count` is `0`, React renders `0`. Use `count > 0 && ...`.
+
+**Defining a component inside another.** Each render creates a new type, so React resets the inner component's state.
+
+**Using array index as a key for changing lists.** State can attach to the wrong item, as covered in [reconciliation and keys](/react/reconciliation-and-keys).
+
+## Interview questions
+
+<Question q="What is JSX?">
+A syntax extension that compiles into JavaScript calls producing React elements. It isn't HTML, and it isn't required.
+</Question>
+
+<Question q="Why must components be pure?">
+React may render a component more than once or discard a render. Side effects during rendering would become unpredictable.
+</Question>
+
+<Question q="Can a child change its props?">
+No. Props are read-only. A child asks its parent to change state through a callback.
+</Question>

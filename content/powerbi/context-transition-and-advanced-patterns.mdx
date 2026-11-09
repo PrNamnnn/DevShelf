@@ -1,0 +1,102 @@
+---
+title: "Context Transition and Advanced DAX Patterns"
+summary: "Why a measure inside an iterator behaves differently, and patterns for ranking, segmentation and new customers."
+level: advanced
+section: advanced-dax
+order: 1
+tags: ["context transition","RANKX","advanced DAX","patterns"]
+requires: ["powerbi/iterators-and-variables","powerbi/time-intelligence"]
+related: ["statistics/segmentation-rfm-and-baskets","statistics/cohort-and-retention-curves"]
+versions: "DAX as documented in November 2026"
+tested: "Not executable here. Checked against Microsoft documentation"
+verified: "2026-11-09"
+docs:
+  - label: "CALCULATE and context transition"
+    url: "https://learn.microsoft.com/en-us/dax/calculate-function-dax"
+  - label: "RANKX"
+    url: "https://learn.microsoft.com/en-us/dax/rankx-function-dax"
+  - label: "Understanding functions for parent-child hierarchies and DAX"
+    url: "https://learn.microsoft.com/en-us/dax/understanding-functions-for-parent-child-hierarchies-in-dax"
+---
+
+## What it is
+
+**Context transition** is when `CALCULATE` converts the current row context into an equivalent filter context. Every measure reference is implicitly wrapped in `CALCULATE`.
+
+## Why it exists
+
+Row context doesn't filter a table or its relations by itself. Context transition lets a calculation "for this customer" work inside an iteration over customers.
+
+## How it works
+
+<StepFlow
+  title="A measure inside SUMX over customers"
+  nodes={["Row context", "Transition", "Filter context", "Evaluate", "Aggregate"]}
+  steps={[
+    { note: "SUMX creates a row context on one customer row.", active: [0] },
+    { note: "Referencing [Revenue] implicitly calls CALCULATE, which begins a context transition.", active: [1] },
+    { note: "All columns of the current customer row become filters. If rows aren't unique, every matching row is included, and results may be doubled.", active: [2] },
+    { note: "Revenue is computed for that customer through the relationship to Sales.", active: [3] },
+    { note: "SUMX adds the results across all customers.", active: [4] }
+  ]}
+/>
+
+Context transition isn't supported in DirectQuery calculated columns or RLS rules, and it can be expensive on large tables.
+
+## Syntax and key APIs
+
+```text
+Column inside Customer:  Customer Revenue = [Revenue]
+Without transition, a plain SUM would see all rows:
+Wrong Column = SUM ( Sales[Amount] )
+
+Rank = RANKX ( ALL ( DimCustomer[Name] ), [Revenue], , DESC, DENSE )
+
+Big Customers =
+SUMX (
+    VALUES ( DimCustomer[CustomerKey] ),
+    IF ( [Revenue] > 10000, [Revenue] )
+)
+
+New Customers =
+VAR Period = VALUES ( DimDate[Date] )
+RETURN
+COUNTROWS (
+    FILTER (
+        VALUES ( Sales[CustomerKey] ),
+        CALCULATE ( MIN ( Sales[Date] ), ALL ( DimDate ) ) IN Period
+    )
+)
+```
+
+## Simple example
+
+Add a `Customer Revenue` column to `DimCustomer` using `= [Revenue]`. Each row gets its own customer's revenue. Replace it with `= SUM(Sales[Amount])` and each row shows the grand total, because no transition occurred.
+
+## Industry examples
+
+Dynamic ABC segmentation, cohort measures and Top-N analysis all rely on iterating a dimension with a measure.
+
+## Patterns and best practices
+
+- Iterate over a column with unique values.
+- Reduce the iteration table first.
+- Separate base measures from analytical patterns.
+- Use DAX Studio to check query timings.
+
+## Alternatives and trade-offs
+
+Pre-computing customer attributes in the warehouse is simpler and faster when the logic doesn't depend on filters.
+
+## Common mistakes
+
+- Iterating over a table with duplicate rows.
+- Using measures in row-heavy iterators without testing cost.
+- Forgetting `ALL` in `RANKX`.
+- Using calculated columns for dynamic logic.
+
+## Interview questions
+
+<Question q="What is context transition?">The transformation of row context into filter context by CALCULATE, including the implicit CALCULATE around any measure reference.</Question>
+
+<Question q="Why does a SUM in a calculated column return the grand total?">Row context doesn't filter the table, and no CALCULATE triggers a transition.</Question>

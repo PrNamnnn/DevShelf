@@ -1,0 +1,112 @@
+---
+title: "Exploratory Data Analysis"
+summary: "A repeatable EDA workflow from understanding the grain of a dataset to generating hypotheses and reporting findings."
+level: fundamental
+section: analysis-types
+order: 4
+tags: ["EDA","profiling","workflow","hypothesis generation"]
+requires: ["statistics/univariate-analysis","statistics/bivariate-analysis"]
+related: ["python/pandas-essentials","statistics/missing-data","statistics/choosing-the-right-chart"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "NIST: EDA"
+    url: "https://www.itl.nist.gov/div898/handbook/eda/eda.htm"
+  - label: "pandas: 10 minutes"
+    url: "https://pandas.pydata.org/docs/user_guide/10min.html"
+---
+
+## What it is
+
+Exploratory data analysis, a term popularized by John Tukey, is open-minded investigation of a dataset before formal modelling. It's how you learn what the data contains, what's broken and what's worth testing.
+
+## Why it exists
+
+Skipping exploration leads to polished results on flawed data. EDA catches join explosions, mislabeled units and missing periods, and it often produces the actual insight.
+
+## How it works
+
+<StepFlow
+  title="An EDA workflow"
+  nodes={["Grain", "Profile", "Quality", "Single", "Pairs", "Report"]}
+  steps={[
+    { note: "State what one row represents, and check it. An order table and an order-line table give very different totals.", active: [0] },
+    { note: "Get shape, types, date ranges and key uniqueness.", active: [1] },
+    { note: "Quantify missing values, duplicates, invalid values and outliers.", active: [2] },
+    { note: "Examine each important variable's distribution.", active: [3] },
+    { note: "Check relationships with the outcome, then segment and look over time.", active: [4] },
+    { note: "Write findings, data problems and the hypotheses worth testing next.", active: [5] }
+  ]}
+/>
+
+Exploration and confirmation need to stay separate. Patterns you noticed after trying dozens of cuts are hypotheses. Test them on fresh data or in an experiment.
+
+## Worked example
+
+A retail analyst loads a year of orders. Grain: `order_id` should be unique, but there are 1.2% duplicates from a retry bug. Profiling shows November is missing two days. Quality checks find negative amounts, which turn out to be refunds that belong in another analysis. A time-series plot then shows a weekly cycle, and segmenting finds that mobile average order value fell after an August redesign. That final observation becomes a hypothesis for a controlled test.
+
+## Python
+
+```python
+import numpy as np
+import pandas as pd
+
+orders = pd.DataFrame({
+    "order_id": [1, 2, 2, 3, 4, 5],
+    "device": ["web", "mobile", "mobile", "web", None, "mobile"],
+    "amount": [120.0, 80.0, 80.0, -40.0, 150.0, np.nan],
+})
+
+profile = pd.DataFrame({
+    "missing_pct": orders.isna().mean().round(3) * 100,
+    "unique": orders.nunique(),
+})
+duplicates = orders.duplicated("order_id").sum()
+invalid = (orders["amount"] < 0).sum()
+
+assert duplicates == 1
+assert invalid == 1
+assert profile.loc["device", "missing_pct"] == 16.7
+```
+
+## SQL
+
+```sql
+SELECT count(*) AS row_count,
+       count(DISTINCT order_id) AS distinct_orders,
+       count(*) - count(amount) AS missing_amounts,
+       count(*) FILTER (WHERE amount < 0) AS negative_amounts
+FROM (VALUES (1, 120.0), (2, 80.0), (2, 80.0), (3, -40.0), (5, NULL))
+       AS o(order_id, amount);
+-- rows: [{"row_count":5,"distinct_orders":4,"missing_amounts":1,"negative_amounts":1}]
+```
+
+## Excel or Power BI
+
+Convert the range to a Table, use Power Query's Column Quality, Distribution and Profile views, and build Pivot Tables for quick segment cuts. Power BI Desktop exposes the same profiling options in Power Query's View ribbon.
+
+## In industry
+
+A short EDA note saved with a project lets others reuse the discoveries. Teams also turn repeated findings into automated data-quality checks.
+
+## Assumptions and limitations
+
+EDA finds patterns, including false ones. The more cuts you examine, the more that appear by chance. Any finding is conditional on the data's coverage and quality.
+
+## Common mistakes
+
+- Skipping the grain check.
+- Treating an EDA finding as proven.
+- Only looking at averages.
+- Forgetting to analyze time, the single most common source of hidden problems.
+
+## Alternatives
+
+Automated profilers speed up the first pass, and their output can be saved. A pre-registered analysis, which fixes the plan in advance, is the right mode for confirming rather than exploring.
+
+## Interview questions
+
+<Question q="What are your first steps with an unfamiliar dataset?">Establish the grain and the key, check date coverage, profile quality, then explore distributions and relationships with the outcome.</Question>
+
+<Question q="How do you avoid false discoveries during EDA?">Keep exploratory findings labelled as hypotheses, count how many cuts were tried, and confirm on held-out data or through an experiment.</Question>

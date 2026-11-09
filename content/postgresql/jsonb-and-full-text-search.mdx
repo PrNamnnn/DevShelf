@@ -1,0 +1,157 @@
+---
+title: "JSONB and Full-Text Search"
+summary: "Storing flexible documents, querying and indexing them correctly, and searching natural language without another system."
+level: advanced
+section: advanced-sql
+order: 20
+tags: [jsonb, json, gin, full-text-search, tsvector, tsquery, containment]
+related: ["postgresql/indexing-strategies", "postgresql/schema-types-and-constraints", "mongodb/documents-bson-and-collections"]
+versions: "All supported PostgreSQL versions."
+tested: "PostgreSQL 18.6 through PGlite"
+verified: "2026-11-09"
+docs:
+  - label: "PostgreSQL: JSON types"
+    url: "https://www.postgresql.org/docs/current/datatype-json.html"
+  - label: "PostgreSQL: JSON functions and operators"
+    url: "https://www.postgresql.org/docs/current/functions-json.html"
+  - label: "PostgreSQL: Full-text search introduction"
+    url: "https://www.postgresql.org/docs/current/textsearch-intro.html"
+  - label: "PostgreSQL: Full-text indexes"
+    url: "https://www.postgresql.org/docs/current/textsearch-indexes.html"
+---
+
+## What it is
+
+`jsonb` stores JSON in a decomposed binary form that can be queried and indexed. Full-text search matches natural-language documents using processed lexemes.
+
+## Why it exists
+
+Some data varies by record, like third-party payloads or product attributes. Basic text search also needs to handle word forms and ranking, which `LIKE` can't do.
+
+## How it works
+
+`json` stores exact text and reparses it on use. `jsonb` drops whitespace, key order and duplicate keys. The docs say most applications should prefer `jsonb`.
+
+Full-text search compares a `tsvector`, normalized lexemes, with a `tsquery` using `@@`. Both can be served by a GIN index.
+
+| Operator | Meaning |
+| --- | --- |
+| `->` | Get field as JSON |
+| `->>` | Get field as text |
+| `#>>` | Get by path as text |
+| `@>` | Contains |
+| `?` | Key exists |
+| `\|\|` | Concatenate |
+| `-` | Delete key |
+
+## Syntax and key APIs
+
+```plsql
+CREATE INDEX ON events USING gin (payload);
+CREATE INDEX ON events USING gin (payload jsonb_path_ops);
+```
+
+`jsonb_ops`, the default, supports key existence and containment. `jsonb_path_ops` is usually much smaller and faster for containment, but can't answer key-existence queries.
+
+## Simple example
+
+```sql
+CREATE TABLE events (id int, payload jsonb);
+INSERT INTO events VALUES (1, '{"user": {"name": "Ada"}, "tags": ["new", "vip"]}');
+
+SELECT payload -> 'user' ->> 'name' AS name
+FROM events
+WHERE payload @> '{"tags": ["vip"]}';
+-- rows: [{"name":"Ada"}]
+```
+
+## Industry examples
+
+### Update a document in place
+
+```sql
+UPDATE events
+SET payload = jsonb_set(payload, '{user,plan}', '"pro"') || '{"seen": true}';
+
+SELECT payload #>> '{user,plan}' AS plan, payload ->> 'seen' AS seen FROM events;
+-- rows: [{"plan":"pro","seen":"true"}]
+```
+
+### Index containment queries
+
+```sql
+CREATE TABLE docs (body jsonb);
+INSERT INTO docs SELECT jsonb_build_object('type', 't' || (g % 100)) FROM generate_series(1, 5000) g;
+CREATE INDEX docs_gin ON docs USING gin (body jsonb_path_ops);
+ANALYZE docs;
+
+DO $$
+DECLARE line text; found boolean := false;
+BEGIN
+  FOR line IN EXPLAIN SELECT * FROM docs WHERE body @> '{"type": "t7"}' LOOP
+    IF line LIKE '%docs_gin%' THEN found := true; END IF;
+  END LOOP;
+  ASSERT found, 'GIN index should be used';
+END $$;
+```
+
+### Search articles by word stem
+
+```sql
+CREATE TABLE articles (
+  id int,
+  body text,
+  search tsvector GENERATED ALWAYS AS (to_tsvector('english', body)) STORED
+);
+INSERT INTO articles VALUES (1, 'Rats ate the cheese'), (2, 'Dogs run fast');
+CREATE INDEX articles_search ON articles USING gin (search);
+
+SELECT id FROM articles WHERE search @@ to_tsquery('english', 'rat');
+-- rows: [{"id":1}]
+```
+
+### Rank search results
+
+```sql
+SELECT id, ts_rank(search, q) > 0 AS matched
+FROM articles, to_tsquery('english', 'dog | run') AS q
+WHERE search @@ q;
+-- rows: [{"id":2,"matched":true}]
+```
+
+## Patterns and best practices
+
+- Keep queried, stable fields in normal columns.
+- Use `@>` with a GIN index for filtering.
+- Add an expression index for one frequently read field.
+- Store a generated `tsvector` for fast search.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Fixed shape | Columns | Schema changes required |
+| Variable attributes | `jsonb` | Weaker constraints and statistics |
+| Exact JSON text | `json` | Reparsed on each use |
+| Basic search | PostgreSQL full-text | Limited relevance features |
+| Large-scale search | Dedicated engine | Extra system to operate |
+
+## Common mistakes
+
+**Using `jsonb` for everything.** Constraints, foreign keys and statistics are stronger on real columns.
+
+**Filtering with `->>` and expecting GIN to help.** A GIN index on the column supports `@>` and `?`, not `->>` comparisons.
+
+**Not specifying a text search configuration.** Results can change with the server's default.
+
+**Expecting JSON extraction to raise errors.** Extraction operators return NULL when the structure doesn't match.
+
+## Interview questions
+
+<Question q="json versus jsonb?">
+`json` keeps the exact text and reparses it. `jsonb` is binary, faster to process and indexable, but it doesn't preserve whitespace, key order or duplicate keys.
+</Question>
+
+<Question q="jsonb_ops versus jsonb_path_ops?">
+`jsonb_path_ops` is smaller and faster for containment but doesn't support key-existence operators.
+</Question>

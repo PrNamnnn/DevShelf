@@ -1,0 +1,140 @@
+---
+title: "Utility-First CSS and Tailwind v4 Setup"
+summary: "How Tailwind generates CSS from your class names, how to install v4, and what Preflight changes."
+level: fundamental
+section: foundations
+order: 10
+tags: [utility-first, setup, v4, postcss, preflight, source-detection, basics]
+related: [tailwind/layout-and-spacing, tailwind/theme-and-dark-mode]
+versions: "Tailwind CSS v4.3. Needs Safari 16.4+, Chrome 111+ and Firefox 128+."
+tested: "Generated output compiled with Tailwind 4.3.5."
+verified: "2026-11-09"
+docs:
+  - label: "Tailwind: Installation with PostCSS"
+    url: "https://tailwindcss.com/docs/installation/using-postcss"
+  - label: "Tailwind: Styling with utility classes"
+    url: "https://tailwindcss.com/docs/styling-with-utility-classes"
+  - label: "Tailwind: Detecting classes in source files"
+    url: "https://tailwindcss.com/docs/detecting-classes-in-source-files"
+  - label: "Tailwind: Preflight"
+    url: "https://tailwindcss.com/docs/preflight"
+---
+
+## What it is
+
+Tailwind is a CSS framework of small single-purpose classes such as `flex` and `pt-4`. You compose them in your markup, and Tailwind generates only the CSS you actually use.
+
+## Why it exists
+
+Hand-written CSS tends to grow without bound and naming classes takes effort. With utilities, CSS stops growing as features repeat, styles sit beside their markup, and shared tokens keep designs consistent.
+
+## How it works
+
+Tailwind scans your source files as **plain text** for tokens that look like classes, then generates matching CSS. It scans everything except `.gitignore` entries, `node_modules`, binaries, CSS and lock files.
+
+Output is organized in cascade layers: `theme, base, components, utilities`. Utilities come last, so they win over component styles.
+
+Because scanning is plain text, a class name has to exist as a complete string.
+
+## Syntax and key APIs
+
+```bash
+npm install tailwindcss @tailwindcss/postcss postcss
+```
+
+```js
+// postcss.config.mjs
+export default { plugins: { "@tailwindcss/postcss": {} } };
+```
+
+```css
+@import "tailwindcss";
+```
+
+Arbitrary values use brackets, and CSS variables have a parenthesis shorthand:
+
+```html
+<div class="bg-[#316ff6] p-(--gutter) grid-cols-[24rem_minmax(0,1fr)]"></div>
+```
+
+## Simple example
+
+```html
+<button class="rounded-md bg-sky-600 px-4 py-2 font-medium text-white hover:bg-sky-700">
+  Save
+</button>
+```
+
+## Industry examples
+
+### Map variants to complete class names
+
+Tailwind can't see classes built by concatenation.
+
+```jsx
+const tones = {
+  danger: "bg-red-600 text-white",
+  neutral: "bg-gray-200 text-gray-900",
+};
+
+function Badge({ tone, children }) {
+  return <span className={`rounded px-2 ${tones[tone]}`}>{children}</span>;
+}
+```
+
+### Include a package in scanning
+
+Styles from a UI library in `node_modules` need an explicit source.
+
+```css
+@import "tailwindcss";
+@source "../node_modules/@acme/ui";
+```
+
+### Know what Preflight resets
+
+Preflight removes default margins, makes headings inherit their font, removes list styles, and makes images block-level. Restore what you need with `@layer base`.
+
+```css
+@layer base {
+  h1 {
+    font-size: var(--text-3xl);
+    font-weight: 700;
+  }
+}
+```
+
+## Patterns and best practices
+
+- Extract repeated markup into components, not CSS classes.
+- Use arbitrary values sparingly, and promote repeated ones to theme tokens.
+- Keep class order consistent with the official Prettier plugin.
+- Add `role="list"` to unstyled lists that should stay announced as lists.
+
+## Alternatives and trade-offs
+
+| Approach | Strength | Trade-off |
+| --- | --- | --- |
+| Tailwind | Fast iteration, small CSS | Long class attributes |
+| CSS Modules | Familiar and scoped | You name and maintain everything |
+| CSS-in-JS | Dynamic styles | Often adds runtime cost |
+
+## Common mistakes
+
+**Interpolating class names.** `` `text-${color}-600` `` won't be generated, since the complete string doesn't exist in source.
+
+**Wondering where heading styles went.** Preflight resets them on purpose.
+
+**Using v4 on older browsers.** It depends on `@property` and `color-mix()`. Stay on v3.4 if you must support older browsers.
+
+**Installing the old PostCSS plugin.** v4 moved it to `@tailwindcss/postcss`.
+
+## Interview questions
+
+<Question q="How does Tailwind know which CSS to generate?">
+It scans source files as plain text for class-like tokens and generates CSS only for valid utilities it finds.
+</Question>
+
+<Question q="Why can't you build class names dynamically?">
+The scanner doesn't run your code, so a class only exists if its complete name is in a source file.
+</Question>

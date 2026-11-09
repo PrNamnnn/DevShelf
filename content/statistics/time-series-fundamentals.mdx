@@ -1,0 +1,108 @@
+---
+title: "Time Series Fundamentals and Decomposition"
+summary: "Trend, seasonality, cycles and noise, moving averages and additive versus multiplicative decomposition."
+level: intermediate
+section: time-series
+order: 1
+tags: ["time series","trend","seasonality","decomposition","moving average"]
+requires: ["statistics/exploratory-data-analysis"]
+related: ["statistics/stationarity-and-autocorrelation","statistics/exponential-smoothing"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "statsmodels: seasonal_decompose"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.tsa.seasonal.seasonal_decompose.html"
+  - label: "pandas: Time series"
+    url: "https://pandas.pydata.org/docs/user_guide/timeseries.html"
+---
+
+## What it is
+
+A time series is a sequence of observations ordered in time. Its usual components are:
+
+| Component | Meaning | Example |
+| --- | --- | --- |
+| Trend | Long-term direction | Rising subscribers |
+| Seasonality | Fixed-period pattern | Weekend orders |
+| Cycle | Irregular longer swings | Business cycle |
+| Noise | Random remainder | Daily fluctuation |
+
+## Why it exists
+
+Observations close in time are correlated, which breaks the independence behind most classical statistics. Time is also the basis of forecasting and of any "is this change unusual?" question.
+
+## How it works
+
+Moving averages smooth noise. A window equal to the seasonal period removes the seasonal pattern. A trailing window suits forecasting, since a centered window uses future values.
+
+**Additive** decomposition is y = T + S + R and fits constant seasonal swings. **Multiplicative** decomposition is y = T × S × R and fits swings that grow with the level. Logging a multiplicative series makes it additive.
+
+## Intuition and formula
+
+<Formula>MAₜ = (yₜ + yₜ₋₁ + … + yₜ₋ₖ₊₁) / k</Formula>
+
+## Worked example
+
+Ten years of simulated monthly sales have a trend of +1.5 per month, an annual sine pattern and noise. Decomposition recovers monthly seasonal effects, ranging from about −27 in October to +25 in April. Year-over-year comparisons avoid seasonal effects without fitting anything, which explains why business reports use them.
+
+## Python
+
+```python
+import numpy as np
+import pandas as pd
+from statsmodels.tsa.seasonal import seasonal_decompose
+
+rng = np.random.default_rng(11)
+n = 120
+index = pd.date_range("2016-01-01", periods=n, freq="MS")
+y = pd.Series(200 + 1.5 * np.arange(n) + 25 * np.sin(2 * np.pi * np.arange(n) / 12) + rng.normal(0, 6, n), index=index)
+
+parts = seasonal_decompose(y, period=12)
+seasonal = parts.seasonal.iloc[:12]
+assert seasonal.idxmin().month == 10
+assert seasonal.idxmax().month == 4
+assert abs(seasonal.sum()) < 1e-6
+
+smooth = y.rolling(12).mean()
+assert smooth.isna().sum() == 11
+```
+
+## SQL
+
+```sql
+SELECT day, round(avg(orders) OVER (ORDER BY day ROWS BETWEEN 2 PRECEDING AND CURRENT ROW), 1) AS ma3
+FROM (VALUES (1, 10), (2, 20), (3, 30), (4, 40)) AS t(day, orders)
+ORDER BY day DESC
+LIMIT 1;
+-- rows: [{"day":4,"ma3":"30.0"}]
+```
+
+## Excel or Power BI
+
+Use `AVERAGE` with a rolling range, or a line chart's Moving Average trendline. In DAX, `DATESINPERIOD` builds rolling windows and `SAMEPERIODLASTYEAR` handles year-over-year comparison.
+
+## In industry
+
+Business reviews look at week-over-week and year-over-year figures, and demand planning relies on decomposed patterns.
+
+## Assumptions and limitations
+
+Classical decomposition assumes a stable seasonal shape and loses values at the edges. Holidays that move between dates need separate handling.
+
+## Common mistakes
+
+- Random train/test splits on time data.
+- Comparing December with November and calling it growth.
+- Using centered windows in a real-time feature.
+- Missing that a series has multiple seasonalities.
+
+## Alternatives
+
+STL decomposition handles changing seasonality and is robust to outliers. Prophet-style models or regression with calendar features handle holidays.
+
+## Interview questions
+
+<Question q="Additive or multiplicative seasonality?">Additive if seasonal swings are roughly constant, multiplicative if they scale with the level.</Question>
+
+<Question q="Why not randomly split a time series?">It leaks future information into training and overstates accuracy.</Question>

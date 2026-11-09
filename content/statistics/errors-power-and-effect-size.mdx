@@ -1,0 +1,93 @@
+---
+title: "Type I and II Errors, Power and Effect Size"
+summary: "The tradeoffs between false positives and false negatives, why power matters, and how to report practical magnitude."
+level: intermediate
+section: inference
+order: 3
+tags: ["type I error","type II error","statistical power","effect size","Cohen's d"]
+requires: ["statistics/hypothesis-testing-logic"]
+related: ["statistics/sample-size-and-duration","statistics/interpreting-experiments"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "statsmodels: Power and sample size"
+    url: "https://www.statsmodels.org/stable/stats.html#power-and-sample-size-calculations"
+  - label: "SciPy: power"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.power.html"
+---
+
+## What it is
+
+| | H₀ true | H₀ false |
+| --- | --- | --- |
+| Reject H₀ | **Type I error** (false positive), rate α | Correct, rate = power |
+| Don't reject | Correct, rate 1 − α | **Type II error** (false negative), rate β |
+
+**Power** is 1 − β, the chance of detecting an effect that really exists. **Effect size** measures how large a difference is, on a standardized or business scale.
+
+## Why it exists
+
+An underpowered study wastes time because even real effects are likely to be missed. And when an underpowered study does reach significance, its estimated effect tends to be exaggerated, a problem known as the winner's curse.
+
+## How it works
+
+Four quantities are linked: α, power, sample size and effect size. Fix three and the fourth follows. Use the sliders below and see power rise with a larger n, a larger effect or a looser α.
+
+<HypothesisViz />
+
+Common standardized measures include Cohen's d for means, odds ratio or risk difference for proportions, Cramér's V for tables, and η² for ANOVA. Cohen's benchmarks of 0.2, 0.5 and 0.8 are generic conventions. A business-specific effect, like ₹ per user, is usually more meaningful.
+
+## Intuition and formula
+
+<Formula>d = (x̄₁ − x̄₂) / s_pooled</Formula>
+
+## Worked example
+
+For a two-group t-test detecting d = 0.3 at α = 0.05 with 80% power, you need about 176 per group. With only 100 per group, power is 56%, so nearly half of such real effects would go undetected.
+
+Weighing the errors is a business call. Falsely shipping a harmful pricing change may be far worse than missing a small improvement, which argues for a stricter α. Screening candidates for further research would justify a looser one.
+
+## Python
+
+```python
+from statsmodels.stats.power import TTestIndPower
+
+analysis = TTestIndPower()
+n = analysis.solve_power(effect_size=0.3, alpha=0.05, power=0.8)
+power = analysis.power(effect_size=0.3, nobs1=100, alpha=0.05)
+
+assert round(n) == 175
+assert round(power, 2) == 0.56
+```
+
+Round n up in practice: the solution is 175.4, so plan for 176.
+
+## Excel or Power BI
+
+Excel has no native power function. Cohen's d can be computed from `AVERAGE` and `STDEV.S`, and power can be built from `NORM.S.DIST`.
+
+## In industry
+
+Teams compute power before launching experiments, to avoid running tests that can't succeed. Post-launch, they report whether the interval excludes the minimum effect they cared about.
+
+## Assumptions and limitations
+
+Power calculations rely on assumed variance and effect size. Power computed after a study from the observed effect adds no information beyond the p-value, so it shouldn't be used to explain a null result.
+
+## Common mistakes
+
+- Treating statistical and practical significance as the same.
+- Stopping a test early because it's significant.
+- Powering for an unrealistically large effect.
+- Quoting Cohen's labels with no domain context.
+
+## Alternatives
+
+Bayesian decision analysis weighs expected loss rather than error rates. Simulation estimates power for complex designs or metrics.
+
+## Interview questions
+
+<Question q="What would you trade off when choosing alpha?">A lower α reduces false positives but requires more data or reduces power. The choice depends on the relative cost of each error.</Question>
+
+<Question q="Why is post-hoc power not useful?">It's a direct function of the observed p-value, so it adds no new information.</Question>

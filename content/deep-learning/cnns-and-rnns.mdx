@@ -1,0 +1,90 @@
+---
+title: "CNNs, RNNs and LSTMs"
+summary: "Convolutions for spatial patterns, recurrence for sequences and the role of memory gates."
+level: advanced
+section: architectures
+order: 1
+tags: ["CNN","RNN","LSTM","convolution"]
+requires: ["deep-learning/training-losses-and-optimizers"]
+related: ["deep-learning/embeddings-attention-and-transformers","statistics/time-series-fundamentals"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "NumPy examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "PyTorch: Convolution layers"
+    url: "https://docs.pytorch.org/docs/stable/nn.html#convolution-layers"
+  - label: "PyTorch: LSTM"
+    url: "https://docs.pytorch.org/docs/stable/generated/torch.nn.LSTM.html"
+---
+
+## What it is
+
+A **CNN** applies small learned filters across an image or signal. An **RNN** processes sequences while maintaining a hidden state. An **LSTM** adds gates that control what state is kept.
+
+## Why it exists
+
+Images have local structure that repeats across positions, and sequences have order. Specialized architectures use far fewer parameters than fully connected networks.
+
+## How it works
+
+Convolutions share weights across positions, giving translation equivariance. Pooling reduces resolution. Residual connections allow very deep models.
+
+An RNN updates hₜ = f(hₜ₋₁, xₜ). Plain RNNs suffer vanishing gradients, and LSTMs use forget, input and output gates to preserve information across more steps.
+
+## Intuition and formula
+
+<Formula>output size = (n + 2p − k) / s + 1 (rounded down)</Formula>
+
+n is input size, p is padding, k is kernel size and s is stride.
+
+<Formula>hₜ = tanh(W_h hₜ₋₁ + W_x xₜ)</Formula>
+
+## Worked example
+
+A 32-pixel input with a 3-wide kernel, padding of 1 and stride 1 stays at 32. A stride of 2 gives 16. A simple edge filter of [−1, 0, 1] responds strongly at a step in brightness.
+
+## Python
+
+```python
+import numpy as np
+
+def output_size(n, kernel, padding, stride):
+    return (n + 2 * padding - kernel) // stride + 1
+
+assert output_size(32, 3, 1, 1) == 32
+assert output_size(32, 3, 1, 2) == 16
+
+signal = np.array([0, 0, 0, 1, 1, 1], dtype=float)
+edges = np.convolve(signal, [1, 0, -1], mode="valid")
+assert edges.tolist() == [0, 1, 1, 0]
+
+h = 0.0
+for x in [1.0, 0.0, 0.0]:
+    h = np.tanh(0.5 * h + x)
+assert h > 0
+```
+
+## In industry
+
+CNNs are still common in efficient vision systems. LSTMs persist in some time-series and edge workloads, and transformers dominate language.
+
+## Assumptions and limitations
+
+Convolution assumes locality. RNNs process serially, limiting parallelism.
+
+## Common mistakes
+
+- Miscalculating output shapes.
+- Omitting data augmentation for vision.
+- Using padded sequences without masks.
+- Training a large model when transfer learning would be enough.
+
+## Alternatives
+
+Vision transformers and temporal convolutions, and gradient boosting with lag features for tabular forecasting.
+
+## Interview questions
+
+<Question q="Why are CNNs efficient for images?">Weight sharing and local connectivity greatly reduce parameters.</Question>
+
+<Question q="What problem do LSTMs address?">Learning longer dependencies by mitigating vanishing gradients.</Question>

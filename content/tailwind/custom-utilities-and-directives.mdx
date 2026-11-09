@@ -1,0 +1,153 @@
+---
+title: "Custom Utilities and Directives"
+summary: "Extending Tailwind with @utility, @variant and @custom-variant, and using @apply and @reference without losing the benefits."
+level: advanced
+section: extending
+order: 10
+tags: [utility, variant, custom-variant, apply, reference, source, plugin, layers]
+related: [tailwind/theme-and-dark-mode, tailwind/production-patterns-and-migration]
+versions: "Tailwind CSS v4."
+tested: "Generated output compiled with Tailwind 4.3.5."
+verified: "2026-11-09"
+docs:
+  - label: "Tailwind: Adding custom styles"
+    url: "https://tailwindcss.com/docs/adding-custom-styles"
+  - label: "Tailwind: Functions and directives"
+    url: "https://tailwindcss.com/docs/functions-and-directives"
+---
+
+## What it is
+
+Directives extend Tailwind from CSS. `@utility` adds a class that works with every variant, and `@custom-variant` adds a new prefix.
+
+## Why it exists
+
+Some CSS has no utility, and teams often need a shared variant such as `theme-midnight:`. These directives add them while keeping variant support and correct layer ordering.
+
+## How it works
+
+`@utility` registers the class in the `utilities` layer, and it only ships when used. A functional utility ends in `-*` and resolves its value with `--value()`.
+
+In v4, rules in `@layer utilities` are not picked up as variant-aware utilities the way they were in v3. Use `@utility`.
+
+| Directive | Purpose |
+| --- | --- |
+| `@utility` | Define a utility |
+| `@custom-variant` | Define a reusable variant |
+| `@variant` | Apply a variant inside custom CSS |
+| `@apply` | Inline utilities in CSS |
+| `@reference` | Use theme in a scoped style block without duplicating output |
+| `@source` | Add or exclude scan paths |
+| `@plugin` | Load a JavaScript plugin |
+| `@config` | Load a legacy JavaScript config |
+
+## Syntax and key APIs
+
+```css
+@import "tailwindcss";
+
+@theme {
+  --tab-size-github: 8;
+}
+
+@utility content-auto {
+  content-visibility: auto;
+}
+
+@utility tab-* {
+  tab-size: --value(--tab-size-*, integer);
+}
+
+@custom-variant theme-midnight (&:where([data-theme="midnight"] *));
+```
+
+## Simple example
+
+```html
+<section class="content-auto lg:content-auto">Long content</section>
+<pre class="tab-github tab-4"></pre>
+<p class="theme-midnight:bg-black">Themed</p>
+```
+
+## Industry examples
+
+### Style third-party markup
+
+`@variant` keeps conditions readable in custom CSS.
+
+```css
+@import "tailwindcss";
+
+.markdown a {
+  color: var(--color-sky-700);
+  @variant hover {
+    color: var(--color-sky-900);
+  }
+}
+```
+
+### Use the theme in a Vue or CSS module style block
+
+Without `@reference`, the stylesheet wouldn't know your theme or would duplicate it.
+
+```vue
+<style scoped>
+@reference "../app.css";
+
+h1 {
+  @apply text-2xl font-semibold;
+}
+</style>
+```
+
+### Force classes the scanner can't see
+
+```css
+@import "tailwindcss";
+@source inline("{hover:,focus:,}underline");
+```
+
+### Load the typography plugin
+
+```css
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+```
+
+## Patterns and best practices
+
+- Create a utility for a single reusable CSS behaviour.
+- Create a component in your framework for repeated markup.
+- Use `@apply` sparingly, mostly for third-party or scoped styles.
+- Keep directives in one entry stylesheet.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| One-off CSS | Arbitrary property `[mask-type:luminance]` | Verbose if repeated |
+| Reusable property | `@utility` | Global name |
+| Repeated UI | Component | Requires framework code |
+| Complex generation | JS plugin via `@plugin` | Legacy API surface |
+
+`corePlugins`, `safelist` and `separator` from JavaScript configs aren't supported in v4.
+
+## Common mistakes
+
+**Using `@layer utilities` for a new utility in v4.** It won't work with variants as expected. Use `@utility`.
+
+**Overusing `@apply`.** It recreates the naming problems that utilities solve.
+
+**Applying without `@reference` in a CSS module.** Scoped blocks are processed separately.
+
+**Expecting a JS config to load automatically.** v4 needs an explicit `@config`.
+
+## Interview questions
+
+<Question q="When should you create a custom utility?">
+For a small CSS behaviour Tailwind doesn't offer and that you'll reuse with variants.
+</Question>
+
+<Question q="Why use @reference?">
+It makes theme, utilities and variants available to a separately processed stylesheet without emitting duplicate CSS.
+</Question>

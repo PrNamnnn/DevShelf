@@ -1,0 +1,158 @@
+---
+title: "Conditionals and Loops"
+summary: "if, for, while, range, break, continue, the often-misunderstood loop else, and match statements."
+level: fundamental
+section: control-flow
+order: 10
+tags: [if, for, while, range, break, continue, loop-else, match, control-flow, walrus]
+requires: [python/numbers-strings-and-conversion]
+related: [python/iteration-protocol-and-itertools, python/collections-and-comprehensions]
+versions: "match needs Python 3.10+. The walrus operator needs 3.8+."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python tutorial: More control flow tools"
+    url: "https://docs.python.org/3/tutorial/controlflow.html"
+  - label: "Python reference: Compound statements"
+    url: "https://docs.python.org/3/reference/compound_stmts.html"
+---
+
+## What it is
+
+Control flow decides which statements run and how often. Python uses indentation to define blocks.
+
+## Why it exists
+
+Programs must make decisions and repeat work. Python's `for` loops over any iterable rather than counting indexes, which removes a whole class of off-by-one errors.
+
+## How it works
+
+Follow how `break` and the loop's `else` interact.
+
+<StepFlow
+  title="Searching with for and else"
+  code={["for n in [3, 8, 5]:", "    if n % 2 == 0:", "        print('found', n)", "        break", "else:", "    print('none even')"]}
+  nodes={["get next item", "test", "break", "loop exhausted", "else block"]}
+  steps={[
+    { line: 0, active: [0], note: "for asks the list for its next item.", state: { n: "3" } },
+    { line: 1, active: [1], note: "3 isn't even, so the body ends and the loop continues.", state: { n: "3" } },
+    { line: 0, active: [0], note: "The next item is fetched.", state: { n: "8" } },
+    { line: 2, active: [1], note: "8 is even, so the message prints.", state: { output: "found 8" } },
+    { line: 3, active: [2], note: "break leaves the loop at once, skipping the else block.", state: { "else ran": "no" } },
+    { line: 5, active: [3, 4], note: "If the list had no even number, the loop would end normally and else would run. Think of it as 'no break'.", state: { "else runs when": "no break" } },
+  ]}
+/>
+
+## Syntax and key APIs
+
+| Construct | Meaning |
+| --- | --- |
+| `range(stop)` | 0 up to but excluding stop |
+| `range(start, stop, step)` | Lazy arithmetic sequence |
+| `break` | Leave the loop |
+| `continue` | Skip to the next iteration |
+| `x if cond else y` | Conditional expression |
+| `while (line := read()):` | Assign and test together |
+
+`match` compares a value against structural patterns.
+
+## Simple example
+
+```python
+result = []
+for n in range(10, 0, -3):
+    if n == 7:
+        continue
+    result.append(n)
+
+assert result == [10, 4, 1]
+assert len(range(10**9)) == 10**9
+```
+
+A `range` stores only its start, stop and step, so it uses little memory.
+
+## Industry examples
+
+### Retry with while and else
+
+```python
+def connect(attempts):
+    tries = 0
+    while tries < 3:
+        tries += 1
+        if attempts[tries - 1]:
+            return f"connected after {tries}"
+    else:
+        return "gave up"
+
+assert connect([False, True, True]) == "connected after 2"
+assert connect([False, False, False]) == "gave up"
+```
+
+### Dispatch on data shape
+
+```python
+def handle(event):
+    match event:
+        case {"type": "click", "x": x, "y": y}:
+            return f"click at {x},{y}"
+        case {"type": "key", "code": code} if code < 32:
+            return "control key"
+        case {"type": str(kind)}:
+            return f"other: {kind}"
+        case _:
+            return "invalid"
+
+assert handle({"type": "click", "x": 1, "y": 2}) == "click at 1,2"
+assert handle({"type": "key", "code": 13}) == "control key"
+assert handle({"type": "scroll"}) == "other: scroll"
+assert handle(5) == "invalid"
+```
+
+### Read chunks with the walrus operator
+
+```python
+import io
+
+stream = io.BytesIO(b"abcdef")
+chunks = []
+while chunk := stream.read(4):
+    chunks.append(chunk)
+
+assert chunks == [b"abcd", b"ef"]
+```
+
+## Patterns and best practices
+
+- Loop over items directly, and use `enumerate` when you need the index.
+- Return early to avoid deep nesting.
+- Use `any` or `all` instead of a flag variable.
+- Comment a loop `else`, since many readers misread it.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Build a list | Comprehension | Single expression only |
+| Many branches on one value | `match` or dict dispatch | 3.10+ for `match` |
+| Search | `next(..., default)` | Less familiar |
+
+## Common mistakes
+
+**`for i in range(len(xs))`.** Use `for x in xs` or `enumerate`.
+
+**Forgetting a `while` update.** The loop never ends.
+
+**Using `=` in a pattern as a variable by accident.** A bare name in `case name:` captures anything.
+
+**Modifying a list while iterating.** Elements get skipped. Build a new list.
+
+## Interview questions
+
+<Question q="When does a loop's else clause run?">
+When the loop finishes without hitting `break`.
+</Question>
+
+<Question q="Why is range memory-efficient?">
+It's a lazy sequence that computes each value from its start, stop and step.
+</Question>

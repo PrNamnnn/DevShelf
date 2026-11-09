@@ -1,0 +1,98 @@
+---
+title: "What Data Analysis Is"
+summary: "The workflow that turns a business question into evidence and a decision, and how it differs from data science and data engineering."
+level: fundamental
+section: foundations
+order: 1
+tags: ["workflow","roles","analytics"]
+related: ["statistics/asking-analytical-questions","statistics/exploratory-data-analysis"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python example executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "NIST Engineering Statistics Handbook"
+    url: "https://www.itl.nist.gov/div898/handbook/"
+  - label: "pandas documentation"
+    url: "https://pandas.pydata.org/docs/"
+---
+
+## What it is
+
+Data analysis is the disciplined process of inspecting, cleaning, transforming and modelling data so that a person can make a better decision. The output isn't a chart. The output is a conclusion someone can act on, together with how confident they should be.
+
+## Why it exists
+
+Organizations collect far more data than anyone can read, and intuition fails quietly. Analysis replaces "I think sales fell because of the price change" with a measured statement about how much sales fell, for which customers, and how likely a price effect is the reason.
+
+The three neighbouring roles solve different problems:
+
+| Discipline | Main question | Typical output |
+| --- | --- | --- |
+| Data analytics | What happened, why, and what should we do? | Analysis, dashboard, recommendation |
+| Data science | What will happen, and can a model decide? | Predictive model, experiment design |
+| Data engineering | Is correct data available, on time? | Pipelines, warehouses, data contracts |
+
+The boundaries overlap, and small teams combine them.
+
+## How it works
+
+<StepFlow
+  title="The analytical workflow"
+  nodes={["Question", "Data", "Clean", "Explore", "Analyze", "Decide"]}
+  steps={[
+    { note: "Agree on the decision the analysis will inform. Without one, there's no way to know when you're finished.", active: [0] },
+    { note: "Find the source of truth, and document what each row represents and when it was captured.", active: [1] },
+    { note: "Fix types, duplicates, missing values and invalid entries. Record every rule so the work is reproducible.", active: [2] },
+    { note: "Profile distributions and relationships. Exploration generates hypotheses.", active: [3] },
+    { note: "Test those hypotheses with the method that fits the question and the data.", active: [4] },
+    { note: "State the recommendation, the evidence, the uncertainty and what would change your mind.", active: [5] }
+  ]}
+/>
+
+The workflow loops. Exploring often shows that the question was wrong or that the data can't answer it, and going back at that point is the process working as designed.
+
+## Worked example
+
+A subscription company asks why revenue fell 6% last quarter. An analyst first splits revenue into customers multiplied by revenue per customer. Customers fell 8% while revenue per customer rose 2%, so this is a customer count problem. Splitting customers into new, churned and retained shows that new signups held steady and churn rose, concentrated in monthly plans after a billing change. The recommendation is specific: examine the billing change first, not the marketing budget.
+
+## Python
+
+```python
+import pandas as pd
+
+quarters = pd.DataFrame({
+    "quarter": ["Q1", "Q2"],
+    "customers": [10_000, 9_200],
+    "revenue_per_customer": [50.0, 51.0],
+})
+quarters["revenue"] = quarters["customers"] * quarters["revenue_per_customer"]
+change = quarters.set_index("quarter").pct_change().loc["Q2"]
+
+assert round(change["customers"], 3) == -0.08
+assert round(change["revenue"], 4) == -0.0616
+```
+
+## In industry
+
+Analysts sit close to product, finance, marketing or operations teams. Most of the job is defining metrics, finding trustworthy data and persuading people. A simple analysis that changes a decision is worth more than a sophisticated one that doesn't.
+
+## Assumptions and limitations
+
+Analysis only sees what was recorded. Data reflects the process that generated it, including its gaps and incentives, and historical patterns may not hold after the world changes. Observational data rarely proves causation on its own.
+
+## Common mistakes
+
+- Starting with the data instead of the decision.
+- Reporting numbers without a comparison, such as a prior period or a target.
+- Presenting a single point estimate as certain.
+- Treating a correlation found while exploring as a confirmed cause.
+
+## Alternatives
+
+Some decisions don't need analysis. If a choice is cheap and easy to reverse, trying it may be faster. If it depends on rare events with no history, expert judgement or scenario planning is more honest than a model with invented inputs.
+
+## Interview questions
+
+<Question q="How does a data analyst differ from a data scientist?">An analyst primarily explains what happened and recommends action. A data scientist more often builds predictive models and designs experiments. The difference is one of emphasis, and many roles do both.</Question>
+
+<Question q="What do you do first when given a vague request?">Ask what decision it supports, who will make it, by when, and what result would change that decision. Then restate the request as a measurable question and confirm it.</Question>

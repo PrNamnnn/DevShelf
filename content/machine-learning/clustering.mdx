@@ -1,0 +1,92 @@
+---
+title: "K-Means, DBSCAN and Gaussian Mixtures"
+summary: "Group unlabeled data, choose a cluster count and see how the EM algorithm fits soft clusters."
+level: intermediate
+section: unsupervised
+order: 1
+tags: ["clustering","K-means","DBSCAN","GMM","EM","silhouette"]
+requires: ["machine-learning/ml-foundations"]
+related: ["statistics/multivariate-analysis","statistics/segmentation-rfm-and-baskets"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Clustering"
+    url: "https://scikit-learn.org/stable/modules/clustering.html"
+  - label: "scikit-learn: Gaussian mixture models"
+    url: "https://scikit-learn.org/stable/modules/mixture.html"
+---
+
+## What it is
+
+Clustering groups similar observations without labels.
+
+| Method | Finds | Needs k | Handles noise |
+| --- | --- | --- | --- |
+| K-means | Spherical clusters | Yes | No |
+| DBSCAN | Dense, arbitrary shapes | No, but needs eps | Yes |
+| Gaussian mixture | Elliptical, soft assignment | Yes | Limited |
+
+## Why it exists
+
+Customer segmentation, grouping documents and anomaly discovery all happen without ready-made labels.
+
+## How it works
+
+**K-means** alternates between assigning points to their nearest centroid and recomputing centroids, minimizing within-cluster squared distance. **DBSCAN** grows clusters from points with enough neighbours within eps. **Gaussian mixtures** are fitted by **expectation-maximization**: the E-step calculates each point's responsibility, and the M-step updates means, covariances and weights.
+
+Use silhouette scores, stability checks and business usefulness to evaluate results.
+
+## Intuition and formula
+
+<Formula>J = Σₖ Σ_(x in Cₖ) ‖x − μₖ‖²</Formula>
+
+## Worked example
+
+On two interleaved half-moons, K-means slices straight across the structure, and DBSCAN recovers both moons. On blobs of differing elongation, a Gaussian mixture does better than K-means.
+
+## Python
+
+```python
+from sklearn.cluster import DBSCAN, KMeans
+from sklearn.datasets import make_blobs, make_moons
+from sklearn.metrics import adjusted_rand_score, silhouette_score
+from sklearn.mixture import GaussianMixture
+
+X, y = make_moons(n_samples=500, noise=0.05, random_state=0)
+kmeans = KMeans(2, n_init=10, random_state=0).fit_predict(X)
+dbscan = DBSCAN(eps=0.2, min_samples=5).fit_predict(X)
+assert adjusted_rand_score(y, dbscan) > 0.95 > adjusted_rand_score(y, kmeans)
+
+blobs, _ = make_blobs(n_samples=300, centers=[[0, 0], [6, 6], [0, 6]], cluster_std=0.6, random_state=0)
+scores = {k: silhouette_score(blobs, KMeans(k, n_init=10, random_state=0).fit_predict(blobs)) for k in [2, 3, 4]}
+assert max(scores, key=scores.get) == 3
+
+gmm = GaussianMixture(3, random_state=0).fit(blobs)
+assert gmm.predict_proba(blobs).shape == (300, 3)
+```
+
+## In industry
+
+K-means is common for segmentation, due to its speed. DBSCAN is often used for spatial and anomaly tasks.
+
+## Assumptions and limitations
+
+Clustering always returns something, including from random data. Results depend on scaling and on the distance measure.
+
+## Common mistakes
+
+- Skipping scaling.
+- Using the elbow plot as the sole criterion.
+- Running K-means on one-hot data without care.
+- Treating cluster labels as stable identifiers across runs.
+
+## Alternatives
+
+Hierarchical clustering provides a dendrogram, and HDBSCAN handles varying densities.
+
+## Interview questions
+
+<Question q="When is K-means a poor choice?">With non-spherical shapes, very different cluster sizes or densities, or heavy outliers.</Question>
+
+<Question q="What does EM do?">It alternates between soft-assigning points and updating cluster parameters to raise the likelihood.</Question>

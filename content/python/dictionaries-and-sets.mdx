@@ -1,0 +1,164 @@
+---
+title: "Dictionaries and Sets in Depth"
+summary: "How hash tables work, the dictionary methods you actually use, merging, set algebra, and nested data."
+level: fundamental
+section: data-structures
+order: 20
+tags: [dict, set, hashing, frozenset, merge, get, setdefault, nested-structures]
+requires: [python/lists-and-tuples]
+related: [python/collections-and-comprehensions, python/classes-and-data-model]
+versions: "Dictionary insertion order is guaranteed from 3.7. The | merge operator needs 3.9+."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python library: Mapping types"
+    url: "https://docs.python.org/3/library/stdtypes.html#mapping-types-dict"
+  - label: "Python library: Set types"
+    url: "https://docs.python.org/3/library/stdtypes.html#set-types-set-frozenset"
+  - label: "Python FAQ: How are dictionaries implemented?"
+    url: "https://docs.python.org/3/faq/design.html#how-are-dictionaries-implemented-in-cpython"
+---
+
+## What it is
+
+A dictionary maps unique keys to values. A set holds unique values. Both are built on hash tables.
+
+## Why it exists
+
+Looking something up by key in average constant time is one of the most common needs in programming.
+
+## How it works
+
+<StepFlow
+  title="Looking up d['ada']"
+  nodes={["hash(key)", "pick slot", "compare identity or ==", "return value"]}
+  steps={[
+    { active: [0], note: "Python calls hash('ada') to get an integer.", state: { hash: "large int" } },
+    { active: [1], note: "The hash selects a slot in the table. Different keys can land on the same slot." },
+    { active: [2], note: "Python checks whether the stored key is the same object or equal. On a collision, it probes another slot." },
+    { active: [3], note: "A match returns the value. No match after probing raises KeyError.", state: { result: "value" } },
+  ]}
+/>
+
+Equal objects must have equal hashes, and a key's hash must never change, which is why mutable lists can't be keys.
+
+## Syntax and key APIs
+
+| Operation | Result |
+| --- | --- |
+| `d.get(k, default)` | Value or default |
+| `d.setdefault(k, v)` | Insert if missing, return value |
+| `d.pop(k, default)` | Remove and return |
+| `d.items()`, `.keys()`, `.values()` | Live views |
+| `a \| b` | Merged new dict, right side wins |
+| `s \| t`, `s & t`, `s - t`, `s ^ t` | Union, intersection, difference, symmetric |
+
+## Simple example
+
+```python
+user = {"name": "Ada"}
+
+assert user.get("age", 0) == 0
+assert user.setdefault("tags", []) == []
+user["tags"].append("admin")
+
+defaults = {"theme": "dark", "name": "guest"}
+assert (defaults | user)["name"] == "Ada"
+
+assert {1, 2} & {2, 3} == {2}
+assert {1, 2} - {2} == {1}
+```
+
+## Industry examples
+
+### Find what changed between snapshots
+
+```python
+before = {"a": 1, "b": 2}
+after = {"b": 3, "c": 4}
+
+assert after.keys() - before.keys() == {"c"}
+assert before.keys() - after.keys() == {"a"}
+assert {k for k in before.keys() & after.keys() if before[k] != after[k]} == {"b"}
+```
+
+### Dispatch instead of long if chains
+
+```python
+handlers = {"add": lambda a, b: a + b, "mul": lambda a, b: a * b}
+
+def calc(op, a, b):
+    try:
+        return handlers[op](a, b)
+    except KeyError:
+        raise ValueError(f"unknown op {op}") from None
+
+assert calc("mul", 2, 3) == 6
+```
+
+### Read nested data safely
+
+```python
+payload = {"user": {"address": {"city": "Pune"}}}
+
+def dig(data, *keys, default=None):
+    for key in keys:
+        if not isinstance(data, dict) or key not in data:
+            return default
+        data = data[key]
+    return data
+
+assert dig(payload, "user", "address", "city") == "Pune"
+assert dig(payload, "user", "phone", default="none") == "none"
+```
+
+### Invert a mapping
+
+```python
+codes = {"IN": "India", "US": "United States"}
+assert {v: k for k, v in codes.items()}["India"] == "IN"
+```
+
+## Patterns and best practices
+
+- Use `get` for optional keys and `[]` when absence is a bug.
+- Use a tuple or `frozenset` as a composite key.
+- Iterate `items()` to get key and value together.
+- Use a set for repeated membership checks.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Counting | `Counter` | Specialized |
+| Grouping | `defaultdict` | Hides missing keys |
+| Fixed fields | `dataclass` | Declared up front |
+| Sorted keys | `sorted(d)` on demand | Not maintained automatically |
+
+## Common mistakes
+
+**Changing a dictionary's size while iterating.** It raises `RuntimeError`. Iterate over `list(d)`.
+
+```python
+d = {"a": 1, "b": 2}
+for key in list(d):
+    if d[key] == 1:
+        del d[key]
+assert d == {"b": 2}
+```
+
+**Using `{}` for an empty set.** That's a dictionary. Use `set()`.
+
+**Depending on set order.** It isn't defined.
+
+**Using `setdefault` with an expensive default.** The default is built every time.
+
+## Interview questions
+
+<Question q="What makes an object hashable?">
+It has a hash that never changes during its lifetime and supports equality, with equal objects having equal hashes.
+</Question>
+
+<Question q="What is the average complexity of a dict lookup?">
+Constant time, degrading only when many keys collide.
+</Question>

@@ -1,0 +1,114 @@
+---
+title: "Mean, Median, Mode and Their Relatives"
+summary: "Arithmetic, weighted, geometric and harmonic means alongside the median and mode, with when each one misleads."
+level: fundamental
+section: descriptive
+order: 1
+tags: ["mean","median","mode","weighted mean","geometric mean"]
+requires: ["statistics/data-types-and-scales"]
+related: ["statistics/dispersion","excel/conditional-aggregation","powerbi/iterators-and-variables"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "NumPy: statistics"
+    url: "https://numpy.org/doc/stable/reference/routines.statistics.html"
+  - label: "SciPy: gmean"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.gmean.html"
+---
+
+## What it is
+
+A measure of central tendency reduces a distribution to one representative value. The right one depends on what "typical" should mean for your question.
+
+## Why it exists
+
+People can't reason about ten thousand order values at once. A central summary allows comparison, but each summary answers a different question, and the choice can change the story.
+
+## How it works
+
+| Measure | Definition | Use when | Misleading when |
+| --- | --- | --- | --- |
+| Mean | Sum ÷ count | Totals matter | Heavy skew or outliers |
+| Median | Middle sorted value | Describing a typical unit | You need to reconstruct a total |
+| Mode | Most frequent value | Nominal data | Continuous data, ties |
+| Weighted mean | Σwx ÷ Σw | Units differ in importance | Weights are wrong |
+| Geometric mean | nth root of the product | Growth factors | Zeros or negatives |
+| Harmonic mean | n ÷ Σ(1/x) | Averaging rates over a fixed quantity | Zeros |
+
+The mean is the balance point of a distribution. The median is where half the mass sits on each side. Right skew pulls the mean above the median, which is why income and order value are usually reported with medians.
+
+## Intuition and formula
+
+<Formula>x̄ = (1/n) Σ xᵢ</Formula>
+
+Here n is the number of observations and xᵢ is observation i. The sum of deviations from the mean is always zero.
+
+<Formula>G = (x₁ · x₂ · … · xₙ)^(1/n)</Formula>
+
+## Worked example
+
+Ten orders: 420, 510, 480, 455, 530, 495, 2900, 470, 505, 440.
+
+The mean is 720.5, while the median is 487.5. One bulk order lifts the mean above nine of the ten values. If finance forecasts total revenue, the mean is correct: 720.5 × future orders. If a designer asks what a typical customer spends, the median is the honest answer.
+
+Annual growth of +10%, −5% and +20% has a geometric mean factor of 1.0784, or 7.84% per year. The arithmetic average of 8.33% overstates compound growth.
+
+Driving equal distances at 60 and 40 km/h averages 48 km/h, which is the harmonic mean, because more time is spent at the slower speed.
+
+## Python
+
+```python
+import numpy as np
+from scipy import stats
+
+orders = np.array([420, 510, 480, 455, 530, 495, 2900, 470, 505, 440])
+assert orders.mean() == 720.5
+assert np.median(orders) == 487.5
+assert round(stats.trim_mean(orders, 0.1), 3) == 485.625
+
+ratings = np.array([4.5, 3.8, 4.9])
+reviews = np.array([100, 300, 50])
+assert round(np.average(ratings, weights=reviews), 3) == 4.078
+
+assert round(stats.gmean([1.10, 0.95, 1.20]), 4) == 1.0784
+assert round(stats.hmean([60, 40]), 6) == 48
+```
+
+## SQL
+
+```sql
+SELECT avg(amount)::numeric(10, 1) AS mean_amount,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY amount) AS median_amount
+FROM unnest(ARRAY[420, 510, 480, 455, 530, 495, 2900, 470, 505, 440]) AS amount;
+-- rows: [{"mean_amount":"720.5","median_amount":487.5}]
+```
+
+## Excel or Power BI
+
+Excel provides `AVERAGE`, `MEDIAN`, `MODE.SNGL`, `GEOMEAN`, `HARMEAN` and `TRIMMEAN`. A weighted mean is `=SUMPRODUCT(values, weights) / SUM(weights)`. In DAX, use `AVERAGE`, `MEDIAN`, or `DIVIDE(SUMX(T, T[x] * T[w]), SUM(T[w]))`.
+
+## In industry
+
+Latency is reported as percentiles because means hide slow requests. Marketplaces show median prices. Finance uses means because totals must reconcile. Averaging precomputed averages is a frequent reporting bug: a total average must be weighted by each group's size.
+
+## Assumptions and limitations
+
+The mean assumes the values can be meaningfully added. The median needs at least ordered data. Neither says anything about spread, so always pair a center with a measure of dispersion.
+
+## Common mistakes
+
+- Averaging percentages from groups of different sizes.
+- Using an arithmetic mean for compound growth.
+- Quoting only the mean on heavily skewed data.
+- Deleting outliers just to bring the mean closer to the median.
+
+## Alternatives
+
+Trimmed means drop a fixed share of extremes, and winsorized means cap them. Both are more robust than the mean and use more data than the median. For skewed positive data, the mean of the logarithm, transformed back, is the geometric mean.
+
+## Interview questions
+
+<Question q="When would you prefer the mean to the median on skewed data?">When the goal involves a total, such as forecasting revenue or cost, because the mean multiplied by count recovers the sum. The median doesn't.</Question>
+
+<Question q="Why can't you average conversion rates across countries?">Countries have different traffic. Divide total conversions by total visitors, which is a traffic-weighted mean.</Question>

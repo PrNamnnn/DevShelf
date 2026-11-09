@@ -1,0 +1,161 @@
+---
+title: "Performance and Practical Patterns"
+summary: "Measuring before optimizing, the fixes that matter most, and idioms that make Python code hold up in production."
+level: advanced
+section: internals
+order: 20
+tags: [performance, timeit, cprofile, idioms, patterns, big-o, testing, profiling]
+requires: [python/memory-management]
+related: [python/iteration-protocol-and-itertools, python/threads-processes-and-the-gil]
+versions: "All current Python 3 versions. The experimental JIT is opt-in from 3.13."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python library: timeit"
+    url: "https://docs.python.org/3/library/timeit.html"
+  - label: "Python library: The Python profilers"
+    url: "https://docs.python.org/3/library/profile.html"
+  - label: "Python library: unittest"
+    url: "https://docs.python.org/3/library/unittest.html"
+---
+
+## What it is
+
+Performance work means finding the actual slow part and fixing it. Practical patterns are habits that keep code correct and readable as it grows.
+
+## Why it exists
+
+Intuition about speed is often wrong. A 100× gain usually comes from changing an algorithm or removing I/O, not from micro-tuning.
+
+## How it works
+
+Work through the layers in order, as the biggest wins come first.
+
+<StepFlow
+  title="A tuning order that works"
+  nodes={["measure", "fix algorithm", "reduce I/O", "use built-ins", "go native or parallel"]}
+  steps={[
+    { active: [0], note: "Profile real workloads. cProfile shows where time is actually spent." },
+    { active: [1], note: "A list lookup inside a loop is O(n²). Changing it to a set makes it O(n)." },
+    { active: [2], note: "Batch queries and cache results. Network and disk dwarf CPU costs." },
+    { active: [3], note: "Built-ins such as sum and sorted run in C and beat equivalent Python loops." },
+    { active: [4], note: "Only then reach for NumPy, native extensions, or processes." },
+  ]}
+/>
+
+## Syntax and key APIs
+
+```bash
+python -m timeit "sum(range(1000))"
+python -m cProfile -s cumtime app.py
+```
+
+## Simple example
+
+```python
+import timeit
+
+setup = "data = list(range(20000)); wanted = set(range(0, 20000, 100))"
+as_list = timeit.timeit("[x for x in data[:2000] if x in lst]", setup + "; lst = list(wanted)", number=1)
+as_set = timeit.timeit("[x for x in data[:2000] if x in wanted]", setup, number=1)
+
+assert as_set < as_list
+```
+
+## Industry examples
+
+### Profile in code
+
+```python
+import cProfile, io, pstats
+
+def slow():
+    return sum(i * i for i in range(10000))
+
+profiler = cProfile.Profile()
+profiler.runcall(slow)
+
+out = io.StringIO()
+pstats.Stats(profiler, stream=out).sort_stats("cumulative").print_stats(3)
+assert "slow" in out.getvalue()
+```
+
+### Prefer early returns
+
+```python
+def discount(user):
+    if user is None:
+        return 0
+    if not user.get("active"):
+        return 0
+    return 10 if user.get("vip") else 5
+
+assert discount({"active": True, "vip": True}) == 10
+assert discount(None) == 0
+```
+
+### Group with one pass, not nested loops
+
+```python
+orders = [{"user": 1, "t": 5}, {"user": 2, "t": 3}, {"user": 1, "t": 2}]
+
+totals = {}
+for order in orders:
+    totals[order["user"]] = totals.get(order["user"], 0) + order["t"]
+
+assert totals == {1: 7, 2: 3}
+```
+
+### Write a small test
+
+```python
+import unittest
+
+def slugify(text):
+    return "-".join(text.lower().split())
+
+class SlugTests(unittest.TestCase):
+    def test_spaces(self):
+        self.assertEqual(slugify("A  B"), "a-b")
+
+suite = unittest.defaultTestLoader.loadTestsFromTestCase(SlugTests)
+result = unittest.TextTestRunner(verbosity=0, stream=open("nul" if __import__("os").name == "nt" else "/dev/null", "w")).run(suite)
+assert result.wasSuccessful()
+```
+
+## Patterns and best practices
+
+- Measure with realistic data.
+- Pick the right data structure first.
+- Use comprehensions and built-ins for simple transformations.
+- Inject dependencies so you can test without real services.
+- Keep functions small and side effects at the edges.
+
+## Alternatives and trade-offs
+
+| Technique | Gain | Cost |
+| --- | --- | --- |
+| Better algorithm | Often huge | Thinking time |
+| `lru_cache` | Repeated calls | Memory, staleness |
+| NumPy | Numeric loops | Dependency |
+| Multiprocessing | CPU parallelism | Overhead |
+
+## Common mistakes
+
+**Optimizing without profiling.** You'll speed up the wrong code.
+
+**String concatenation in a loop.** Use `join`.
+
+**Query-per-row in a loop.** Batch it. This is usually the largest cost.
+
+**Benchmarking tiny inputs.** Complexity differences appear only at scale.
+
+## Interview questions
+
+<Question q="How do you find a Python performance problem?">
+Reproduce it with realistic data, profile with `cProfile` or a sampling profiler, and fix the dominant cost.
+</Question>
+
+<Question q="Why might list membership be slow?">
+Each `in` scans the list. A set does a hash lookup, on average in constant time.
+</Question>

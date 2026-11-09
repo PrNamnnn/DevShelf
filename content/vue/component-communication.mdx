@@ -1,0 +1,165 @@
+---
+title: "Props, Events, v-model and Slots"
+summary: "How Vue components communicate, with typed props, two-way binding through defineModel, scoped slots, and provide and inject."
+level: intermediate
+section: components
+order: 10
+tags: [props, emits, v-model, defineModel, slots, provide-inject, components, composition]
+related: [vue/templates-and-components, vue/composables-pinia-and-router]
+versions: "defineModel needs 3.4+. Reactive props destructure needs 3.5+."
+tested: "Not executed. Component syntax was checked against the Vue docs."
+verified: "2026-11-09"
+docs:
+  - label: "Vue: Props"
+    url: "https://vuejs.org/guide/components/props.html"
+  - label: "Vue: Component events"
+    url: "https://vuejs.org/guide/components/events.html"
+  - label: "Vue: Component v-model"
+    url: "https://vuejs.org/guide/components/v-model.html"
+  - label: "Vue: Slots"
+    url: "https://vuejs.org/guide/components/slots.html"
+  - label: "Vue: Provide and inject"
+    url: "https://vuejs.org/guide/components/provide-inject.html"
+---
+
+## What it is
+
+Vue components communicate through **props** down, **events** up, **slots** for content and **provide/inject** across many levels.
+
+## Why it exists
+
+One-way data flow makes it clear who owns state. Slots let a component control layout while its parent supplies content.
+
+## How it works
+
+Props are declared explicitly and are read-only in the child. Emitted events go to the parent only and don't bubble like DOM events. `defineModel` declares a prop and matching update event together and returns a ref. Slot content is compiled in the parent's scope, while scoped slots receive data from the child.
+
+## Syntax and key APIs
+
+```vue
+<script setup>
+const { size = "md", label } = defineProps({
+  label: { type: String, required: true },
+  size: String,
+});
+const emit = defineEmits(["save"]);
+const model = defineModel({ type: String });
+</script>
+```
+
+<Callout type="version">
+Variables destructured from `defineProps` are reactive in Vue 3.5 and above. In 3.4 and earlier they were constants, so use `withDefaults` or `props.x`.
+</Callout>
+
+## Simple example
+
+```vue
+<!-- SearchBox.vue -->
+<script setup>
+const model = defineModel({ default: "" });
+const emit = defineEmits(["submit"]);
+</script>
+
+<template>
+  <input v-model="model" @keyup.enter="emit('submit', model)" />
+</template>
+```
+
+```vue
+<!-- Parent -->
+<SearchBox v-model="query" @submit="runSearch" />
+```
+
+## Industry examples
+
+### A reusable list using a scoped slot
+
+```vue
+<!-- DataList.vue -->
+<script setup>
+defineProps({ items: Array });
+</script>
+
+<template>
+  <ul>
+    <li v-for="item in items" :key="item.id">
+      <slot name="row" :item="item">{{ item.label }}</slot>
+    </li>
+  </ul>
+</template>
+```
+
+```vue
+<DataList :items="orders">
+  <template #row="{ item }">
+    <strong>{{ item.number }}</strong>
+  </template>
+</DataList>
+```
+
+### Multiple models on one component
+
+```vue
+<UserName v-model:first="first" v-model:last="last" />
+```
+
+```vue
+<script setup>
+const first = defineModel("first");
+const last = defineModel("last");
+</script>
+```
+
+### Share with distant descendants
+
+Use a `Symbol` key to avoid collisions, and protect state with `readonly`. A provided ref isn't unwrapped on inject.
+
+```vue
+<script setup>
+import { provide, readonly, ref } from "vue";
+import { themeKey } from "./keys";
+
+const theme = ref("dark");
+provide(themeKey, { theme: readonly(theme), setTheme: (v) => (theme.value = v) });
+</script>
+```
+
+## Patterns and best practices
+
+- Declare props with types and validators where useful.
+- Don't mutate props. Emit an event or use `defineModel`.
+- Reach for slots before adding many configuration props.
+- Keep mutation functions with the provider of injected state.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Parent to child | Props | Prop drilling across depth |
+| Child to parent | Events | Only reaches direct parent |
+| Deep tree values | Provide and inject | Less explicit source |
+| App-wide state | Pinia | Extra library |
+
+## Common mistakes
+
+**Mutating a prop.** Vue warns, and the parent's value won't follow.
+
+**Relying on event bubbling.** Component events don't bubble, so an intermediate parent must re-emit.
+
+**Setting a `default` on `defineModel` without a parent value.** The docs warn it can cause parent and child to disagree.
+
+**Expecting injected refs to unwrap.** They're injected as they were provided.
+
+## Interview questions
+
+<Question q="How do you implement v-model on a custom component?">
+From 3.4, call `defineModel()`, which creates the `modelValue` prop and `update:modelValue` event and returns a ref.
+</Question>
+
+<Question q="What is a scoped slot?">
+A slot that passes child data to parent-provided content, so the parent controls rendering with the child's values.
+</Question>
+
+<Question q="Do component events bubble?">
+No. Only the direct parent's listener receives them.
+</Question>

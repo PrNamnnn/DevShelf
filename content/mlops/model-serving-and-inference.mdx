@@ -1,0 +1,107 @@
+---
+title: "Model Serving, REST APIs and Batch vs Real-Time"
+summary: "Choose between batch, online and streaming inference, and serve models with latency and reliability in mind."
+level: intermediate
+section: serving
+order: 1
+tags: ["model serving","REST API","batch inference","real-time inference","latency"]
+requires: ["mlops/reproducibility-and-experiment-tracking"]
+related: ["express/rest-api-design","mlops/docker-and-deployment","statistics/quantiles-and-five-number-summary"]
+versions: "Practices current as of November 2026"
+tested: "Python example executed with the listed versions. FastAPI fragment checked against documentation and not executed"
+verified: "2026-11-09"
+docs:
+  - label: "FastAPI: First steps"
+    url: "https://fastapi.tiangolo.com/tutorial/first-steps/"
+  - label: "scikit-learn: Computational performance"
+    url: "https://scikit-learn.org/stable/computing/computational_performance.html"
+---
+
+## What it is
+
+Serving makes predictions available to other systems.
+
+| Mode | Latency | Example |
+| --- | --- | --- |
+| Batch | Minutes to hours | Nightly churn scores |
+| Online | Milliseconds | Fraud check at payment |
+| Streaming | Seconds | Event-driven updates |
+
+## Why it exists
+
+A model only adds value when a decision can use its output on time.
+
+## How it works
+
+Prefer batch if the decision allows it, since it's simpler and easily retried. Online serving must load models once, validate input, limit timeouts and return a fallback when something fails. Report P50, P95 and P99 latency.
+
+Release with shadow mode, canary or A/B tests.
+
+## Syntax and key APIs
+
+```py
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+class Features(BaseModel):
+    tenure: float
+    spend: float
+
+app = FastAPI()
+
+@app.post("/v1/score")
+def score(features: Features) -> dict[str, float]:
+    return {"probability": float(model.predict_proba([[features.tenure, features.spend]])[0, 1])}
+```
+
+## Simple example
+
+```python
+import time
+
+import numpy as np
+
+def predict_with_fallback(predict, features, fallback=0.1):
+    try:
+        return float(predict(features)), "model"
+    except Exception:
+        return fallback, "fallback"
+
+assert predict_with_fallback(lambda f: 0.7, [1, 2]) == (0.7, "model")
+assert predict_with_fallback(lambda f: 1 / 0, [1, 2]) == (0.1, "fallback")
+
+timings = []
+for _ in range(200):
+    start = time.perf_counter()
+    np.linalg.norm(np.ones(1_000))
+    timings.append(time.perf_counter() - start)
+assert np.percentile(timings, 95) >= np.percentile(timings, 50)
+```
+
+## Industry examples
+
+Marketplaces precompute recommendations in batch and rerank online. Payment systems run strict-budget online scoring.
+
+## Patterns and best practices
+
+- Version your API and model separately.
+- Validate inputs against a schema.
+- Log predictions with model version.
+- Batch GPU requests when possible.
+
+## Alternatives and trade-offs
+
+Serving frameworks such as BentoML or managed endpoints reduce work. Edge deployment reduces latency and complicates updating.
+
+## Common mistakes
+
+- Reloading a model on every request.
+- Ignoring tail latency.
+- Different preprocessing in training and serving.
+- No fallback path.
+
+## Interview questions
+
+<Question q="Batch or real-time?">Batch if a stale score is acceptable. Real-time only when the decision depends on fresh context.</Question>
+
+<Question q="What's a canary release?">Sending a small share of traffic to the new version and watching for problems.</Question>

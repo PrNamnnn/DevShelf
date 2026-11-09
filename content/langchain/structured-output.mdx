@@ -1,0 +1,173 @@
+---
+title: "Structured Output"
+summary: "Getting validated objects instead of free text, the difference between provider-native and tool-based strategies, and handling failures."
+level: intermediate
+section: structured
+order: 10
+tags: [structured-output, pydantic, with_structured_output, ToolStrategy, ProviderStrategy, validation]
+related: [langchain/prompts-and-runnables, langchain/tools-and-agents]
+versions: "LangChain v1. The strict option on ProviderStrategy needs langchain 1.2+."
+tested: "langchain 1.4.9 with a scripted fake model. Real provider enforcement wasn't tested."
+verified: "2026-11-09"
+docs:
+  - label: "LangChain: Structured output"
+    url: "https://docs.langchain.com/oss/python/langchain/structured-output"
+  - label: "LangChain: Models"
+    url: "https://docs.langchain.com/oss/python/langchain/models"
+  - label: "Pydantic: Models"
+    url: "https://docs.pydantic.dev/latest/concepts/models/"
+---
+
+## What it is
+
+Structured output constrains a model to return data that matches a schema, so your code receives an object rather than text to parse.
+
+## Why it exists
+
+Applications need fields they can trust: a category, a date, a list of items. Prompting for JSON alone is unreliable.
+
+## How it works
+
+There are two main strategies.
+
+| Strategy | Mechanism | Notes |
+| --- | --- | --- |
+| `ProviderStrategy` | The provider enforces a schema natively | Needs model support |
+| `ToolStrategy` | The schema is presented as a tool the model must call | Works with any tool-calling model |
+
+Passing a schema type to `create_agent` lets LangChain pick automatically: provider-native when supported, tool-based otherwise. A JSON Schema dictionary has to be wrapped in an explicit strategy. The result appears in `result["structured_response"]`.
+
+<StepFlow
+  title="Tool-based structured output with one retry"
+  nodes={["schema as tool", "model calls it", "validate arguments", "error fed back", "valid response"]}
+  steps={[
+    { active: [0], note: "The Pydantic schema is converted into a tool definition sent to the model." },
+    { active: [1], note: "The model produces a tool call with arguments.", state: { args: "{score: 12}" } },
+    { active: [2], note: "Validation fails: score must be between 0 and 5.", state: { result: "invalid" } },
+    { active: [3, 1], note: "With handle_errors enabled, the error goes back as a ToolMessage so the model can correct itself." },
+    { active: [2, 4], note: "The corrected call validates and becomes structured_response.", state: { result: "Review(score=4)" } },
+  ]}
+/>
+
+## Syntax and key APIs
+
+```py
+from langchain.agents.structured_output import ProviderStrategy, ToolStrategy
+
+structured = model.with_structured_output(Invoice)
+invoice = structured.invoke("...")
+
+agent = create_agent(model, tools=[], response_format=ToolStrategy(Invoice))
+```
+
+<Callout type="deprecated">
+Prompted output with `response_format=("prompt", Schema)` was removed in v1. Use a strategy.
+</Callout>
+
+## Simple example
+
+Validation is what makes the output trustworthy.
+
+```python
+from pydantic import BaseModel, Field, ValidationError
+
+class Review(BaseModel):
+    """A product review."""
+    score: int = Field(ge=0, le=5)
+    summary: str
+
+assert Review(score=4, summary="good").score == 4
+
+try:
+    Review(score=12, summary="too high")
+except ValidationError as error:
+    assert error.errors()[0]["loc"] == ("score",)
+else:
+    raise AssertionError
+```
+
+## Industry examples
+
+### An agent returning a typed result
+
+This runs the real agent with a scripted model that "calls" the schema tool.
+
+```python
+from langchain.agents import create_agent
+from langchain.agents.structured_output import ToolStrategy
+from langchain.messages import AIMessage
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from pydantic import BaseModel
+
+class Scripted(GenericFakeChatModel):
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+class Ticket(BaseModel):
+    """A support ticket."""
+    priority: str
+
+reply = AIMessage(content="", tool_calls=[
+    {"name": "Ticket", "args": {"priority": "high"}, "id": "1", "type": "tool_call"},
+])
+
+agent = create_agent(
+    Scripted(messages=iter([reply])),
+    tools=[],
+    response_format=ToolStrategy(Ticket),
+)
+
+result = agent.invoke({"messages": [{"role": "user", "content": "Server down"}]})
+assert result["structured_response"] == Ticket(priority="high")
+```
+
+### Choose among several shapes
+
+`ToolStrategy` accepts a union, so the model selects which result fits.
+
+```py
+agent = create_agent(model, tools=[], response_format=ToolStrategy(Refund | Escalation))
+```
+
+### Control error handling
+
+```py
+ToolStrategy(Ticket, handle_errors="Return a valid priority: low, medium or high.")
+ToolStrategy(Ticket, handle_errors=False)
+```
+
+## Patterns and best practices
+
+- Describe fields clearly, since descriptions are part of the prompt.
+- Add constraints in the schema, then re-check business rules in code.
+- Use `Literal` or enums for categories.
+- Keep schemas small and shallow.
+
+## Alternatives and trade-offs
+
+| Option | Strength | Trade-off |
+| --- | --- | --- |
+| `ProviderStrategy` | Strongest enforcement | Provider support varies |
+| `ToolStrategy` | Broad compatibility, retries | Extra tokens |
+| `with_structured_output` | Simple, no agent needed | Fewer agent features |
+| Output parser in a chain | Works on plain text | No automatic correction |
+
+## Common mistakes
+
+**Treating valid structure as correct content.** A schema verifies shape, not truth.
+
+**Passing a raw JSON Schema without a strategy.** Dictionaries aren't auto-detected.
+
+**Omitting `title` and `description` from JSON Schema with `ProviderStrategy`.** Both are required at the top level.
+
+**Using a very deep schema.** Models get less reliable as schemas grow.
+
+## Interview questions
+
+<Question q="How does ToolStrategy produce structured output?">
+It presents the schema as a tool, then validates the model's tool-call arguments against the schema.
+</Question>
+
+<Question q="Does structured output guarantee correct data?">
+No. It guarantees shape at best. Facts still need verification.
+</Question>

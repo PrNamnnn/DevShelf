@@ -1,0 +1,105 @@
+---
+title: "Forecast Evaluation and Time-Based Validation"
+summary: "Walk-forward validation, MAE, RMSE, MAPE and MASE, the common pitfalls, and how forecasts are used by a business."
+level: advanced
+section: time-series
+order: 5
+tags: ["forecast evaluation","walk-forward","MAPE","MASE","time series split"]
+requires: ["statistics/arima-and-sarima"]
+related: ["machine-learning/cross-validation-and-tuning","statistics/data-quality-and-leakage"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: TimeSeriesSplit"
+    url: "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.TimeSeriesSplit.html"
+---
+
+## What it is
+
+Forecast evaluation estimates how well a model will perform on the future, using only past data to train.
+
+## Why it exists
+
+Random cross-validation lets models peek at future values, making them look better than they'll be. Forecast errors drive actual costs in inventory and staffing.
+
+## How it works
+
+**Walk-forward validation** trains on an initial window, forecasts the next horizon, slides forward and repeats, averaging errors across windows.
+
+| Metric | Formula idea | Note |
+| --- | --- | --- |
+| MAE | Mean absolute error | Original units |
+| RMSE | Root mean squared error | Penalizes big misses |
+| MAPE | Mean absolute % error | Undefined at zero, asymmetric |
+| sMAPE | Symmetric percent error | Fixes some of MAPE's issues |
+| MASE | MAE ÷ naive MAE | Scale-free. Below 1 beats the in-sample naive benchmark |
+
+Every feature must be known at forecast time. Next month's actual promotions may be known, but next month's actual weather isn't.
+
+## Intuition and formula
+
+<Formula>MASE = MAE / ((1/(n − s)) Σ|yₜ − yₜ₋ₛ|)</Formula>
+
+## Worked example
+
+The Holt-Winters forecast has MAE 7.24 on the test window. In-sample seasonal-naive MAE is 17.8, so MASE is 0.41, beating the benchmark.
+
+The business consequence is asymmetric: overstocking perishable goods loses their cost, and understocking loses the margin. The best forecast for that decision is then a quantile, not the mean.
+
+## Python
+
+```python
+import numpy as np
+from sklearn.model_selection import TimeSeriesSplit
+
+y = np.arange(24)
+splits = list(TimeSeriesSplit(n_splits=3, test_size=4).split(y))
+for train, test in splits:
+    assert train.max() < test.min()
+assert len(splits[-1][0]) == 20
+
+actual = np.array([110.0, 120, 130])
+forecast = np.array([100.0, 125, 120])
+mae = np.abs(actual - forecast).mean()
+mape = (np.abs(actual - forecast) / actual).mean() * 100
+assert round(mae, 2) == 8.33
+assert round(mape, 2) == 6.98
+```
+
+## SQL
+
+```sql
+SELECT round(avg(abs(actual - forecast)), 2) AS mae
+FROM (VALUES (110.0, 100.0), (120.0, 125.0), (130.0, 120.0)) AS t(actual, forecast);
+-- rows: [{"mae":"8.33"}]
+```
+
+## Excel or Power BI
+
+Compute `ABS(actual − forecast)` and average it. In Power BI, compare stored forecast snapshots with actuals so that each forecast is evaluated as it was made.
+
+## In industry
+
+Organizations track forecast accuracy over time, by product and horizon, and keep historic forecasts rather than overwriting them.
+
+## Assumptions and limitations
+
+Past performance is only a guide when conditions change. A single error number can hide big misses during critical periods.
+
+## Common mistakes
+
+- Random splits.
+- Using MAPE near zero.
+- Features that aren't available at prediction time.
+- Evaluating only one-step horizons when decisions need longer ones.
+
+## Alternatives
+
+Pinball loss evaluates quantile forecasts, and business-cost metrics score the decision that the forecast supports.
+
+## Interview questions
+
+<Question q="How do you cross-validate a forecasting model?">Use expanding or sliding windows that train on the past and test on later periods.</Question>
+
+<Question q="What does a MASE of 0.8 mean?">The model's error is 80% of the in-sample naive forecast's error.</Question>

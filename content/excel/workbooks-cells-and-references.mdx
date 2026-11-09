@@ -1,0 +1,96 @@
+---
+title: "Workbooks, Ranges and Cell References"
+summary: "The Excel object model and how relative, absolute and mixed references behave when formulas are copied."
+level: fundamental
+section: foundations
+order: 1
+tags: ["workbook","worksheet","range","relative reference","absolute reference"]
+related: ["excel/essential-functions-and-logic","excel/tables-validation-and-formatting","statistics/data-types-and-scales"]
+versions: "Microsoft 365 and Excel 2016 onward"
+tested: "Reference behaviour evaluated in Excel build 20527"
+verified: "2026-11-09"
+docs:
+  - label: "Excel: Switch between relative, absolute and mixed references"
+    url: "https://support.microsoft.com/en-us/office/switch-between-relative-absolute-and-mixed-references-dfec08cd-ae65-4f56-839e-5f0d8d0baca9"
+  - label: "Excel: Overview of formulas"
+    url: "https://support.microsoft.com/en-us/office/overview-of-formulas-in-excel-ecfdc708-9162-49e8-b993-c311f47ca173"
+---
+
+## What it is
+
+A **workbook** is an Excel file containing **worksheets**, which are grids of **cells**. A **range** is a rectangular group of cells such as `C2:C6`. A **reference** tells a formula where to find its input.
+
+| Type | Example | When copied |
+| --- | --- | --- |
+| Relative | `C2` | Row and column both shift |
+| Absolute | `$C$2` | Neither shifts |
+| Mixed column | `$C2` | Column fixed, row shifts |
+| Mixed row | `C$2` | Row fixed, column shifts |
+
+## Why it exists
+
+A spreadsheet's power comes from writing a formula once and filling it across thousands of rows. References control exactly how it adapts.
+
+## How it works
+
+Excel stores a relative reference as an offset from the formula's cell. Copy `=C2*D2` from F2 to F3 and it becomes `=C3*D3`. The dollar sign locks part of the reference. Press F4 while editing a reference to cycle through the four forms.
+
+Each cell has a value and a display format. A date such as 5 January 2026 is stored as a serial number and only looks like a date, which is why dates can be subtracted.
+
+## Syntax and key APIs
+
+```text
+=C2*D2                 relative
+=C2*$H$1               fixed tax rate cell in H1
+=$A2&" "&B$1           lock column A and row 1
+=SUM(Sheet2!C2:C6)     another sheet
+=SUM('Q1 Sales'!C:C)   sheet name with a space needs quotes
+```
+
+The sample table used across this book is:
+
+| Region | Product | Units | Price | Date |
+| --- | --- | --- | --- | --- |
+| North | Pen | 10 | 20 | 2026-01-05 |
+| South | Book | 5 | 150 | 2026-01-12 |
+| North | Book | 3 | 150 | 2026-02-03 |
+| East | Pen | 8 | 20 | 2026-02-14 |
+| South | Pen | 12 | 20 | 2026-03-01 |
+
+## Simple example
+
+To calculate revenue with a single tax rate in `H1`, enter this in `F2` and fill down:
+
+```text
+=C2*D2*(1+$H$1)
+```
+
+The units and price references move with each row, while the tax rate stays fixed.
+
+## Industry examples
+
+Financial models place assumptions on a dedicated sheet and reference them absolutely, so that changing one input updates the whole model. Multiplication grids use mixed references such as `=$A2*B$1`.
+
+## Patterns and best practices
+
+- Keep inputs, calculations and outputs on separate, clearly labelled areas.
+- Never type constants inside formulas. Use a labelled input cell.
+- Prefer Excel Tables over fixed ranges, since their references grow automatically.
+- Use Trace Precedents to audit where a number comes from.
+
+## Alternatives and trade-offs
+
+Named ranges read better than `$H$1`, but too many become hard to maintain. Structured references are clearer in a table. Python or SQL suit large, repeatable data work better than a grid.
+
+## Common mistakes
+
+- Forgetting `$` so that a fixed input drifts when filled down.
+- Text that looks like numbers, which `SUM` ignores.
+- Merged cells inside data, which break sorting and filtering.
+- Whole-column references inside heavy array formulas, which slow calculation.
+
+## Interview questions
+
+<Question q="What is the difference between C2, $C$2 and C$2?">Relative, fully absolute, and row-locked. They differ in what changes when the formula is copied.</Question>
+
+<Question q="How does Excel store a date?">As a serial number of days, with a number format that displays it as a date.</Question>

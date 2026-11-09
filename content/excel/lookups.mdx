@@ -1,0 +1,88 @@
+---
+title: "XLOOKUP, VLOOKUP, INDEX and MATCH"
+summary: "Find values safely, handle missing keys, use approximate tiers and choose the right lookup for each Excel version."
+level: fundamental
+section: functions
+order: 3
+tags: ["XLOOKUP","VLOOKUP","INDEX","MATCH"]
+requires: ["excel/essential-functions-and-logic"]
+related: ["excel/power-query-and-data-model","postgresql/queries-and-joins"]
+versions: "XLOOKUP requires Excel 2021, 2024 or Microsoft 365"
+tested: "VLOOKUP and INDEX/MATCH evaluated in Excel build 20527. XLOOKUP isn't available in that build, and its behaviour was checked against Microsoft documentation"
+verified: "2026-11-09"
+docs:
+  - label: "Excel: XLOOKUP function"
+    url: "https://support.microsoft.com/en-us/office/xlookup-function-b7fd680e-6d10-43e6-84f9-88eae8bf5929"
+  - label: "Excel: VLOOKUP function"
+    url: "https://support.microsoft.com/en-us/office/vlookup-function-0bbc8083-26fe-4963-8ab8-93a18ad188a1"
+  - label: "Excel: INDEX and MATCH"
+    url: "https://support.microsoft.com/en-us/office/look-up-values-with-vlookup-index-or-match-68297403-7c3c-4150-9e3c-4d348188976b"
+---
+
+## What it is
+
+Lookup functions fetch a value from one place using a key from another, the spreadsheet equivalent of a join.
+
+## Why it exists
+
+Business data lives in many tables: orders hold a product ID, and a price list holds the price.
+
+## How it works
+
+| Function | Strength | Weakness |
+| --- | --- | --- |
+| `VLOOKUP` | Available everywhere | Leftmost key, breaks when columns are inserted |
+| `INDEX` + `MATCH` | Any direction, resilient | Two functions |
+| `XLOOKUP` | Simple, default exact, built-in not-found | Modern versions only |
+
+`VLOOKUP` defaults to **approximate** match. Always pass `FALSE` for exact matching unless you specifically want tiers.
+
+`XLOOKUP`'s match mode is 0 for exact (default), −1 for exact or next smaller, 1 for exact or next larger, and 2 for wildcard. Its search mode is 1 for first to last, −1 for last to first, and 2 or −2 for binary search on sorted data.
+
+## Syntax and key APIs
+
+```text
+=XLOOKUP(lookup_value, lookup_array, return_array, [if_not_found], [match_mode], [search_mode])
+=VLOOKUP(lookup_value, table_array, col_index, FALSE)
+=INDEX(return_range, MATCH(lookup_value, lookup_range, 0))
+```
+
+## Simple example
+
+```text
+=XLOOKUP("East",A2:A6,C2:C6)               returns 8
+=XLOOKUP("West",A2:A6,C2:C6,"none")        returns none
+=XLOOKUP("North",A2:A6,C2:C6,,0,-1)        returns 3, the last North row
+=INDEX(C2:C6,MATCH("East",A2:A6,0))        returns 8
+=IFERROR(VLOOKUP("West",A2:C6,3,FALSE),"missing")
+```
+
+For a tier table where H has 0, 5 and 10 and I has Bronze, Silver and Gold, `=XLOOKUP(7,H2:H4,I2:I4,,-1)` returns Silver.
+
+## Industry examples
+
+Price lists, employee-to-manager mappings, and exchange rates by date all use lookups. Reconciliation sheets flag items present in one system but missing from another.
+
+## Patterns and best practices
+
+- Check that lookup keys are unique, because the first match wins.
+- Normalize keys with `TRIM` and a matching type.
+- Use `if_not_found` so that missing keys remain visible as a clear message.
+- Bring in many columns using Power Query merges instead of dozens of lookups.
+
+## Alternatives and trade-offs
+
+Power Query merges and Data Model relationships scale better. `FILTER` returns all matches rather than the first.
+
+## Common mistakes
+
+- Omitting `FALSE` in `VLOOKUP`.
+- Comparing numbers stored as text with numbers.
+- Duplicate keys silently returning the first match.
+- Hard-coded column numbers in `VLOOKUP`.
+
+## Interview questions
+
+<Question q="Why is INDEX/MATCH better than VLOOKUP?">It can look left, and it doesn't break when columns are inserted because it refers to specific ranges.</Question>
+
+<Question q="How do you return the last match?">Use XLOOKUP's search_mode of −1, or a descending sort or reverse-search formula in older versions.</Question>

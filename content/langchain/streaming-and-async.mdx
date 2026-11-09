@@ -1,0 +1,162 @@
+---
+title: "Streaming and Async"
+summary: "Showing tokens as they arrive, streaming agent steps, and running many model calls concurrently."
+level: intermediate
+section: foundations
+order: 30
+tags: [streaming, async, astream, stream-modes, batch, concurrency]
+requires: [langchain/models-and-messages]
+related: [langchain/tools-and-agents, python/asyncio]
+versions: "LangChain v1. Event streaming arrived in v1.3."
+tested: "langchain 1.4.9 with fake models. No real provider was called."
+verified: "2026-11-09"
+docs:
+  - label: "LangChain: Streaming"
+    url: "https://docs.langchain.com/oss/python/langchain/streaming"
+  - label: "LangChain: Models"
+    url: "https://docs.langchain.com/oss/python/langchain/models"
+---
+
+## What it is
+
+Streaming returns output incrementally. Async methods such as `ainvoke` let many model calls overlap on one thread.
+
+## Why it exists
+
+Model calls are slow. Seeing the first words quickly transforms perceived speed, and async avoids blocking a server while waiting.
+
+## How it works
+
+For agents, a stream mode selects what you receive.
+
+| Mode | Yields |
+| --- | --- |
+| `updates` | State after each agent step |
+| `messages` | `(token, metadata)` from the model |
+| `custom` | Data from `get_stream_writer` |
+
+For new applications, the docs recommend `stream_events(..., version="v3")`.
+
+<LanesViz
+  title="Streaming an answer to a browser"
+  actors={["Browser", "Your API", "Model"]}
+  steps={[
+    { from: 0, to: 1, label: "POST /chat", note: "The browser opens a streaming request." },
+    { from: 1, to: 2, label: "model.astream()", note: "The server starts a streaming call." },
+    { from: 2, to: 1, label: "chunk", note: "Tokens arrive as they're generated." },
+    { from: 1, to: 0, label: "SSE: data: chunk", note: "Each chunk is forwarded immediately." },
+    { from: 2, to: 1, label: "final chunk", note: "Usage metadata often comes at the end." },
+    { from: 1, to: 0, label: "done", note: "The server closes the stream." },
+  ]}
+/>
+
+## Syntax and key APIs
+
+```py
+for chunk in model.stream("Hi"): ...
+async for chunk in model.astream("Hi"): ...
+await model.ainvoke("Hi")
+for token, metadata in agent.stream(inputs, stream_mode="messages"): ...
+```
+
+## Simple example
+
+```python
+import asyncio
+from langchain.messages import AIMessage
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+
+async def main():
+    model = GenericFakeChatModel(messages=iter([AIMessage(content="one two")]))
+    return [chunk.content async for chunk in model.astream("Hi")]
+
+chunks = asyncio.run(main())
+assert "".join(chunks) == "one two"
+assert len(chunks) > 1
+```
+
+## Industry examples
+
+### Bounded concurrency
+
+```python
+import asyncio
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+async def summarize(model, limit, text):
+    async with limit:
+        return (await model.ainvoke(text)).content
+
+async def main():
+    model = FakeListChatModel(responses=["ok"])
+    limit = asyncio.Semaphore(2)
+    return await asyncio.gather(*(summarize(model, limit, t) for t in ["a", "b", "c"]))
+
+assert asyncio.run(main()) == ["ok", "ok", "ok"]
+```
+
+### Stream agent steps
+
+```python
+from langchain.agents import create_agent
+from langchain.messages import AIMessage
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+
+class Scripted(GenericFakeChatModel):
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+agent = create_agent(Scripted(messages=iter([AIMessage(content="done")])), tools=[])
+
+steps = list(agent.stream({"messages": [{"role": "user", "content": "go"}]}, stream_mode="updates"))
+assert "model" in steps[0]
+```
+
+### Server-sent events
+
+```py
+from fastapi.responses import StreamingResponse
+
+async def events(prompt):
+    async for chunk in model.astream(prompt):
+        yield f"data: {chunk.text}\n\n"
+
+@app.post("/chat")
+async def chat(prompt: str):
+    return StreamingResponse(events(prompt), media_type="text/event-stream")
+```
+
+## Patterns and best practices
+
+- Stream user-facing output.
+- Set timeouts, and handle client disconnects.
+- Limit concurrency to stay inside rate limits.
+- Don't parse partial JSON unless your parser supports it.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Interactive chat | `stream` | More client code |
+| Background job | `invoke` | Slower perceived |
+| Bulk processing | `batch` | No partial output |
+
+## Common mistakes
+
+**Calling blocking `invoke` in an async route.** It blocks the event loop.
+
+**Not cancelling on disconnect.** You keep paying for tokens no one reads.
+
+**Assuming tokens align with words.** Chunks can split anywhere.
+
+**Using `get_stream_writer` outside graph execution.** It only works inside it.
+
+## Interview questions
+
+<Question q="Why stream model output?">
+It lowers perceived latency and lets users stop early.
+</Question>
+
+<Question q="stream versus batch?">
+`stream` yields parts of one response. `batch` runs many inputs and returns complete results.
+</Question>

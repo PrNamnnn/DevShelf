@@ -1,0 +1,193 @@
+---
+title: "Retrieval-Augmented Generation"
+summary: "Building a RAG pipeline from chunking to retrieval, and choosing between two-step, agentic and hybrid designs."
+level: advanced
+section: retrieval
+order: 10
+tags: [rag, retrieval, embeddings, vector-store, chunking, text-splitters, retrievers, grounding]
+related: ["langchain/tools-and-agents", "langchain/evaluation-and-observability", "deep-learning/embeddings-attention-and-transformers"]
+versions: "LangChain v1 with langchain-text-splitters."
+tested: "langchain-core 1.7.6 with an in-memory store and a local keyword embedding. No real embedding model was called."
+verified: "2026-11-09"
+docs:
+  - label: "LangChain: Retrieval"
+    url: "https://docs.langchain.com/oss/python/langchain/retrieval"
+  - label: "LangChain: RAG tutorial"
+    url: "https://docs.langchain.com/oss/python/langchain/rag"
+  - label: "LangChain: Document loader integrations"
+    url: "https://docs.langchain.com/oss/python/integrations/document_loaders"
+---
+
+## What it is
+
+RAG retrieves relevant text from your own data and gives it to the model as context, so that answers are grounded in that data.
+
+## Why it exists
+
+Models don't know your documents, their knowledge has a cutoff, and whole knowledge bases don't fit in a prompt. Retrieval sends only the relevant pieces.
+
+## How it works
+
+<StepFlow
+  title="Indexing and answering"
+  nodes={["load documents", "split into chunks", "embed chunks", "vector store", "embed question", "retrieve top k", "prompt + generate"]}
+  steps={[
+    { active: [0], note: "Indexing starts offline. Sources become Document objects with text and metadata." },
+    { active: [1], note: "Long documents are split, with overlap so that ideas aren't cut in half.", state: { chunks: "1000 chars, 200 overlap" } },
+    { active: [2, 3], note: "An embedding model converts each chunk into a vector, which is stored with its text." },
+    { active: [4], note: "At question time, the question is embedded with the same model." },
+    { active: [5], note: "The store returns the nearest chunks by similarity.", state: { k: "4" } },
+    { active: [6], note: "The chunks are inserted into the prompt, and the model answers from them." },
+  ]}
+/>
+
+| Architecture | Behaviour | Best for |
+| --- | --- | --- |
+| 2-step RAG | Always retrieve, then generate | Predictable Q&A |
+| Agentic RAG | The agent decides when and what to retrieve | Open-ended questions |
+| Hybrid RAG | Adds query enhancement and validation | High-accuracy needs |
+
+## Syntax and key APIs
+
+```py
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.vectorstores import InMemoryVectorStore
+from langchain_core.documents import Document
+
+splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+chunks = splitter.split_documents(documents)
+
+store = InMemoryVectorStore(embeddings)
+store.add_documents(chunks)
+results = store.similarity_search("question", k=4)
+```
+
+`InMemoryVectorStore` needs `numpy` installed for its similarity search.
+
+## Simple example
+
+```python
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+doc = Document(page_content="word " * 300, metadata={"source": "a.txt"})
+
+splitter = RecursiveCharacterTextSplitter(chunk_size=100, chunk_overlap=20)
+chunks = splitter.split_documents([doc])
+
+assert len(chunks) > 1
+assert all(len(c.page_content) <= 100 for c in chunks)
+assert all(c.metadata["source"] == "a.txt" for c in chunks)
+```
+
+## Industry examples
+
+### Retrieve with metadata preserved
+
+The embedding here is a simple keyword vector, so the example runs locally and is meaningful. Use a real embedding model in production.
+
+```python
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
+from langchain_core.vectorstores import InMemoryVectorStore
+
+VOCABULARY = ["refund", "shipping", "password"]
+
+class KeywordEmbeddings(Embeddings):
+    def embed_query(self, text):
+        return [float(word in text.lower()) + 1e-6 for word in VOCABULARY]
+
+    def embed_documents(self, texts):
+        return [self.embed_query(t) for t in texts]
+
+store = InMemoryVectorStore(KeywordEmbeddings())
+store.add_documents([
+    Document(page_content="Refund requests take 5 days.", metadata={"source": "billing"}),
+    Document(page_content="Reset your password in settings.", metadata={"source": "account"}),
+])
+
+hit = store.similarity_search("How do I get a refund?", k=1)[0]
+assert hit.metadata["source"] == "billing"
+
+retriever = store.as_retriever(search_kwargs={"k": 1})
+assert retriever.invoke("forgot password")[0].metadata["source"] == "account"
+```
+
+### Generate with citations
+
+Number the sources and instruct the model to refuse when context is insufficient.
+
+```python
+from langchain_core.documents import Document
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "Answer only from the sources and cite them like [1]. "
+               "If they are insufficient, say you don't know.\n\n{sources}"),
+    ("human", "{question}"),
+])
+
+def format_sources(docs):
+    return "\n".join(f"[{i}] {d.page_content}" for i, d in enumerate(docs, 1))
+
+docs = [Document(page_content="Refunds take 5 days.")]
+chain = prompt | FakeListChatModel(responses=["Refunds take 5 days [1]."]) | StrOutputParser()
+
+answer = chain.invoke({"sources": format_sources(docs), "question": "How long?"})
+assert "[1]" in answer
+```
+
+### Agentic retrieval as a tool
+
+```py
+@tool
+def search_docs(query: str) -> str:
+    """Search the product documentation."""
+    return format_sources(store.similarity_search(query, k=4))
+
+agent = create_agent(model, tools=[search_docs], system_prompt="Search before answering.")
+```
+
+## Patterns and best practices
+
+- Keep `source` and section metadata on every chunk.
+- Chunk by document structure when possible.
+- Combine vector and keyword search for names and codes.
+- Filter by permissions at retrieval time.
+- Build an evaluation set before tuning.
+
+## Alternatives and trade-offs
+
+| Decision | Smaller or simpler | Larger or richer |
+| --- | --- | --- |
+| Chunk size | Precise, less context | More context, noisier |
+| `k` | Cheap, may miss | Better recall, more tokens |
+| Pipeline | 2-step is predictable | Agentic handles complexity |
+
+Search can use the built-in in-memory store for development, and pgvector or a dedicated vector database in production.
+
+## Common mistakes
+
+**Embedding queries and documents with different models.** The vectors aren't comparable.
+
+**Treating retrieved text as trusted.** Documents can contain prompt injection.
+
+**Skipping access control.** A retriever can leak documents the user couldn't otherwise read.
+
+**Tuning without measurement.** See [evaluation and observability](/langchain/evaluation-and-observability).
+
+## Interview questions
+
+<Question q="Why does chunking need overlap?">
+So that information spanning a boundary appears intact in at least one chunk.
+</Question>
+
+<Question q="Two-step RAG or agentic RAG?">
+Two-step when every question needs lookup and predictability matters. Agentic when retrieval depends on the question and may take several steps.
+</Question>
+
+<Question q="How would you reduce hallucinations in RAG?">
+Improve retrieval quality, restrict answers to sources with citations, allow a "don't know" answer, and evaluate groundedness.
+</Question>

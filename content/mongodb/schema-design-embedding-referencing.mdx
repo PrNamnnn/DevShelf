@@ -1,0 +1,103 @@
+---
+title: "Embedding, Referencing and Schema Validation"
+summary: "Design documents around access patterns, and decide when to embed, reference or enforce a schema."
+level: intermediate
+section: modeling
+order: 1
+tags: ["schema design","embedding","referencing","JSON Schema"]
+requires: ["mongodb/projection-sort-and-updates"]
+related: ["mongodb/modelling-patterns","powerbi/star-schema-and-relationships","postgresql/schema-types-and-constraints"]
+versions: "Documentation for MongoDB 9.0. Examples executed on MongoDB 8.0.12"
+tested: "JavaScript examples executed against a temporary MongoDB 8.0.12 replica set"
+verified: "2026-11-09"
+docs:
+  - label: "MongoDB: Data modeling"
+    url: "https://www.mongodb.com/docs/manual/data-modeling/"
+  - label: "MongoDB: Schema validation"
+    url: "https://www.mongodb.com/docs/manual/core/schema-validation/"
+---
+
+## What it is
+
+Schema design decides what lives inside one document and what lives separately. MongoDB's guideline is that data accessed together should be stored together.
+
+## Why it exists
+
+Reads and single-document writes become simpler and more efficient when related data shares a document. But unbounded or independently updated data needs separation.
+
+## How it works
+
+| Prefer | When |
+| --- | --- |
+| Embed | Owned by the parent, read together, bounded in size |
+| Reference | Shared by many, growing without limit, or changed independently |
+| Hybrid | Embed a summary, reference the full record |
+
+Duplicating data for reads is a deliberate choice, and it creates an obligation to keep copies consistent, or to accept staleness.
+
+Start by listing your queries, their frequency and their consistency requirements. Then shape documents to them.
+
+## Syntax and key APIs
+
+```text
+db.createCollection("products", { validator: { $jsonSchema: { ... } }, validationLevel: "strict", validationAction: "error" })
+```
+
+## Simple example
+
+```js
+import assert from "node:assert/strict";
+import { MongoClient } from "mongodb";
+
+const client = new MongoClient(process.env.MONGODB_URI);
+const db = client.db("shelf_schema");
+await db.dropDatabase();
+
+await db.createCollection("products", {
+  validator: {
+    $jsonSchema: {
+      bsonType: "object",
+      required: ["name", "price"],
+      properties: {
+        name: { bsonType: "string" },
+        price: { bsonType: "double", minimum: 0 },
+      },
+    },
+  },
+});
+
+const products = db.collection("products");
+await products.insertOne({ name: "Pen", price: 20.5 });
+await assert.rejects(products.insertOne({ name: "Broken", price: -1 }), /validation/i);
+
+await db.dropDatabase();
+await client.close();
+```
+
+## Industry examples
+
+An order embeds a copy of each product's price at purchase time, which is correct because history shouldn't change. A customer's support tickets are referenced, since they grow continuously.
+
+## Patterns and best practices
+
+- Bound every array.
+- Copy values that represent a point in time.
+- Add `$jsonSchema` validators to protect important invariants.
+- Review designs against real query volumes.
+
+## Alternatives and trade-offs
+
+Relational normalization minimizes duplication and gives strong constraints. Document modelling optimizes for reads along known paths.
+
+## Common mistakes
+
+- Normalizing everything then using `$lookup` constantly.
+- Embedding unbounded arrays.
+- Forgetting that duplicated data has to be maintained.
+- Designing without a list of queries.
+
+## Interview questions
+
+<Question q="When should you reference instead of embed?">When the related data is unbounded, shared by many parents, or independently accessed and updated.</Question>
+
+<Question q="How can MongoDB enforce structure?">Through `$jsonSchema` validators at the collection level.</Question>

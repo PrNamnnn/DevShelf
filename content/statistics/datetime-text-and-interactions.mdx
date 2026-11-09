@@ -1,0 +1,112 @@
+---
+title: "Date-Time, Text and Interaction Features"
+summary: "Create useful calendar, lag, text and interaction features without looking into the future."
+level: intermediate
+section: features
+order: 3
+tags: ["feature creation","date features","lag features","TF-IDF","interactions"]
+requires: ["statistics/scaling-binning-and-transforms"]
+related: ["statistics/time-series-fundamentals","statistics/feature-selection-and-pipelines"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "pandas: Time series"
+    url: "https://pandas.pydata.org/docs/user_guide/timeseries.html"
+  - label: "scikit-learn: Text feature extraction"
+    url: "https://scikit-learn.org/stable/modules/feature_extraction.html#text-feature-extraction"
+---
+
+## What it is
+
+Feature creation expresses domain knowledge as columns: dates become behavioural signals, text becomes numbers, and combinations capture joint effects.
+
+## Why it exists
+
+A model can't discover that weekends differ if all it gets is an epoch timestamp, and good features often matter more than algorithm choice on tabular data.
+
+## How it works
+
+| Source | Features |
+| --- | --- |
+| Timestamp | Hour, weekday, month-end, holiday |
+| Events | Recency, frequency, rolling sums, days between |
+| Time series | Lags and rolling windows, shifted to exclude the current value |
+| Text | Length, keywords, TF-IDF, embeddings |
+| Pairs | Ratios, differences, products, category crosses |
+
+Cyclic quantities such as hour need sine and cosine so that 23:00 is near 00:00. Rolling features need `.shift(1)` so that the current value isn't included.
+
+## Intuition and formula
+
+<Formula>hour_sin = sin(2π · hour / 24), hour_cos = cos(2π · hour / 24)</Formula>
+
+<Formula>tf-idf(t, d) = tf(t, d) · idf(t)</Formula>
+
+## Worked example
+
+For predicting weekly purchases per customer, a useful feature is `spend_last_4w`, computed from the four weeks before each row, and not including the current one. Dividing `support_tickets` by `active_days` gives a rate more informative than either count.
+
+## Python
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+orders = pd.DataFrame({
+    "day": pd.date_range("2026-01-01", periods=5, freq="D"),
+    "amount": [10.0, 20.0, 30.0, 40.0, 50.0],
+})
+orders["weekday"] = orders["day"].dt.dayofweek
+orders["prior_2d_sum"] = orders["amount"].shift(1).rolling(2).sum()
+assert orders["prior_2d_sum"].tolist()[2:] == [30.0, 50.0, 70.0]
+
+hours = np.array([23, 0])
+points = np.c_[np.sin(2 * np.pi * hours / 24), np.cos(2 * np.pi * hours / 24)]
+assert np.linalg.norm(points[0] - points[1]) < 0.3
+
+docs = ["refund not received", "refund delayed", "great service"]
+matrix = TfidfVectorizer().fit_transform(docs)
+assert matrix.shape[0] == 3
+```
+
+## SQL
+
+```sql
+SELECT day,
+       sum(amount) OVER (ORDER BY day ROWS BETWEEN 2 PRECEDING AND 1 PRECEDING) AS prior_2d
+FROM (VALUES (1, 10), (2, 20), (3, 30)) AS t(day, amount)
+ORDER BY day DESC
+LIMIT 1;
+-- rows: [{"day":3,"prior_2d":30}]
+```
+
+## Excel or Power BI
+
+`WEEKDAY`, `EOMONTH` and `TEXT` derive calendar fields. In Power BI, use a dedicated date table instead of adding columns to fact tables.
+
+## In industry
+
+Rolling behavioural aggregates are the backbone of fraud and recommendation features, and feature stores reuse them across models.
+
+## Assumptions and limitations
+
+Handmade features reflect current domain beliefs. Many interactions raise overfitting risk, and rolling windows have to match the delay of the production data.
+
+## Common mistakes
+
+- Rolling windows that include the current row.
+- Treating hour as linear.
+- Using a timezone inconsistent with users.
+- Fitting TF-IDF on all documents before the split.
+
+## Alternatives
+
+Tree ensembles discover interactions automatically. Neural models learn text representations without manual features.
+
+## Interview questions
+
+<Question q="How do you encode hour of day?">Use sine and cosine so that the feature wraps around midnight.</Question>
+
+<Question q="How can a rolling average leak?">By including the current or future rows in the window.</Question>

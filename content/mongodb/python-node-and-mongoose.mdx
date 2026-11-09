@@ -1,0 +1,109 @@
+---
+title: "MongoDB with Python, Node.js and Mongoose"
+summary: "Connect from applications, reuse clients correctly and define Mongoose schemas responsibly."
+level: intermediate
+section: production
+order: 1
+tags: ["PyMongo","Node.js driver","Mongoose","connection pool"]
+requires: ["mongodb/crud-and-query-operators"]
+related: ["express/database-access","python/asyncio","mongodb/atlas-security-and-production"]
+versions: "Documentation for MongoDB 9.0 and Mongoose 9. Examples executed on MongoDB 8.0.12"
+tested: "JavaScript, Mongoose and PyMongo examples executed against a temporary MongoDB 8.0.12 replica set"
+verified: "2026-11-09"
+docs:
+  - label: "PyMongo documentation"
+    url: "https://www.mongodb.com/docs/languages/python/pymongo-driver/current/"
+  - label: "Node.js driver"
+    url: "https://www.mongodb.com/docs/drivers/node/current/"
+  - label: "Mongoose: Schemas"
+    url: "https://mongoosejs.com/docs/guide.html"
+---
+
+## What it is
+
+**Drivers** connect applications to MongoDB. **Mongoose** is an object-document mapper for Node.js, adding schemas, validation and middleware.
+
+## Why it exists
+
+Applications need pooled connections, retries and native data types. Mongoose adds application-level structure to flexible documents.
+
+## How it works
+
+A client maintains a connection pool. Create **one client per process** and reuse it. Creating one per request exhausts connections.
+
+Mongoose compiles a `Schema` into a `Model`. Its `autoIndex` default creates indexes at startup, which is convenient in development and generally disabled in production, where index builds are controlled separately.
+
+## Syntax and key APIs
+
+| Task | Python | Node.js |
+| --- | --- | --- |
+| Connect | `MongoClient(uri)` | `new MongoClient(uri)` |
+| Insert | `insert_one(doc)` | `insertOne(doc)` |
+| Read | `find_one(q)` | `findOne(q)` |
+| Asynchronous | `AsyncMongoClient` | Native promises |
+
+## Simple example
+
+```python
+import os
+from pymongo import MongoClient
+
+client = MongoClient(os.environ["MONGODB_URI"])
+db = client["shelf_pymongo"]
+client.drop_database(db)
+
+db.users.insert_one({"_id": 1, "name": "Asha", "plan": "pro"})
+assert db.users.find_one({"plan": "pro"})["name"] == "Asha"
+
+client.drop_database(db)
+client.close()
+```
+
+```js
+import assert from "node:assert/strict";
+import mongoose from "mongoose";
+
+await mongoose.connect(process.env.MONGODB_URI, { dbName: "shelf_mongoose", autoIndex: false });
+
+const userSchema = new mongoose.Schema({
+  email: { type: String, required: true, lowercase: true, trim: true },
+  plan: { type: String, enum: ["basic", "pro"], default: "basic" },
+});
+const User = mongoose.model("User", userSchema);
+
+const user = await User.create({ email: "  ASHA@EXAMPLE.COM " });
+assert.equal(user.email, "asha@example.com");
+assert.equal(user.plan, "basic");
+await assert.rejects(User.create({ email: "x@y.z", plan: "gold" }), /validation/i);
+
+await mongoose.connection.dropDatabase();
+await mongoose.disconnect();
+```
+
+## Industry examples
+
+Express APIs share one Mongoose connection for the life of the process. Data scripts use PyMongo to load documents into pandas.
+
+## Patterns and best practices
+
+- Reuse clients.
+- Keep credentials in environment variables or a secret manager.
+- Disable `autoIndex` in production.
+- Use `.lean()` for read-only Mongoose results that don't need document features.
+
+## Alternatives and trade-offs
+
+The native driver has less overhead and fewer abstractions. Mongoose validation helps at the application level, and it doesn't replace database-level validators.
+
+## Common mistakes
+
+- Opening a new client per request.
+- Mixing driver and Mongoose validation assumptions.
+- Forgetting that `updateOne` skips Mongoose validators by default.
+- Logging connection strings.
+
+## Interview questions
+
+<Question q="Why reuse MongoClient?">It manages a connection pool, and creating many clients wastes connections and adds latency.</Question>
+
+<Question q="Why disable autoIndex in production?">Index builds can be expensive, and should be planned and rolled out deliberately.</Question>

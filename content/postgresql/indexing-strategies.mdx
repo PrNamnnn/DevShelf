@@ -1,0 +1,178 @@
+---
+title: "Indexing Strategies"
+summary: "Choosing an index type, designing multicolumn indexes, using partial and expression indexes, and creating them safely in production."
+level: advanced
+section: performance
+order: 10
+tags: [indexes, btree, gin, brin, multicolumn, partial-index, expression-index, covering-index, concurrently]
+related: ["postgresql/explain-analyze", "postgresql/jsonb-and-full-text-search", "mongodb/indexes-and-explain"]
+versions: "B-tree skip scan needs PostgreSQL 18."
+tested: "PostgreSQL 18.6 through PGlite. CREATE INDEX CONCURRENTLY wasn't run."
+verified: "2026-11-09"
+docs:
+  - label: "PostgreSQL: Index types"
+    url: "https://www.postgresql.org/docs/current/indexes-types.html"
+  - label: "PostgreSQL: Multicolumn indexes"
+    url: "https://www.postgresql.org/docs/current/indexes-multicolumn.html"
+  - label: "PostgreSQL: Partial indexes"
+    url: "https://www.postgresql.org/docs/current/indexes-partial.html"
+  - label: "PostgreSQL: Index-only scans"
+    url: "https://www.postgresql.org/docs/current/indexes-index-only-scans.html"
+  - label: "PostgreSQL: CREATE INDEX"
+    url: "https://www.postgresql.org/docs/current/sql-createindex.html"
+---
+
+## What it is
+
+An index is a separate structure that finds rows without scanning the table. Choosing one means matching its structure to your queries.
+
+## Why it exists
+
+Without an index, finding one row means reading every page. An index speeds reads but costs storage and slows each write, so every index must earn its place.
+
+## How it works
+
+| Type | Best for |
+| --- | --- |
+| B-tree (default) | Equality, ranges, sorting, anchored `LIKE 'foo%'` |
+| Hash | Equality only |
+| GIN | Multi-value data: `jsonb`, arrays, full-text search |
+| GiST | Geometric data, nearest neighbour |
+| SP-GiST | Tries, quadtrees |
+| BRIN | Huge tables whose values follow physical order |
+
+In a multicolumn B-tree, the docs' rule is that equality on leading columns, plus an inequality on the first column without an equality, limits the scanned portion.
+
+<StepFlow
+  title="Index on (status, created_at): which queries use it well?"
+  nodes={["status = x", "status = x AND created_at > y", "status = x ORDER BY created_at", "created_at > y only"]}
+  steps={[
+    { active: [0], note: "Equality on the leading column narrows the scan to one contiguous section.", state: { fit: "good" } },
+    { active: [1], note: "Equality on the first column plus a range on the second narrows the section further.", state: { fit: "best" } },
+    { active: [2], note: "Within one status, entries are already sorted by created_at, so no Sort is needed.", state: { fit: "good, no sort" } },
+    { active: [3], note: "No constraint on the leading column. Skip scan in PostgreSQL 18 can help when status has few distinct values, otherwise this is poor.", state: { fit: "limited" } },
+  ]}
+/>
+
+## Syntax and key APIs
+
+```sql
+CREATE TABLE orders (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  status text NOT NULL,
+  email text NOT NULL,
+  total numeric NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX orders_status_created ON orders (status, created_at DESC);
+CREATE INDEX orders_open ON orders (created_at) WHERE status = 'open';
+CREATE INDEX orders_lower_email ON orders (lower(email));
+CREATE INDEX orders_created_cover ON orders (created_at) INCLUDE (total);
+```
+
+## Simple example
+
+```sql
+INSERT INTO orders (status, email, total)
+SELECT 'paid', 'u' || g || '@x.io', g FROM generate_series(1, 20000) g;
+ANALYZE orders;
+
+EXPLAIN SELECT * FROM orders WHERE lower(email) = 'u5@x.io';
+```
+
+## Industry examples
+
+### Index only the rows you query
+
+If 1% of orders are open, a partial index is a fraction of the size. A query can only use it when its condition implies the index predicate.
+
+```plsql
+-- Can use orders_open:
+SELECT * FROM orders WHERE status = 'open' AND created_at > now() - interval '1 day';
+
+-- Can't, because the condition isn't implied:
+SELECT * FROM orders WHERE created_at > now() - interval '1 day';
+```
+
+### Match how a query filters text
+
+An expression index is only used when the query contains the same expression.
+
+```sql
+CREATE TABLE people (name text);
+INSERT INTO people SELECT 'n' || g FROM generate_series(1, 5000) g;
+CREATE INDEX people_lower ON people (lower(name));
+ANALYZE people;
+
+CREATE TEMP TABLE plan AS SELECT 1;
+DO $$
+DECLARE line text; found boolean := false;
+BEGIN
+  FOR line IN EXPLAIN SELECT * FROM people WHERE lower(name) = 'n7' LOOP
+    IF line LIKE '%people_lower%' THEN found := true; END IF;
+  END LOOP;
+  ASSERT found, 'expression index should be used';
+END $$;
+```
+
+### Build indexes without blocking writes
+
+`CONCURRENTLY` avoids blocking writes, but it takes longer, can't run in a transaction, and leaves an invalid index if it fails.
+
+```plsql
+CREATE INDEX CONCURRENTLY orders_customer ON orders (customer_id);
+
+-- After a failure:
+DROP INDEX CONCURRENTLY orders_customer;
+```
+
+### Find unused indexes
+
+```plsql
+SELECT indexrelname, idx_scan
+FROM pg_stat_user_indexes
+ORDER BY idx_scan ASC;
+```
+
+## Patterns and best practices
+
+- Put equality columns first, then the range or sort column.
+- Design indexes from real query patterns and `EXPLAIN`.
+- Run `ANALYZE` after creating an expression index, so it has statistics.
+- The docs say indexes with more than three columns are unlikely to be helpful.
+- Drop indexes that are never used.
+
+## Alternatives and trade-offs
+
+| Option | Benefit | Cost |
+| --- | --- | --- |
+| Single-column indexes | Flexible | May need bitmap combination |
+| Composite index | Fast for one query shape | Column order is specific |
+| Partial index | Small | Only for matching queries |
+| Covering index | Avoids heap access | Larger, and depends on vacuum |
+| BRIN | Tiny | Needs physically correlated data |
+
+## Common mistakes
+
+**Indexing every column.** Each index slows writes and adds to vacuum work.
+
+**Wrong column order.** A range column first prevents later columns from narrowing the scan.
+
+**Wrapping an indexed column in a function.** Without a matching expression index, the index can't be used.
+
+**Leaving an invalid concurrent index.** It's ignored by queries but still adds write overhead.
+
+## Interview questions
+
+<Question q="What is the leftmost prefix rule?">
+A multicolumn B-tree is most effective when queries constrain its leading columns. PostgreSQL 18's skip scan relaxes this when leading columns have few distinct values.
+</Question>
+
+<Question q="When would you use GIN?">
+For values containing many keys, such as `jsonb` documents, arrays and full-text search.
+</Question>
+
+<Question q="Why can't CREATE INDEX CONCURRENTLY run in a transaction?">
+It uses multiple transactions and waits for other transactions between its phases.
+</Question>

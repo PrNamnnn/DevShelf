@@ -1,0 +1,87 @@
+---
+title: "PCA and Dimensionality Reduction"
+summary: "Project data onto directions of maximum variance, choose components and use reduction safely inside pipelines."
+level: intermediate
+section: unsupervised
+order: 2
+tags: ["PCA","eigenvectors","explained variance","t-SNE","UMAP"]
+requires: ["machine-learning/ml-foundations"]
+related: ["statistics/multivariate-analysis","statistics/feature-selection-and-pipelines"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Decomposition"
+    url: "https://scikit-learn.org/stable/modules/decomposition.html"
+  - label: "scikit-learn: PCA"
+    url: "https://scikit-learn.org/stable/modules/generated/sklearn.decomposition.PCA.html"
+---
+
+## What it is
+
+Dimensionality reduction represents data with fewer features. **PCA** finds orthogonal directions that capture the maximum variance.
+
+## Why it exists
+
+Many correlated features add cost and noise, and can't be plotted directly.
+
+## How it works
+
+Standardize, compute the covariance's eigenvectors (usually through singular value decomposition), and project onto the top k. The first component's eigenvalue is the variance along it. Choose k from cumulative explained variance, or based on downstream performance.
+
+t-SNE and UMAP are nonlinear, and are mainly for visualization.
+
+## Intuition and formula
+
+<Formula>explained ratioⱼ = λⱼ / Σ λᵢ</Formula>
+
+## Worked example
+
+A dataset with 50 features driven by 3 hidden factors has about 95% or more of its variance captured by 3 components.
+
+## Python
+
+```python
+import numpy as np
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+
+rng = np.random.default_rng(0)
+factors = rng.normal(size=(1_000, 3))
+loadings = rng.normal(size=(3, 50))
+X = factors @ loadings + rng.normal(0, 0.2, (1_000, 50))
+
+scaled = StandardScaler().fit_transform(X)
+pca = PCA(n_components=0.9).fit(scaled)
+assert pca.n_components_ <= 3
+assert pca.explained_variance_ratio_.sum() >= 0.9
+
+covariance = np.cov(scaled, rowvar=False)
+top = np.linalg.eigvalsh(covariance)[-1]
+assert round(top / np.trace(covariance), 3) == round(pca.explained_variance_ratio_[0], 3)
+```
+
+## In industry
+
+Used to compress embeddings, denoise sensors and visualize clusters.
+
+## Assumptions and limitations
+
+PCA captures linear structure, and high-variance directions may be irrelevant to the target. Components are difficult to interpret.
+
+## Common mistakes
+
+- Skipping standardization.
+- Fitting PCA on all data before splitting.
+- Interpreting t-SNE distances.
+- Assuming more variance always means more predictive.
+
+## Alternatives
+
+Feature selection preserves original meaning. Autoencoders learn nonlinear compressions.
+
+## Interview questions
+
+<Question q="Is PCA supervised?">No. It ignores the target.</Question>
+
+<Question q="How do you choose the number of components?">Based on cumulative explained variance and downstream performance.</Question>

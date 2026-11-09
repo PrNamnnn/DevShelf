@@ -1,0 +1,162 @@
+---
+title: "Partitioning, Vacuum and Maintenance"
+summary: "Splitting huge tables, why updates create bloat, how autovacuum keeps a database healthy, and preventing wraparound."
+level: advanced
+section: operations
+order: 10
+tags: [partitioning, vacuum, autovacuum, bloat, wraparound, maintenance, pruning]
+related: [postgresql/transactions-and-mvcc, postgresql/explain-analyze]
+versions: "PostgreSQL 18 VACUUM and ANALYZE process inheritance children by default."
+tested: "Partitioning and pruning run on PostgreSQL 18.6 through PGlite. Autovacuum behaviour is from the docs."
+verified: "2026-11-09"
+docs:
+  - label: "PostgreSQL: Table partitioning"
+    url: "https://www.postgresql.org/docs/current/ddl-partitioning.html"
+  - label: "PostgreSQL: Routine vacuuming"
+    url: "https://www.postgresql.org/docs/current/routine-vacuuming.html"
+  - label: "PostgreSQL 18 release notes"
+    url: "https://www.postgresql.org/docs/18/release-18.html"
+---
+
+## What it is
+
+**Partitioning** splits one logical table into smaller physical tables. **Vacuuming** reclaims dead row versions and maintains the data the planner and transaction system rely on.
+
+## Why it exists
+
+Very large tables make maintenance slow and retention hard. MVCC also leaves old row versions that must be cleaned up eventually.
+
+## How it works
+
+An `UPDATE` or `DELETE` doesn't immediately remove the old row version. Autovacuum later reclaims that space for reuse. It also refreshes statistics and the visibility map, and freezes old rows.
+
+Transaction IDs are finite, so every table must be vacuumed at least once every two billion transactions. With fewer than 3 million IDs left, the system refuses new write transactions.
+
+<StepFlow
+  title="A row's life under MVCC"
+  nodes={["live row", "UPDATE: dead version", "autovacuum", "space reusable", "visibility map set"]}
+  steps={[
+    { active: [0], note: "A table page holds the live row." },
+    { active: [1], note: "An update writes a new version. The old one stays for any snapshot that may still need it.", state: { dead: "1" } },
+    { active: [2], note: "Once no snapshot needs it, autovacuum can remove it." },
+    { active: [3], note: "The space can be reused by new rows. Plain VACUUM usually doesn't shrink the file.", state: { dead: "0" } },
+    { active: [4], note: "All-visible pages are recorded, allowing index-only scans to skip the heap." },
+  ]}
+/>
+
+| Partition method | Key | Use |
+| --- | --- | --- |
+| Range | Date ranges | Time-series, retention |
+| List | Discrete values | Tenant or region |
+| Hash | Modulus | Even distribution |
+
+Range bounds are inclusive at the lower end and exclusive at the upper end.
+
+## Syntax and key APIs
+
+```sql
+CREATE TABLE measurements (
+  taken_at date NOT NULL,
+  value numeric
+) PARTITION BY RANGE (taken_at);
+
+CREATE TABLE measurements_2026_01 PARTITION OF measurements
+  FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+
+CREATE TABLE measurements_2026_02 PARTITION OF measurements
+  FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
+```
+
+## Simple example
+
+```sql
+INSERT INTO measurements VALUES ('2026-01-15', 1), ('2026-02-15', 2);
+
+SELECT tableoid::regclass::text AS part FROM measurements WHERE taken_at = '2026-02-15';
+-- rows: [{"part":"measurements_2026_02"}]
+```
+
+## Industry examples
+
+### Confirm pruning
+
+The plan should only mention the relevant partition.
+
+```sql
+DO $$
+DECLARE line text; plan text := '';
+BEGIN
+  FOR line IN EXPLAIN SELECT * FROM measurements WHERE taken_at >= '2026-02-01' LOOP
+    plan := plan || line;
+  END LOOP;
+  ASSERT plan LIKE '%measurements_2026_02%', 'expected February partition';
+  ASSERT plan NOT LIKE '%measurements_2026_01%', 'January should be pruned';
+END $$;
+```
+
+### Delete old data instantly
+
+Dropping a partition is much faster than a mass `DELETE` and creates no dead rows.
+
+```sql
+DROP TABLE measurements_2026_01;
+SELECT count(*)::int AS n FROM measurements;
+-- rows: [{"n":1}]
+```
+
+### Detach with less locking
+
+```plsql
+ALTER TABLE measurements DETACH PARTITION measurements_2026_01 CONCURRENTLY;
+```
+
+### Monitor dead rows and wraparound
+
+```plsql
+SELECT relname, n_dead_tup, last_autovacuum
+FROM pg_stat_user_tables
+ORDER BY n_dead_tup DESC;
+
+SELECT datname, age(datfrozenxid) FROM pg_database;
+```
+
+## Patterns and best practices
+
+- Partition for retention or very large tables, not by default.
+- Make the partition key part of frequent filters.
+- Lower autovacuum scale factors on large, busy tables.
+- Run `ANALYZE` manually on partitioned parents, since autovacuum doesn't analyze them.
+- Avoid long-running transactions, which block cleanup.
+
+## Alternatives and trade-offs
+
+| Option | Benefit | Cost |
+| --- | --- | --- |
+| Good indexes | Simple | Grow with the table |
+| Partitioning | Fast retention, pruning | Key limitations, planning overhead |
+| Plain `VACUUM` | Online | Rarely returns space to the OS |
+| `VACUUM FULL` | Compacts the table | `ACCESS EXCLUSIVE` lock |
+
+## Common mistakes
+
+**Primary keys that omit the partition key.** Unique constraints must include all partition columns.
+
+**Turning off autovacuum.** Bloat grows and wraparound risk follows.
+
+**Using `DELETE` to empty a whole table.** `TRUNCATE` is better.
+
+**Too many partitions.** Planning time and memory increase.
+
+## Interview questions
+
+<Question q="What is table bloat?">
+Space occupied by dead row versions. It grows when vacuum can't keep up or long transactions prevent cleanup.
+</Question>
+
+<Question q="What is transaction ID wraparound?">
+Transaction IDs are finite, and vacuum must freeze old rows before the counter wraps, or the database refuses new writes.
+</Question>
+
+<Question q="Why partition by date?">
+Queries can prune to relevant ranges and old data can be dropped instantly.
+</Question>

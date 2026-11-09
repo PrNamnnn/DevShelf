@@ -1,0 +1,106 @@
+---
+title: "Scaling, Transformation and Binning"
+summary: "Standardize, normalize, log-transform and bin numeric features, and know which models need each step."
+level: intermediate
+section: features
+order: 2
+tags: ["scaling","normalization","log transform","binning"]
+requires: ["statistics/encoding-categoricals"]
+related: ["statistics/shape-skewness-kurtosis","machine-learning/naive-bayes-knn-and-svm"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Preprocessing data"
+    url: "https://scikit-learn.org/stable/modules/preprocessing.html"
+  - label: "scikit-learn: KBinsDiscretizer"
+    url: "https://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.KBinsDiscretizer.html"
+---
+
+## What it is
+
+Feature transformation reshapes numeric inputs. **Standardization** gives a mean of 0 and SD of 1. **Normalization** usually rescales to 0 through 1. **Log transforms** compress skew. **Binning** converts numbers into ranges.
+
+## Why it exists
+
+Distance and gradient-based algorithms are distorted by scale. Skew makes linear fits worse. Bins can be easier to explain in a scorecard.
+
+## How it works
+
+| Model family | Needs scaling? |
+| --- | --- |
+| Linear with regularization, SVM, KNN, neural networks, PCA | Yes |
+| Decision trees, random forests, gradient boosting | Generally no |
+
+`RobustScaler` uses the median and IQR, so outliers have less effect. `log1p` handles zeros. Binning discards information, so it's typically only justified for interpretability, policy thresholds or known nonlinearity.
+
+## Intuition and formula
+
+<Formula>z = (x − μ) / σ</Formula>
+
+<Formula>x_scaled = (x − min) / (max − min)</Formula>
+
+## Worked example
+
+Income ranges up to 5,000,000 and age up to 90. Without scaling, KNN's distances are almost entirely income. Standardized, both contribute. For income specifically, `log1p` first reduces skew, and then scaling is applied.
+
+## Python
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
+
+x = np.array([[10.0], [20.0], [30.0], [1000.0]])
+
+standard = StandardScaler().fit_transform(x)
+assert abs(standard.mean()) < 1e-9
+
+assert MinMaxScaler().fit_transform(x).max() == 1
+assert np.median(RobustScaler().fit_transform(x)) == 0
+assert np.log1p(0) == 0
+
+ages = pd.Series([18, 25, 37, 64])
+bands = pd.cut(ages, bins=[0, 24, 44, 120], labels=["young", "mid", "senior"])
+assert bands.tolist() == ["young", "mid", "mid", "senior"]
+```
+
+## SQL
+
+```sql
+SELECT x, round((x - avg(x) OVER ()) / stddev_samp(x) OVER (), 2) AS z,
+       width_bucket(x, 0, 100, 4) AS bucket
+FROM (VALUES (10.0), (60.0), (80.0)) AS t(x)
+ORDER BY x
+LIMIT 1;
+-- rows: [{"x":"10.0","z":"-1.11","bucket":1}]
+```
+
+## Excel or Power BI
+
+`STANDARDIZE(x, mean, sd)` calculates z-scores, `LN(1+x)` is a log1p, and Pivot Table grouping creates bins. In Power BI, use the Groups and Bins feature.
+
+## In industry
+
+Risk scorecards use carefully constructed bins for regulators. Neural networks and embeddings need normalized input.
+
+## Assumptions and limitations
+
+Scaling changes neither relationships nor distribution shape. Bin boundaries introduce artificial jumps, and min-max scaling is highly sensitive to new extremes.
+
+## Common mistakes
+
+- Fitting a scaler on the combined training and test data.
+- Scaling for tree models and assuming it helps.
+- Using log on zero or negative values.
+- Interpreting coefficients without noting the transform.
+
+## Alternatives
+
+Power transforms such as Box-Cox and Yeo-Johnson make data more normal, and quantile transforms map to a chosen distribution.
+
+## Interview questions
+
+<Question q="Do tree models need scaling?">Generally no, because splits depend on order, not magnitude.</Question>
+
+<Question q="Why is binning often discouraged?">It discards information and creates artificial discontinuities, though it can help interpretability.</Question>

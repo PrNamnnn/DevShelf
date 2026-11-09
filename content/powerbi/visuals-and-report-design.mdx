@@ -1,0 +1,86 @@
+---
+title: "Visualization and Report Design"
+summary: "Design report pages around questions, choose visuals and apply a consistent layout and theme."
+level: intermediate
+section: reporting
+order: 1
+tags: ["report design","visuals","layout","themes"]
+requires: ["powerbi/dax-fundamentals-and-context"]
+related: ["statistics/choosing-the-right-chart","statistics/dashboards-and-misleading-visuals","powerbi/report-interactions"]
+versions: "Power BI Desktop as documented in November 2026"
+tested: "Not executable here. Checked against Microsoft documentation"
+verified: "2026-11-09"
+docs:
+  - label: "Visualization types"
+    url: "https://learn.microsoft.com/en-us/power-bi/visuals/power-bi-visualizations-overview"
+  - label: "Dashboard design tips"
+    url: "https://learn.microsoft.com/en-us/power-bi/create-reports/service-dashboards-design-tips"
+  - label: "KPI visuals"
+    url: "https://learn.microsoft.com/en-us/power-bi/visuals/power-bi-visualization-kpi"
+---
+
+## What it is
+
+Report design arranges visuals so a user can answer known questions quickly.
+
+## Why it exists
+
+Good models fail if users can't read the report. Each extra visual also adds queries and slows a page.
+
+## How it works
+
+Follow a reading pattern: KPI cards on top, main trend next, then breakdowns. Keep slicers in one consistent location. Use tooltips and drill-through for detail instead of adding more visuals.
+
+| Goal | Visual |
+| --- | --- |
+| Single KPI | Card or KPI |
+| Trend | Line |
+| Ranking | Bar |
+| Cross-tab | Matrix |
+| Bridge | Waterfall |
+| Driver exploration | Decomposition tree |
+
+## Syntax and key APIs
+
+A theme JSON file centralizes colour and font choices:
+
+```json
+{
+  "name": "Company",
+  "dataColors": ["#2f5fc9", "#bd4573", "#2a8a78"],
+  "background": "#ffffff",
+  "foreground": "#1a1a1a"
+}
+```
+
+## Simple example
+
+An executive sales page has four KPI cards, a monthly actual-versus-target line, a region bar chart and a slicer for year. Details move to a separate drill-through page.
+
+## Industry examples
+
+Companies publish standard report templates with fixed themes and navigation, for consistent reading across departments.
+
+## Patterns and best practices
+
+- Design for one audience per page.
+- Use comparisons and targets.
+- Set alt text and tab order for accessibility.
+- Test on the phone layout if needed.
+
+## Alternatives and trade-offs
+
+Paginated reports suit pixel-perfect printing and long tables. Exports to Excel suit ad hoc work but they fragment the source of truth.
+
+## Common mistakes
+
+- Too many visuals per page.
+- Slicers everywhere.
+- Inconsistent colours for the same entity.
+- Reporting without comparison.
+
+## Interview questions
+
+<Question q="How would you redesign a slow, crowded page?">Identify the core question, reduce visuals, move details to drill-through or tooltips and reduce measure complexity.</Question>
+
+<Question q="Report vs dashboard in Power BI?">A report has interactive multi-page visuals based on a model. A dashboard pins tiles to a single page in the service.</Question>

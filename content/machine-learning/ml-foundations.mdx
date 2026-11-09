@@ -1,0 +1,89 @@
+---
+title: "Machine Learning Foundations"
+summary: "Supervised and unsupervised learning, classification and regression, generalization and the standard workflow."
+level: fundamental
+section: foundations
+order: 1
+tags: ["supervised learning","unsupervised learning","classification","regression","generalization"]
+requires: ["statistics/simple-linear-regression"]
+related: ["machine-learning/bias-variance-and-regularization","machine-learning/classification-metrics","statistics/predictive-and-prescriptive-analysis","statistics/logistic-regression","statistics/simple-linear-regression"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Supervised learning"
+    url: "https://scikit-learn.org/stable/supervised_learning.html"
+  - label: "scikit-learn: Common pitfalls"
+    url: "https://scikit-learn.org/stable/common_pitfalls.html"
+---
+
+## What it is
+
+Machine learning builds functions from examples rather than from hand-written rules. **Supervised** learning has labeled targets, split into **classification** (categories) and **regression** (numbers). **Unsupervised** learning finds structure without labels, such as clusters.
+
+## Why it exists
+
+Some patterns are too complex to write by hand, like fraud signals or image contents. Regression in the statistics book emphasizes inference about coefficients. Machine learning emphasizes predictive performance on new data.
+
+## How it works
+
+The goal is **generalization**, meaning good performance on unseen data. Models minimize a **loss** on training data. Parameters are learned, and **hyperparameters** are set outside training.
+
+Workflow: define the prediction and its decision, assemble point-in-time data, split, build a baseline, train, evaluate, tune, test once, then deploy and monitor.
+
+Always compare to a simple baseline, such as the majority class or the most recent value.
+
+## Intuition and formula
+
+<Formula>θ* = argmin (1/n) Σ L(yᵢ, f(xᵢ; θ))</Formula>
+
+## Worked example
+
+A company predicts 30-day churn, where 20% of customers churn. A model that always predicts "no churn" is 80% accurate, which is the number any model has to beat, and accuracy is a poor measure here. A logistic pipeline gets evaluated on recall of churners, using data from a later time period than training.
+
+## Python
+
+```python
+from sklearn.datasets import make_classification
+from sklearn.dummy import DummyClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+
+X, y = make_classification(n_samples=2_000, n_informative=5, weights=[0.8], random_state=0)
+X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, random_state=0)
+
+baseline = DummyClassifier(strategy="most_frequent").fit(X_train, y_train)
+model = make_pipeline(StandardScaler(), LogisticRegression()).fit(X_train, y_train)
+
+auc = roc_auc_score(y_test, model.predict_proba(X_test)[:, 1])
+assert baseline.score(X_test, y_test) > 0.75
+assert auc > 0.75
+```
+
+## In industry
+
+Most value comes from problem framing, data quality and integration into a decision process. A model is one component in a system.
+
+## Assumptions and limitations
+
+Training and production data are assumed similar. Models learn correlations, not causes, and they can reproduce biases in historic data.
+
+## Common mistakes
+
+- Skipping the baseline.
+- Using future data in features.
+- Optimizing a metric unrelated to the decision.
+- Reusing the test set.
+
+## Alternatives
+
+Rules can be better when logic is known and stable. Classical statistics suits questions about effects rather than predictions.
+
+## Interview questions
+
+<Question q="What's the difference between a parameter and a hyperparameter?">Parameters are learned from data. Hyperparameters are set before training and control how learning happens.</Question>
+
+<Question q="When would you avoid machine learning?">When a simple rule works, data is insufficient, or errors can't be tolerated without explanation.</Question>

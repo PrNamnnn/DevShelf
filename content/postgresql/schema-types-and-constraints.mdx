@@ -1,0 +1,169 @@
+---
+title: "Schema Design: Types and Constraints"
+summary: "Choosing data types, enforcing rules in the database, identity columns, generated columns and safe upserts."
+level: fundamental
+section: foundations
+order: 10
+tags: [ddl, data-types, constraints, primary-key, foreign-key, identity, generated-columns, upsert, basics]
+related: [postgresql/queries-and-joins, postgresql/indexing-strategies]
+versions: "PostgreSQL 18 for uuidv7, virtual generated columns, and OLD and NEW in RETURNING."
+tested: "PostgreSQL 18.6 through PGlite"
+verified: "2026-11-09"
+docs:
+  - label: "PostgreSQL: Constraints"
+    url: "https://www.postgresql.org/docs/current/ddl-constraints.html"
+  - label: "PostgreSQL: Data types"
+    url: "https://www.postgresql.org/docs/current/datatype.html"
+  - label: "PostgreSQL: Identity columns"
+    url: "https://www.postgresql.org/docs/current/ddl-identity-columns.html"
+  - label: "PostgreSQL: Generated columns"
+    url: "https://www.postgresql.org/docs/current/ddl-generated-columns.html"
+  - label: "PostgreSQL: INSERT"
+    url: "https://www.postgresql.org/docs/current/sql-insert.html"
+---
+
+## What it is
+
+A schema defines tables, column types and the rules data must satisfy. Constraints are those rules, enforced by the database for every writer.
+
+## Why it exists
+
+Application checks can be bypassed by a bug, a script or a race condition. Database constraints hold regardless of who writes.
+
+## How it works
+
+| Need | Type | Why |
+| --- | --- | --- |
+| Text | `text` | No performance difference from `varchar` |
+| Whole numbers | `integer`, `bigint` | `integer` is the common choice |
+| Money, exact values | `numeric(10,2)` | Exact, slower than integers |
+| Measurements | `double precision` | Inexact |
+| Points in time | `timestamptz` | Stored as UTC |
+| Time-ordered IDs | `uuid` with `uuidv7()` | Available in 18 |
+
+A `PRIMARY KEY` is unique and not null. A `UNIQUE` constraint creates a unique B-tree index. Foreign keys **don't** create an index on the referencing column, so add one yourself.
+
+A `CHECK` passes when its expression is true **or NULL**.
+
+## Syntax and key APIs
+
+```sql
+CREATE TABLE customers (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  email text NOT NULL UNIQUE,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE orders (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  customer_id bigint NOT NULL REFERENCES customers (id) ON DELETE RESTRICT,
+  quantity integer NOT NULL CHECK (quantity > 0),
+  unit_price numeric(10,2) NOT NULL CHECK (unit_price >= 0),
+  total numeric(12,2) GENERATED ALWAYS AS (quantity * unit_price) VIRTUAL
+);
+
+CREATE INDEX orders_customer_id_idx ON orders (customer_id);
+```
+
+<Callout type="version">
+Generated columns are virtual by default in PostgreSQL 18, computed when read. Use `STORED` to compute on write. `uuidv7()` and `OLD` and `NEW` in `RETURNING` are also new in 18.
+</Callout>
+
+## Simple example
+
+```sql
+INSERT INTO customers (email) VALUES ('ada@example.com');
+INSERT INTO orders (customer_id, quantity, unit_price) VALUES (1, 2, 4.50);
+SELECT quantity, total::text FROM orders;
+-- rows: [{"quantity":2,"total":"9.00"}]
+```
+
+## Industry examples
+
+### Upsert without races
+
+`ON CONFLICT DO UPDATE` guarantees an atomic insert or update, even under high concurrency. `excluded` holds the proposed row.
+
+```sql
+CREATE TABLE stock (sku text PRIMARY KEY, units integer NOT NULL);
+INSERT INTO stock VALUES ('a', 5);
+
+INSERT INTO stock (sku, units) VALUES ('a', 3)
+ON CONFLICT (sku) DO UPDATE SET units = stock.units + excluded.units;
+
+SELECT units FROM stock WHERE sku = 'a';
+-- rows: [{"units":8}]
+```
+
+### Enforce a rule on a subset of rows
+
+A partial unique index allows one active subscription per user, plus any number of cancelled ones.
+
+```sql
+CREATE TABLE subscriptions (user_id int NOT NULL, status text NOT NULL);
+CREATE UNIQUE INDEX one_active ON subscriptions (user_id) WHERE status = 'active';
+
+INSERT INTO subscriptions VALUES (1, 'cancelled'), (1, 'cancelled'), (1, 'active');
+SELECT count(*)::int AS n FROM subscriptions;
+-- rows: [{"n":3}]
+```
+
+### See previous values on update
+
+```sql
+UPDATE stock SET units = 1 WHERE sku = 'a'
+RETURNING old.units AS before, new.units AS after;
+-- rows: [{"before":8,"after":1}]
+```
+
+### Treat NULLs as equal in a unique constraint
+
+By default, two NULLs don't conflict.
+
+```sql
+CREATE TABLE a (code text UNIQUE);
+INSERT INTO a VALUES (NULL), (NULL);
+
+CREATE TABLE b (code text UNIQUE NULLS NOT DISTINCT);
+INSERT INTO b VALUES (NULL);
+SELECT count(*)::int AS n FROM a;
+-- rows: [{"n":2}]
+```
+
+## Patterns and best practices
+
+- Use `GENERATED ALWAYS AS IDENTITY` for new surrogate keys.
+- Add `NOT NULL` unless absence is meaningful.
+- Index every foreign key used in joins or deletes.
+- Name constraints so that errors are readable.
+
+## Alternatives and trade-offs
+
+| Decision | Option | Trade-off |
+| --- | --- | --- |
+| Primary key | `bigint` identity | Compact, reveals ordering |
+| Primary key | `uuidv7()` | Larger, can be generated by clients |
+| Derived value | Virtual generated | No storage, computed on read |
+| Derived value | Stored generated | Storage, indexable, faster reads |
+
+Generated column expressions must use immutable functions and can't reference other generated columns.
+
+## Common mistakes
+
+**Storing money as `real` or `double precision`.** They're inexact. Use `numeric`.
+
+**Using `timestamp` for events.** Use `timestamptz`.
+
+**Using `serial` and assuming no gaps.** Sequences aren't rolled back, so gaps are normal.
+
+**Assuming a `CHECK` rejects NULL.** NULL passes unless the column is also `NOT NULL`.
+
+## Interview questions
+
+<Question q="Primary key versus unique constraint?">
+A primary key is unique and not null, and a table can have only one. A table can have several unique constraints, which allow NULLs by default.
+</Question>
+
+<Question q="Why index a foreign key?">
+PostgreSQL doesn't do it automatically. Without an index, joins and parent-row deletes may scan the child table.
+</Question>

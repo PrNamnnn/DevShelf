@@ -1,0 +1,95 @@
+---
+title: "Star Schema, Relationships and Cardinality"
+summary: "Model fact and dimension tables, and control filter propagation with relationship cardinality and direction."
+level: fundamental
+section: modeling
+order: 2
+tags: ["star schema","dimensional modelling","fact table","dimension table","relationships","cardinality"]
+requires: ["powerbi/power-query-and-m"]
+related: ["powerbi/dax-fundamentals-and-context","data-engineering/dimensional-modelling-and-partitioning","excel/power-query-and-data-model"]
+versions: "Power BI Desktop as documented in November 2026"
+tested: "Not executable here. Concepts checked against Microsoft documentation"
+verified: "2026-11-09"
+docs:
+  - label: "Star schema in Power BI"
+    url: "https://learn.microsoft.com/en-us/power-bi/guidance/star-schema"
+  - label: "Model relationships"
+    url: "https://learn.microsoft.com/en-us/power-bi/transform-model/desktop-relationships-understand"
+---
+
+## What it is
+
+A **star schema** has **fact tables** that record events and measures, surrounded by **dimension tables** that describe them. Relationships connect dimensions to facts.
+
+## Why it exists
+
+Power BI's engine and DAX are designed for this shape. It produces smaller models, simpler measures and predictable filtering. A single wide table can cause repeated values, slower calculations and awkward filtering.
+
+## How it works
+
+Filters flow from the "one" side to the "many" side. Selecting a product in `DimProduct` filters `FactSales`.
+
+<TreeViz
+  title="Filters flow from dimensions to the fact"
+  nodes={[
+    { id: "fact", label: "FactSales" },
+    { id: "date", label: "DimDate", parent: "fact" },
+    { id: "product", label: "DimProduct", parent: "fact" },
+    { id: "customer", label: "DimCustomer", parent: "fact" }
+  ]}
+  steps={[
+    { note: "The fact table holds keys and numeric measures at a defined grain, such as one row per order line.", active: ["fact"] },
+    { note: "A slicer on DimDate filters rows in FactSales through the relationship.", active: ["date"], visited: ["fact"] },
+    { note: "DimProduct and DimCustomer do likewise, so several filters combine on the fact.", active: ["customer"], visited: ["fact", "date", "product"] }
+  ]}
+/>
+
+| Cardinality | Use |
+| --- | --- |
+| One-to-many | The normal case |
+| One-to-one | Rare, often better merged |
+| Many-to-many | Advanced, and sometimes needs a bridge table |
+
+Duplicates on the "one" side make a refresh fail. Bi-directional filtering should be used only when genuinely needed. Relationships don't enforce referential integrity, so unmatched facts appear under a blank dimension member.
+
+Role-playing dimensions, such as order date and ship date, use one active and additional inactive relationships activated through `USERELATIONSHIP`, or separate copies.
+
+## Syntax and key APIs
+
+```text
+DimDate[Date]        1 -> *  FactSales[OrderDate]
+DimProduct[Key]      1 -> *  FactSales[ProductKey]
+DimCustomer[Key]     1 -> *  FactSales[CustomerKey]
+```
+
+## Simple example
+
+Instead of a flat table with repeated product names, keep one row per product in `DimProduct` and only `ProductKey` in the fact. Declaring a measure on the fact gives correct totals for whichever attribute slices the report.
+
+## Industry examples
+
+Retail, finance and logistics all use star models, often sharing conformed date and product dimensions across multiple fact tables.
+
+## Patterns and best practices
+
+- Define the grain of every fact first.
+- Mark a Date table and hide foreign keys.
+- Avoid bi-directional relationships.
+- Prefer a single-table dimension over deep snowflakes.
+
+## Alternatives and trade-offs
+
+Snowflake schemas save a little storage but add joins. A single flat table is fine for simple, one-off reports.
+
+## Common mistakes
+
+- Relationships built between two fact tables.
+- Duplicate keys in a dimension.
+- Bi-directional relationships that cause ambiguity.
+- Mixed grains in one fact table.
+
+## Interview questions
+
+<Question q="Why a star schema in Power BI?">It compresses well, makes DAX simpler, and gives predictable filter propagation.</Question>
+
+<Question q="Which way do filters flow?">From the one side to the many side, unless a relationship is set to both directions.</Question>

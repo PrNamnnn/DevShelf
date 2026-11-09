@@ -1,0 +1,129 @@
+---
+title: "Views, Functions and Temporary Objects"
+summary: "When to use views, inline versus multi-statement functions, and choosing among temp tables, table variables and CTEs."
+level: intermediate
+section: programmability
+order: 20
+tags: [views, table-valued-functions, temp-tables, table-variables, indexed-views]
+requires: [sqlserver/joins-apply-and-set-operations]
+related: [sqlserver/procedures-and-error-handling, sqlserver/window-functions-and-ctes]
+versions: "SQL Server 2025 (17.x). Inline UDF scalar inlining needs compatibility level 150+."
+tested: "Temporary objects run on SQL Server 2025. CREATE VIEW and CREATE FUNCTION weren't created on the instance."
+verified: "2026-11-09"
+docs:
+  - label: "T-SQL: CREATE VIEW"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/statements/create-view-transact-sql"
+  - label: "T-SQL: CREATE FUNCTION"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/statements/create-function-transact-sql"
+  - label: "T-SQL: Table variables"
+    url: "https://learn.microsoft.com/en-us/sql/t-sql/data-types/table-transact-sql"
+---
+
+## What it is
+
+Views name queries. Functions return values or tables. Temp tables and table variables hold intermediate results.
+
+## Why it exists
+
+They reuse logic and break complicated work into steps. The choice among them has a large effect on query plans.
+
+## How it works
+
+An **inline table-valued function** is expanded into the calling query, like a parameterized view. A **multi-statement** function fills a table variable first, so the optimizer sees it as a black box.
+
+| Object | Scope | Statistics | Best for |
+| --- | --- | --- | --- |
+| CTE | One statement | From base tables | Readability |
+| Table variable | Batch | Limited | Small sets |
+| `#temp` table | Session | Yes | Larger intermediate sets |
+| `##temp` table | Global | Yes | Rarely |
+
+## Syntax and key APIs
+
+```plsql
+CREATE VIEW dbo.ActiveOrders AS
+SELECT Id, Total FROM dbo.Orders WHERE Status = 'active';
+
+CREATE FUNCTION dbo.OrdersFor(@customer int)
+RETURNS TABLE AS RETURN
+  SELECT Id, Total FROM dbo.Orders WHERE CustomerId = @customer;
+```
+
+## Simple example
+
+```sql
+CREATE TABLE #orders (id int PRIMARY KEY, total int);
+INSERT #orders VALUES (1, 10), (2, 30);
+
+DECLARE @big TABLE (id int);
+INSERT @big SELECT id FROM #orders WHERE total > 20;
+
+SELECT COUNT(*) FROM @big;
+-- output: 1
+```
+
+## Industry examples
+
+### Materialize a step and index it
+
+Temp tables have statistics and can be indexed, helping the next step's plan.
+
+```sql
+SELECT id, total INTO #large FROM #orders WHERE total > 5;
+CREATE INDEX ix_total ON #large (total);
+
+SELECT MAX(total) FROM #large;
+-- output: 30
+```
+
+### Parameterized logic with APPLY
+
+```plsql
+SELECT c.Name, o.Total
+FROM dbo.Customers c
+CROSS APPLY dbo.OrdersFor(c.Id) o;
+```
+
+### Pass a set to a procedure
+
+```plsql
+CREATE TYPE dbo.IdList AS TABLE (Id int PRIMARY KEY);
+GO
+CREATE PROCEDURE dbo.Archive @ids dbo.IdList READONLY AS
+  DELETE o FROM dbo.Orders o JOIN @ids i ON i.Id = o.Id;
+```
+
+## Patterns and best practices
+
+- Prefer inline table-valued functions to multi-statement ones.
+- Use `#temp` tables for large intermediate results.
+- Keep views simple, and avoid views of views.
+- Use `SCHEMABINDING` to protect dependencies.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Reusable filter | Inline TVF | No procedural logic |
+| Fast aggregate reads | Indexed view | Many restrictions, write cost |
+| Procedural logic | Stored procedure | Can't be used in a `FROM` |
+
+## Common mistakes
+
+**Scalar functions in `WHERE`.** They can run per row. Inlining helps only if the function qualifies.
+
+**Large table variables.** Poor statistics lead to poor plans.
+
+**Nesting many views.** The plan becomes huge and hard to tune.
+
+**`SELECT *` in a view.** It doesn't pick up new columns reliably.
+
+## Interview questions
+
+<Question q="Temp table or table variable?">
+Temp tables have statistics and support more indexing, so they suit larger sets. Table variables suit small sets and have batch scope.
+</Question>
+
+<Question q="Why prefer an inline TVF?">
+It's expanded into the outer query, so the optimizer can use full statistics and indexes.
+</Question>

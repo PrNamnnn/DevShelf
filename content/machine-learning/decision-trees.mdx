@@ -1,0 +1,103 @@
+---
+title: "Decision Trees"
+summary: "How trees split data using impurity, why they overfit and how to control them."
+level: intermediate
+section: algorithms
+order: 1
+tags: ["decision trees","Gini","entropy","information gain"]
+requires: ["machine-learning/bias-variance-and-regularization"]
+related: ["machine-learning/ensembles-and-boosting","statistics/segmentation-rfm-and-baskets"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Decision Trees"
+    url: "https://scikit-learn.org/stable/modules/tree.html"
+---
+
+## What it is
+
+A decision tree predicts by asking a sequence of questions about features, ending at a leaf.
+
+## Why it exists
+
+Trees handle nonlinearity and interactions, need no scaling, and small ones are simple to explain.
+
+## How it works
+
+At each node, the algorithm chooses the split that most reduces impurity. Classification uses Gini or entropy, and regression uses variance reduction. Growth stops via depth, minimum samples or pruning.
+
+Fully grown trees memorize the data, and they're unstable: a small data change can give a different tree.
+
+<TreeViz
+  title="A churn tree"
+  nodes={[
+    { id: "root", label: "tenure under 6?" },
+    { id: "a", label: "monthly plan?", parent: "root" },
+    { id: "b", label: "Stay 8%", parent: "root" },
+    { id: "c", label: "Churn 45%", parent: "a" },
+    { id: "d", label: "Stay 18%", parent: "a" }
+  ]}
+  steps={[
+    { note: "The first split gives the greatest reduction in impurity.", active: ["root"] },
+    { note: "New customers are split further, by plan type.", active: ["a"], visited: ["root"] },
+    { note: "A leaf predicts using the proportion of its training rows.", active: ["c"], visited: ["root", "a"] }
+  ]}
+/>
+
+## Intuition and formula
+
+<Formula>Gini = 1 − Σ pₖ²</Formula>
+
+<Formula>Entropy = − Σ pₖ log₂ pₖ</Formula>
+
+## Worked example
+
+A node with 40% churners has Gini 1 − 0.16 − 0.36 = 0.48, and entropy 0.971 bits. A split that produces two equally sized children with 10% and 70% churn has weighted Gini of 0.5 × 0.18 + 0.5 × 0.42 = 0.30, a reduction of 0.18.
+
+## Python
+
+```python
+import math
+from sklearn.datasets import make_classification
+from sklearn.model_selection import cross_val_score
+from sklearn.tree import DecisionTreeClassifier
+
+gini = lambda p: 1 - p**2 - (1 - p) ** 2
+assert round(gini(0.4), 2) == 0.48
+assert round(-(0.4 * math.log2(0.4) + 0.6 * math.log2(0.6)), 3) == 0.971
+assert round(gini(0.4) - (0.5 * gini(0.1) + 0.5 * gini(0.7)), 2) == 0.18
+
+X, y = make_classification(n_samples=800, flip_y=0.2, random_state=0)
+deep = DecisionTreeClassifier(random_state=0).fit(X, y)
+limited = cross_val_score(DecisionTreeClassifier(max_depth=3, random_state=0), X, y, cv=5).mean()
+unlimited = cross_val_score(DecisionTreeClassifier(random_state=0), X, y, cv=5).mean()
+
+assert deep.score(X, y) == 1.0
+assert limited > unlimited
+```
+
+## In industry
+
+Shallow trees are used for rules and segmentation that business teams can act on, and trees form the base of ensembles.
+
+## Assumptions and limitations
+
+Boundaries are axis-aligned, and trees can't extrapolate beyond training targets. Impurity-based feature importance is biased toward high-cardinality features.
+
+## Common mistakes
+
+- Unlimited depth.
+- Trusting impurity importances.
+- Assuming a single tree is stable.
+- Using trees for trends beyond the training range.
+
+## Alternatives
+
+Random forests and boosting greatly improve accuracy, and permutation importance gives better feature attribution.
+
+## Interview questions
+
+<Question q="Why do trees overfit?">They can continue splitting until each leaf is pure, memorizing noise.</Question>
+
+<Question q="Do trees need feature scaling?">No, because splits depend only on value order.</Question>

@@ -1,0 +1,171 @@
+---
+title: "Templates, Parallel and Intercepting Routes"
+summary: "Going beyond pages and layouts: remounting with template.js, multiple slots, and modals that keep their URL."
+level: advanced
+section: routing
+order: 20
+tags: [templates, parallel-routes, intercepting-routes, modals, slots, route-groups]
+requires: [nextjs/routing-and-layouts]
+related: [nextjs/request-lifecycle-and-streaming]
+versions: "Next.js 16."
+tested: "Compiled on Next.js 16.4.5 in a scratch app."
+verified: "2026-11-09"
+docs:
+  - label: "Next.js: template.js"
+    url: "https://nextjs.org/docs/app/api-reference/file-conventions/template"
+  - label: "Next.js: Parallel routes"
+    url: "https://nextjs.org/docs/app/api-reference/file-conventions/parallel-routes"
+  - label: "Next.js: Intercepting routes"
+    url: "https://nextjs.org/docs/app/api-reference/file-conventions/intercepting-routes"
+---
+
+## What it is
+
+A **template** is a layout that remounts when its segment changes. **Parallel routes** render several pages in one layout using named slots. **Intercepting routes** show a route inside the current layout during client navigation.
+
+## Why it exists
+
+Dashboards need independent panels, feeds need modals with a shareable URL, and some UI should reset on each navigation.
+
+## How it works
+
+Slots are folders named `@name`, passed as props to the parent layout. They aren't URL segments.
+
+<StepFlow
+  title="A photo modal with a real URL"
+  nodes={["click /photo/7", "(.)photo intercepts", "modal in @modal slot", "refresh page", "full photo page"]}
+  steps={[
+    { active: [0], note: "A Link navigates on the client." },
+    { active: [1], note: "An intercepting route matches, because this is a soft navigation." },
+    { active: [2], note: "The feed stays visible, the modal renders in its slot, and the URL shows /photo/7." },
+    { active: [3], note: "On a refresh or shared link there's no previous page to overlay." },
+    { active: [4], note: "The normal route renders as a full page." },
+  ]}
+/>
+
+| Convention | Matches |
+| --- | --- |
+| `(.)x` | Same level |
+| `(..)x` | One level up |
+| `(..)(..)x` | Two levels up |
+| `(...)x` | From the app root |
+
+Matching is by route segment, so `@slot` folders aren't counted.
+
+## Syntax and key APIs
+
+```tsx
+// app/layout.tsx
+export default function Layout({
+  children,
+  modal,
+}: {
+  children: React.ReactNode;
+  modal: React.ReactNode;
+}) {
+  return (
+    <>
+      {children}
+      {modal}
+    </>
+  );
+}
+```
+
+```tsx
+// app/@modal/default.tsx
+export default function Default() {
+  return null;
+}
+```
+
+`default.tsx` renders for an unmatched slot on hard navigation. Without one, the route returns a 404.
+
+## Simple example
+
+```tsx
+// app/template.tsx
+export default function Template({ children }: { children: React.ReactNode }) {
+  return <div className="fade-in">{children}</div>;
+}
+```
+
+## Industry examples
+
+### Independent dashboard panels
+
+```text
+app/dashboard/
+  layout.tsx
+  page.tsx
+  @revenue/page.tsx
+  @team/page.tsx
+```
+
+Each slot has its own loading and error states.
+
+### Conditional slots by role
+
+```tsx
+export default async function Layout({
+  admin,
+  member,
+}: {
+  admin: React.ReactNode;
+  member: React.ReactNode;
+}) {
+  const role = await getRole();
+  return role === "admin" ? admin : member;
+}
+```
+
+Both slots still render on the server, so authorize inside each one.
+
+### Read the active slot segment
+
+```tsx
+"use client";
+
+import { useSelectedLayoutSegment } from "next/navigation";
+
+export function Tabs() {
+  const segment = useSelectedLayoutSegment("team");
+  return <span>{segment}</span>;
+}
+```
+
+## Patterns and best practices
+
+- Always add `default.tsx` for slots.
+- Use intercepting routes for modals you want to be linkable.
+- Use templates only when you need a reset, since layouts avoid re-rendering.
+- Authorize at the data layer.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Shared persistent UI | Layout | State kept |
+| Reset on navigation | Template | Remount cost |
+| Simple modal | Client state | No URL |
+| Linkable modal | Intercepting route | More files |
+
+## Common mistakes
+
+**Missing `default.tsx`.** Refreshing gives a 404.
+
+**Counting `@slot` folders in `(..)` paths.** Only route segments count.
+
+**Assuming a hidden slot isn't rendered.** Both render on the server.
+
+**Mixing static and dynamic slots at one level.** All must match.
+
+## Interview questions
+
+<Question q="Layout versus template?">
+A layout persists and keeps state. A template gets a unique key and remounts when its segment changes.
+</Question>
+
+<Question q="How do intercepting routes behave on refresh?">
+Interception applies only to soft navigation. A hard load renders the actual route.
+</Question>

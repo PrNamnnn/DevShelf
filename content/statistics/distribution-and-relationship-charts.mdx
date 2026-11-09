@@ -1,0 +1,112 @@
+---
+title: "Histograms, Box, Violin, Scatter and Heatmaps"
+summary: "Show distributions and relationships with the right technique, including correlation matrices and pair plots."
+level: intermediate
+section: communication
+order: 2
+tags: ["histogram","box plot","violin plot","scatter plot","heatmap","pair plot"]
+requires: ["statistics/choosing-the-right-chart"]
+related: ["statistics/univariate-analysis","statistics/multivariate-analysis","statistics/quantiles-and-five-number-summary"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "Matplotlib: hist"
+    url: "https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.hist.html"
+  - label: "Matplotlib: boxplot"
+    url: "https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.boxplot.html"
+  - label: "pandas: scatter_matrix"
+    url: "https://pandas.pydata.org/docs/reference/api/pandas.plotting.scatter_matrix.html"
+---
+
+## What it is
+
+These charts show structure rather than a few totals.
+
+| Chart | Shows | Weakness |
+| --- | --- | --- |
+| Histogram | Shape in bins | Sensitive to bin width |
+| Box plot | Median, IQR, outliers | Hides multiple peaks |
+| Violin | Full density by group | Can be over-read at small n |
+| Scatter | Pair relationship | Overplotting |
+| Heatmap | Patterns in a grid | Colour precision is limited |
+| Pair plot | All pairwise views | Unreadable with many variables |
+
+## Why it exists
+
+Anscombe's quartet showed datasets with nearly identical statistics that look completely different when plotted. Plots reveal what a summary conceals.
+
+## How it works
+
+Use a shared scale when comparing. For big data, use transparency or hexagonal binning. For correlation matrices, use a diverging colour scale centered at zero, and a fixed range from −1 to +1.
+
+## Worked example
+
+Comparing delivery time by carrier: box plots show carrier B has a similar median but a much longer tail. A violin reveals that B's distribution has two peaks, leading to a discovery that one warehouse is responsible.
+
+## Python
+
+```python
+import io
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+
+rng = np.random.default_rng(0)
+a = rng.normal(3, 0.5, 500)
+b = np.r_[rng.normal(3, 0.3, 350), rng.normal(6, 0.4, 150)]
+matrix = np.corrcoef(rng.normal(size=(4, 200)))
+
+fig, axes = plt.subplots(1, 3, figsize=(9, 3))
+axes[0].hist(b, bins=30)
+axes[1].violinplot([a, b])
+image = axes[2].imshow(matrix, cmap="RdBu_r", vmin=-1, vmax=1)
+fig.colorbar(image, ax=axes[2])
+
+buffer = io.BytesIO()
+fig.savefig(buffer, format="png")
+plt.close(fig)
+assert buffer.tell() > 1_000
+assert np.median(a) < np.mean(b)
+```
+
+## SQL
+
+```sql
+SELECT width_bucket(x, 0, 10, 2) AS bin, count(*) AS n
+FROM unnest(ARRAY[1, 2, 3, 7, 9]) AS x
+GROUP BY bin
+ORDER BY bin;
+-- rows: [{"bin":1,"n":3},{"bin":2,"n":2}]
+```
+
+## Excel or Power BI
+
+Excel provides Histogram, Box and Whisker and Scatter charts, and color scales create heatmaps. Power BI has scatter plots and matrix conditional formatting, and box plots or violins need custom visuals or Python visuals.
+
+## In industry
+
+Distribution charts are core to EDA, experiment diagnostics and monitoring for shifts.
+
+## Assumptions and limitations
+
+Violin plots smooth small samples misleadingly, and heatmaps can't show exact values precisely, so annotate key cells.
+
+## Common mistakes
+
+- Comparing box plots across different axes.
+- Rainbow color maps on ordered data.
+- Pair plots with too many columns.
+- Using a non-zero-centered color scale on correlations.
+
+## Alternatives
+
+Ridgeline plots compare many distributions, and ECDFs avoid bins.
+
+## Interview questions
+
+<Question q="What can a violin plot show that a box plot can't?">Multiple peaks and the overall density shape.</Question>
+
+<Question q="How do you handle overplotting?">Transparency, sampling, hexagonal or 2D bins.</Question>

@@ -1,0 +1,121 @@
+---
+title: "The Aggregation Pipeline"
+summary: "Transform data through $match, $group, $project, $unwind, $lookup and $sort, and optimize stage order."
+level: intermediate
+section: querying
+order: 1
+tags: ["aggregation","$match","$group","$lookup","$unwind","$project"]
+requires: ["mongodb/crud-and-query-operators"]
+related: ["mongodb/indexes-and-explain","statistics/inconsistent-data-and-validation","statistics/univariate-analysis","postgresql/aggregates-windows-and-ctes"]
+versions: "Documentation for MongoDB 9.0. Examples executed on MongoDB 8.0.12"
+tested: "JavaScript examples executed against a temporary MongoDB 8.0.12 replica set"
+verified: "2026-11-09"
+docs:
+  - label: "MongoDB: Aggregation"
+    url: "https://www.mongodb.com/docs/manual/aggregation/"
+  - label: "MongoDB: Pipeline optimization"
+    url: "https://www.mongodb.com/docs/manual/core/aggregation-pipeline-optimization/"
+  - label: "MongoDB: $lookup"
+    url: "https://www.mongodb.com/docs/manual/reference/operator/aggregation/lookup/"
+  - label: "MongoDB: Pipeline limits"
+    url: "https://www.mongodb.com/docs/manual/core/aggregation-pipeline-limits/"
+---
+
+## What it is
+
+An aggregation pipeline passes documents through ordered stages, each one transforming the stream.
+
+## Why it exists
+
+It performs filtering, joining, reshaping and summarizing on the server, which is MongoDB's counterpart to `SELECT ... JOIN ... GROUP BY` and the core data-transformation tool in the database.
+
+## How it works
+
+<StepFlow
+  title="Revenue per category"
+  nodes={["$match", "$unwind", "$lookup", "$group", "$sort"]}
+  steps={[
+    { note: "Filter first. An early match can use an index and reduces work.", active: [0] },
+    { note: "$unwind creates one document per array element.", active: [1] },
+    { note: "$lookup performs a left outer join with another collection.", active: [2] },
+    { note: "$group aggregates by key using accumulators such as $sum.", active: [3] },
+    { note: "$sort orders the final results. Sorting at the end avoids sorting unneeded documents.", active: [4] }
+  ]}
+/>
+
+Stages that sort or group can run into a memory limit per stage, and `allowDiskUse` permits spilling to disk. The optimizer may reorder or merge stages, but it can't replace good pipeline design.
+
+## Syntax and key APIs
+
+| Stage | SQL analog |
+| --- | --- |
+| `$match` | `WHERE` or `HAVING` |
+| `$project`, `$set` | `SELECT` expressions |
+| `$group` | `GROUP BY` |
+| `$sort`, `$limit` | `ORDER BY`, `LIMIT` |
+| `$lookup` | `LEFT JOIN` |
+| `$unwind` | Unnest an array |
+| `$merge`, `$out` | Write results |
+
+## Simple example
+
+```js
+import assert from "node:assert/strict";
+import { MongoClient } from "mongodb";
+
+const client = new MongoClient(process.env.MONGODB_URI);
+const db = client.db("shelf_aggregation");
+await db.dropDatabase();
+
+await db.collection("products").insertMany([
+  { _id: "A", category: "stationery" },
+  { _id: "B", category: "books" },
+]);
+await db.collection("orders").insertMany([
+  { status: "paid", items: [{ sku: "A", qty: 10, price: 20 }, { sku: "B", qty: 1, price: 150 }] },
+  { status: "paid", items: [{ sku: "B", qty: 3, price: 150 }] },
+  { status: "open", items: [{ sku: "A", qty: 99, price: 20 }] },
+]);
+
+const rows = await db.collection("orders").aggregate([
+  { $match: { status: "paid" } },
+  { $unwind: "$items" },
+  { $lookup: { from: "products", localField: "items.sku", foreignField: "_id", as: "product" } },
+  { $unwind: "$product" },
+  { $group: { _id: "$product.category", revenue: { $sum: { $multiply: ["$items.qty", "$items.price"] } } } },
+  { $sort: { revenue: -1 } },
+]).toArray();
+
+assert.deepEqual(rows, [{ _id: "books", revenue: 600 }, { _id: "stationery", revenue: 200 }]);
+
+await db.dropDatabase();
+await client.close();
+```
+
+## Industry examples
+
+Analytics APIs build reports, and `$merge` maintains rollup collections on a schedule. ETL jobs reshape documents before loading to a warehouse.
+
+## Patterns and best practices
+
+- `$match` and `$sort` early, when an index can serve them.
+- Use `$project` near the end, unless reducing fields helps a stage.
+- Build pipelines stage by stage and test each one.
+- Keep `$lookup` targets indexed.
+
+## Alternatives and trade-offs
+
+For heavy, wide analytics, a columnar warehouse is better. Atlas Stream Processing and change streams serve continuous pipelines.
+
+## Common mistakes
+
+- `$group` before `$match`.
+- `$unwind` silently dropping documents with empty arrays.
+- Repeated `$lookup` on a poor schema.
+- Assuming pipeline order doesn't matter.
+
+## Interview questions
+
+<Question q="Why place $match early?">It reduces documents flowing through later stages and can use an index.</Question>
+
+<Question q="What does $unwind do to empty arrays?">It drops those documents unless preserveNullAndEmptyArrays is set.</Question>

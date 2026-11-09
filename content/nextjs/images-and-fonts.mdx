@@ -1,0 +1,148 @@
+---
+title: "Image and Font Optimization"
+summary: "Using next/image correctly, the new preload option, remote image rules, and self-hosting fonts with next/font."
+level: intermediate
+section: platform
+order: 30
+tags: [next-image, fonts, optimization, remotePatterns, preload, lcp, cls]
+requires: [nextjs/routing-and-layouts]
+related: [nextjs/metadata-and-seo, nextjs/deployment-and-environment]
+versions: "Next.js 16: priority is deprecated in favour of preload, and qualities defaults to [75]."
+tested: "Compiled on Next.js 16.4.5 in a scratch app."
+verified: "2026-11-09"
+docs:
+  - label: "Next.js: Images"
+    url: "https://nextjs.org/docs/app/getting-started/images"
+  - label: "Next.js: Image component"
+    url: "https://nextjs.org/docs/app/api-reference/components/image"
+  - label: "Next.js: Fonts"
+    url: "https://nextjs.org/docs/app/getting-started/fonts"
+---
+
+## What it is
+
+`next/image` serves resized, modern-format images. `next/font` self-hosts fonts with no layout shift.
+
+## Why it exists
+
+Images and fonts dominate page weight and cause content to jump. Handling them by hand is easy to get wrong.
+
+## How it works
+
+`next/image` builds a `srcset` and optimizes on demand. Known dimensions reserve space before loading, preventing layout shift. `width` and `height` describe the intrinsic size and don't set the rendered size.
+
+<StepFlow
+  title="An image request"
+  nodes={["browser picks srcset", "/_next/image?w=828", "resize, convert", "cache", "serve WebP"]}
+  steps={[
+    { active: [0], note: "Using sizes, the browser chooses the smallest suitable width." },
+    { active: [1], note: "The request goes through the optimizer." },
+    { active: [2], note: "The source image is fetched and resized. Unmatched remote hosts return 400." },
+    { active: [3], note: "The result is cached for later requests." },
+    { active: [4], note: "The default format list is WebP. SVGs are never optimized." },
+  ]}
+/>
+
+<Callout type="version">
+In Next.js 16, `priority` is deprecated in favour of `preload`. The docs note that `loading="eager"` or `fetchPriority="high"` is usually the better choice. `qualities` defaults to `[75]`.
+</Callout>
+
+## Syntax and key APIs
+
+| Prop | Purpose |
+| --- | --- |
+| `src`, `alt` | Required |
+| `width`, `height` | Intrinsic size |
+| `fill` | Fill a positioned parent |
+| `sizes` | Rendered width by viewport |
+| `preload` | Add a `<link>` preload |
+
+## Simple example
+
+```tsx
+import Image from "next/image";
+import hero from "./hero.png";
+
+export default function Page() {
+  return <Image src={hero} alt="A bookshelf" placeholder="blur" fetchPriority="high" />;
+}
+```
+
+## Industry examples
+
+### Fill a responsive container
+
+Without `sizes`, the browser assumes the image is full viewport width.
+
+```tsx
+<div style={{ position: "relative", aspectRatio: "16 / 9" }}>
+  <Image src="/cover.jpg" alt="" fill sizes="(max-width: 768px) 100vw, 50vw" style={{ objectFit: "cover" }} />
+</div>
+```
+
+### Allow remote images
+
+```ts
+import type { NextConfig } from "next";
+
+const config: NextConfig = {
+  images: {
+    remotePatterns: [{ protocol: "https", hostname: "cdn.example.com", pathname: "/img/**" }],
+  },
+};
+
+export default config;
+```
+
+### Self-host a font
+
+Requests never go to Google from the browser, because fonts ship as your own static assets.
+
+```tsx
+import { Newsreader } from "next/font/google";
+
+const serif = Newsreader({ subsets: ["latin"], variable: "--font-serif" });
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html className={serif.variable}>
+      <body>{children}</body>
+    </html>
+  );
+}
+```
+
+## Patterns and best practices
+
+- Give the main above-the-fold image a high fetch priority.
+- Always set `sizes` for responsive images.
+- Prefer variable fonts and few families.
+- Use `alt=""` for decorative images.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Responsive photos | `next/image` | Server work or a loader |
+| Icons and logos | Inline SVG | Not for photos |
+| Heavy traffic | External image CDN | Cost |
+
+## Common mistakes
+
+**Using `fill` without a positioned parent.** The image escapes its container.
+
+**Omitting `sizes`.** The browser downloads oversized files.
+
+**Using a `quality` not in `qualities`.** It's coerced to the closest allowed value.
+
+**Loading many font weights.** Each adds weight unless the font is variable.
+
+## Interview questions
+
+<Question q="Why do width and height matter?">
+They give the aspect ratio so the browser can reserve space and avoid layout shift.
+</Question>
+
+<Question q="What does the sizes prop do?">
+It tells the browser how wide the image will render so that it can pick the right `srcset` entry.
+</Question>

@@ -1,0 +1,166 @@
+---
+title: "App Router: Files, Layouts and Navigation"
+summary: "How folders become routes, how layouts persist across pages, and how special files define loading, error and not-found states."
+level: fundamental
+section: routing
+order: 10
+tags: [app-router, routing, layouts, pages, dynamic-routes, link, loading, error, basics]
+related: [nextjs/server-and-client-components, react/components-jsx-and-props]
+versions: "Next.js 16: params and searchParams are promises and must be awaited."
+tested: "Built on Next.js 16.4.5 in a scratch app."
+verified: "2026-11-09"
+docs:
+  - label: "Next.js: Layouts and pages"
+    url: "https://nextjs.org/docs/app/getting-started/layouts-and-pages"
+  - label: "Next.js: loading.js"
+    url: "https://nextjs.org/docs/app/api-reference/file-conventions/loading"
+  - label: "Next.js: error.js"
+    url: "https://nextjs.org/docs/app/api-reference/file-conventions/error"
+  - label: "Next.js: Version 16 upgrade guide"
+    url: "https://nextjs.org/docs/app/guides/upgrading/version-16"
+---
+
+## What it is
+
+The App Router maps folders inside `app/` to URL segments. Special filenames such as `page.tsx` and `layout.tsx` define what each segment renders.
+
+## Why it exists
+
+File-based routing removes route configuration, and nested layouts let shared UI persist during navigation instead of remounting.
+
+## How it works
+
+A folder becomes a route when it has `page.tsx`. Layouts wrap their children and keep their state across navigation within them. Special files nest in a fixed hierarchy: layout, then error boundary, then loading boundary, then not-found and page.
+
+| File | Purpose |
+| --- | --- |
+| `page.tsx` | The route's UI |
+| `layout.tsx` | Shared wrapper that persists |
+| `loading.tsx` | Suspense fallback for the segment |
+| `error.tsx` | Error boundary, must be a Client Component |
+| `not-found.tsx` | UI for `notFound()` |
+| `route.ts` | API endpoint, can't share a segment with `page.tsx` |
+
+## Syntax and key APIs
+
+| Folder | Matches |
+| --- | --- |
+| `app/blog/page.tsx` | `/blog` |
+| `app/blog/[slug]/page.tsx` | `/blog/anything` |
+| `app/docs/[...path]/page.tsx` | `/docs/a/b/c` |
+| `app/(marketing)/about/page.tsx` | `/about`, the group isn't in the URL |
+
+<Callout type="version">
+Synchronous access to request APIs was removed in Next.js 16. `params`, `searchParams`, `cookies()`, `headers()` and `draftMode()` must be awaited.
+</Callout>
+
+## Simple example
+
+```tsx
+// app/blog/[slug]/page.tsx
+export default async function Post({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  return <h1>{slug}</h1>;
+}
+```
+
+## Industry examples
+
+### A shared dashboard layout
+
+```tsx
+// app/dashboard/layout.tsx
+import Link from "next/link";
+
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <div>
+      <nav>
+        <Link href="/dashboard">Overview</Link>
+        <Link href="/dashboard/settings">Settings</Link>
+      </nav>
+      <main>{children}</main>
+    </div>
+  );
+}
+```
+
+### Recover from errors
+
+`retry()` is the recommended recovery function, stable since 16.3.
+
+```tsx
+// app/dashboard/error.tsx
+"use client";
+
+export default function Error({ retry }: { error: unknown; retry: () => void }) {
+  return (
+    <div role="alert">
+      <p>Something went wrong.</p>
+      <button onClick={() => retry()}>Try again</button>
+    </div>
+  );
+}
+```
+
+### Generate static paths and metadata
+
+```tsx
+// app/products/[id]/page.tsx
+import type { Metadata } from "next";
+
+type Props = { params: Promise<{ id: string }> };
+
+export function generateStaticParams() {
+  return [{ id: "1" }, { id: "2" }];
+}
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { id } = await params;
+  return { title: `Product ${id}` };
+}
+
+export default async function Page({ params }: Props) {
+  const { id } = await params;
+  return <p>Product {id}</p>;
+}
+```
+
+## Patterns and best practices
+
+- Use route groups to organize code without changing URLs.
+- Colocate components within route folders, since only `page` and `route` files are publicly served.
+- Use `Link` for internal navigation, so routes get prefetched.
+- Run `npx next typegen` to get the global `PageProps` and `LayoutProps` helpers.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| State across pages | Layout | Layouts don't re-render on navigation |
+| Reset on each navigation | `template.tsx` | Remounts every time |
+| Older codebases | Pages Router | Lacks Server Components |
+
+## Common mistakes
+
+**Reading `params` without awaiting.** It's a promise in Next.js 16.
+
+**Expecting `error.tsx` to catch its own layout's errors.** It wraps children only, so put one in the parent segment, or use `global-error.tsx` at the root.
+
+**Omitting `"use client"` in `error.tsx`.** Error boundaries must be Client Components.
+
+**Putting `route.ts` beside `page.tsx`.** They can't coexist at the same segment.
+
+## Interview questions
+
+<Question q="What is the difference between a layout and a template?">
+A layout persists across navigation and keeps its state. A template creates a new instance on each navigation.
+</Question>
+
+<Question q="What does loading.tsx do?">
+It wraps the page in a Suspense boundary and shows immediately while the segment's content loads.
+</Question>
+
+<Question q="How do you read a dynamic segment in Next.js 16?">
+Await the `params` prop: `const { id } = await params`.
+</Question>

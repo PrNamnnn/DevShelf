@@ -1,0 +1,85 @@
+---
+title: "Feature Stores and ML Pipelines"
+summary: "Share features between training and serving with point-in-time correctness and pipeline automation."
+level: advanced
+section: operations
+order: 1
+tags: ["feature store","training-serving skew","ML pipelines"]
+requires: ["mlops/ml-project-lifecycle"]
+related: ["statistics/feature-selection-and-pipelines","statistics/data-quality-and-leakage","data-engineering/airflow-orchestration"]
+versions: "Practices current as of November 2026"
+tested: "Python example executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "Feast documentation"
+    url: "https://docs.feast.dev/"
+  - label: "pandas: merge_asof"
+    url: "https://pandas.pydata.org/docs/reference/api/pandas.merge_asof.html"
+---
+
+## What it is
+
+A **feature store** manages feature definitions, offline history for training and low-latency online values for serving. An **ML pipeline** automates data, training, evaluation and registration.
+
+## Why it exists
+
+Implementing a feature twice creates **training-serving skew**, in which a model sees different values in production than it learned from.
+
+## How it works
+
+Offline stores keep history, and online stores keep the latest values. A **point-in-time join** attaches the most recent feature value as of each label's timestamp, avoiding future leakage.
+
+Pipelines are directed graphs of steps, each producing tracked artifacts.
+
+## Syntax and key APIs
+
+`pandas.merge_asof` demonstrates the core operation behind point-in-time joins.
+
+## Simple example
+
+```python
+import pandas as pd
+
+labels = pd.DataFrame({
+    "user": ["a", "a"],
+    "at": pd.to_datetime(["2026-01-10", "2026-02-10"]),
+    "churned": [0, 1],
+})
+features = pd.DataFrame({
+    "user": ["a", "a", "a"],
+    "at": pd.to_datetime(["2026-01-01", "2026-02-01", "2026-03-01"]),
+    "spend_30d": [100, 40, 5],
+})
+
+training = pd.merge_asof(labels, features, on="at", by="user", direction="backward")
+assert training["spend_30d"].tolist() == [100, 40]
+```
+
+The value from March isn't used for the February label, which is exactly the point.
+
+## Industry examples
+
+Fraud systems reuse transaction aggregates across several models, and recommendation teams maintain shared embeddings.
+
+## Patterns and best practices
+
+- Define features once, as code.
+- Set freshness expectations per feature.
+- Monitor online and offline value consistency.
+
+## Alternatives and trade-offs
+
+A shared warehouse view may be enough for batch models. Feature stores add infrastructure, and pay off with several real-time models.
+
+## Common mistakes
+
+- Joining on the latest snapshot for training.
+- No time-to-live on online features.
+- Reimplementing logic in the service.
+- Adopting a feature store too early.
+
+## Interview questions
+
+<Question q="What is training-serving skew?">A difference between feature values or logic at training and at inference.</Question>
+
+<Question q="What is a point-in-time join?">Attaching the most recent feature value known at each training example's timestamp.</Question>

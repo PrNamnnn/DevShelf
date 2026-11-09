@@ -1,0 +1,192 @@
+---
+title: "Tools and Agents"
+summary: "Defining tools, how the agent loop works, using create_agent, and controlling agents with middleware."
+level: intermediate
+section: agents
+order: 10
+tags: [tools, agents, create_agent, tool-calling, middleware, ToolRuntime, human-in-the-loop]
+related: [langchain/structured-output, langchain/memory-and-langgraph, langchain/rag]
+versions: "LangChain v1. create_agent replaces create_react_agent."
+tested: "langchain 1.4.9 with a scripted fake model. No real provider was called."
+verified: "2026-11-09"
+docs:
+  - label: "LangChain: Agents"
+    url: "https://docs.langchain.com/oss/python/langchain/agents"
+  - label: "LangChain: Tools"
+    url: "https://docs.langchain.com/oss/python/langchain/tools"
+  - label: "LangChain: Middleware"
+    url: "https://docs.langchain.com/oss/python/langchain/middleware/overview"
+---
+
+## What it is
+
+A **tool** is a function a model can ask to call. An **agent** runs a model in a loop: it calls tools, reads results, and stops when it can answer.
+
+## Why it exists
+
+Models can't look up live data or take actions on their own. Tools give them that ability, while your code keeps control of what actually runs.
+
+## How it works
+
+The model doesn't execute anything. It emits a request, and the framework runs the function.
+
+<StepFlow
+  title="The agent loop"
+  nodes={["user message", "model", "tool call?", "run tool", "ToolMessage", "final answer"]}
+  steps={[
+    { active: [0, 1], note: "The messages go to the model along with the tool schemas." },
+    { active: [2], note: "The model returns an AIMessage containing a tool call: get_weather(city='Pune').", state: { tool_calls: "1" } },
+    { active: [3], note: "The framework validates the arguments and runs the Python function." },
+    { active: [4, 1], note: "The result is appended as a ToolMessage with the matching ID, and the model is called again.", state: { messages: "4" } },
+    { active: [2, 5], note: "With no further tool calls, the loop ends and the answer is returned.", state: { tool_calls: "0" } },
+  ]}
+/>
+
+Type hints define the input schema, and the docstring becomes the description that the model reads.
+
+## Syntax and key APIs
+
+```py
+from langchain.agents import create_agent
+from langchain.tools import tool, ToolRuntime
+
+agent = create_agent(
+    model="provider:model",
+    tools=[search],
+    system_prompt="You are a helpful assistant.",
+)
+
+result = agent.invoke({"messages": [{"role": "user", "content": "Hi"}]})
+```
+
+`config` and `runtime` are reserved tool argument names. `ToolRuntime` gives access to state, context and stores.
+
+<Callout type="deprecated">
+`create_react_agent` is replaced by `langchain.agents.create_agent`, with `prompt=` renamed to `system_prompt=`. Pre-bound models from `bind_tools` aren't accepted.
+</Callout>
+
+## Simple example
+
+```python
+from langchain.tools import tool
+
+@tool
+def add(a: int, b: int) -> int:
+    """Add two integers."""
+    return a + b
+
+assert add.name == "add"
+assert add.description == "Add two integers."
+assert set(add.args) == {"a", "b"}
+assert add.invoke({"a": 2, "b": 3}) == 5
+```
+
+## Industry examples
+
+### Run the full loop
+
+```python
+from langchain.agents import create_agent
+from langchain.messages import AIMessage, ToolMessage
+from langchain.tools import tool
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+
+class Scripted(GenericFakeChatModel):
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+@tool
+def get_stock(sku: str) -> int:
+    """Return units in stock for a SKU."""
+    return {"A1": 7}.get(sku, 0)
+
+script = iter([
+    AIMessage(content="", tool_calls=[
+        {"name": "get_stock", "args": {"sku": "A1"}, "id": "c1", "type": "tool_call"},
+    ]),
+    AIMessage(content="There are 7 units."),
+])
+
+agent = create_agent(Scripted(messages=script), tools=[get_stock])
+result = agent.invoke({"messages": [{"role": "user", "content": "Stock of A1?"}]})
+
+tool_message = next(m for m in result["messages"] if isinstance(m, ToolMessage))
+assert tool_message.content == "7"
+assert tool_message.tool_call_id == "c1"
+assert result["messages"][-1].content == "There are 7 units."
+```
+
+### Read user identity from context, not the model
+
+Never let the model supply a user ID. Pass it through runtime context, where it can't be invented.
+
+```py
+from dataclasses import dataclass
+
+@dataclass
+class Context:
+    user_id: str
+
+@tool
+def my_orders(runtime: ToolRuntime[Context]) -> list[str]:
+    """List the current user's orders."""
+    return load_orders(runtime.context.user_id)
+
+agent = create_agent(model, tools=[my_orders], context_schema=Context)
+agent.invoke({"messages": [...]}, context=Context(user_id="u1"))
+```
+
+### Require approval for risky tools
+
+Middleware wraps the agent loop, and built-ins cover retries, summarization and human approval.
+
+```py
+from langchain.agents.middleware import HumanInTheLoopMiddleware
+
+agent = create_agent(
+    model,
+    tools=[send_email],
+    middleware=[HumanInTheLoopMiddleware(interrupt_on={"send_email": True})],
+    checkpointer=checkpointer,
+)
+```
+
+## Patterns and best practices
+
+- Write tool descriptions for the model, including when to use each one.
+- Return concise, structured results to save tokens.
+- Validate arguments and permissions inside the tool.
+- Limit the number of tools and iterations.
+- Require human approval for irreversible actions.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Known fixed steps | Chain | Can't adapt |
+| Model decides steps | `create_agent` | Less predictable, more calls |
+| Fully custom control | LangGraph | More code |
+
+## Common mistakes
+
+**Believing the model runs the tool.** Your process runs it, so it's your security boundary.
+
+**Trusting tool arguments.** They're model output and can be influenced by prompt injection.
+
+**Omitting a docstring or type hints.** The model then has little to go on.
+
+**Using `config` or `runtime` as parameter names.** They're reserved.
+
+## Interview questions
+
+<Question q="What actually executes a tool?">
+Your application. The model only returns a structured request naming the tool and its arguments.
+</Question>
+
+<Question q="How does an agent know when to stop?">
+It stops when the model returns a message with no tool calls, or when a limit is reached.
+</Question>
+
+<Question q="How do you stop prompt injection from causing damage?">
+Treat tool arguments as untrusted, scope credentials from context, and require approval for dangerous actions.
+</Question>

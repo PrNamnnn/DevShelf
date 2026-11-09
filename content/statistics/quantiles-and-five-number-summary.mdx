@@ -1,0 +1,98 @@
+---
+title: "Percentiles, Quartiles and the Five-Number Summary"
+summary: "Read distributions by position, understand interpolation methods, and use P50, P95 and box plots to describe real metrics."
+level: fundamental
+section: descriptive
+order: 3
+tags: ["percentiles","quartiles","five-number summary","box plot"]
+requires: ["statistics/dispersion"]
+related: ["statistics/outliers-and-z-scores","statistics/distribution-and-relationship-charts"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "NumPy: percentile"
+    url: "https://numpy.org/doc/stable/reference/generated/numpy.percentile.html"
+  - label: "pandas: describe"
+    url: "https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.describe.html"
+---
+
+## What it is
+
+The pth **percentile** is a value below which about p% of observations fall. **Quartiles** cut sorted data into four parts at Q1 (25th), Q2 (the median) and Q3 (75th). The **five-number summary** is minimum, Q1, median, Q3 and maximum, which is what a box plot draws.
+
+## Why it exists
+
+Means describe a balance point, while percentiles describe actual customer experience. A checkout averaging 400 ms may still take 3 seconds for 5% of users. Percentiles also stay stable when extreme values change.
+
+## How it works
+
+Sort the values, then find a position in the ordered list. Because a percentile often falls between two observations, tools interpolate, and they don't all use the same rule:
+
+| Tool | Default |
+| --- | --- |
+| NumPy `percentile`, pandas `quantile` | Linear interpolation |
+| Excel `PERCENTILE.INC` | Inclusive linear, the same as NumPy's default |
+| Excel `PERCENTILE.EXC` | Exclusive |
+| SQL `percentile_cont` | Linear interpolation |
+| SQL `percentile_disc` | Returns an actual observed value |
+
+On large datasets the differences vanish. On small ones they can change a reported value.
+
+## Worked example
+
+Sorted orders: 420, 440, 455, 470, 480, 495, 505, 510, 530, 2900.
+
+Q1's position under linear interpolation is 0.25 × 9 = 2.25 in zero-based indexing, so it lies a quarter of the way from 455 to 470, giving 458.75. Q3 sits at position 6.75, three quarters of the way from 505 to 510, giving 508.75. The five-number summary is 420, 458.75, 487.5, 508.75, 2900. The tight box and huge top whisker show one extreme value and a consistent middle.
+
+## Python
+
+```python
+import numpy as np
+import pandas as pd
+
+orders = pd.Series([420, 510, 480, 455, 530, 495, 2900, 470, 505, 440])
+summary = orders.quantile([0, 0.25, 0.5, 0.75, 1]).tolist()
+assert summary == [420, 458.75, 487.5, 508.75, 2900]
+
+assert round(np.percentile(orders, 90, method="linear"), 6) == 767
+assert np.percentile(orders, 90, method="higher") == 2900
+```
+
+## SQL
+
+```sql
+SELECT percentile_cont(0.25) WITHIN GROUP (ORDER BY v) AS q1,
+       percentile_disc(0.25) WITHIN GROUP (ORDER BY v) AS q1_observed
+FROM unnest(ARRAY[420, 510, 480, 455, 530, 495, 2900, 470, 505, 440]) AS v;
+-- rows: [{"q1":458.75,"q1_observed":455}]
+```
+
+## Excel or Power BI
+
+Use `QUARTILE.INC(range, 1)` and `PERCENTILE.INC(range, 0.95)`. Power BI offers `PERCENTILE.INC` in DAX. For a measure over a group, wrap it with `PERCENTILEX.INC`, which evaluates an expression across a table.
+
+## In industry
+
+Site reliability teams set objectives on P95 and P99 latency. Compensation benchmarks use percentiles. Growth teams look at P90 spend to understand their best customers.
+
+## Assumptions and limitations
+
+Extreme percentiles need many observations. P99 from 100 points is essentially the second-largest value. Percentiles also can't be averaged across groups or days: combine the raw data or use a mergeable sketch such as t-digest.
+
+## Common mistakes
+
+- Averaging daily P95 values to report a monthly P95.
+- Comparing percentile figures from tools with different interpolation on small samples.
+- Quoting a percentile from too little data.
+- Reading a whisker as the true minimum or maximum, when it stops at a rule-based limit.
+
+## Alternatives
+
+A full histogram or empirical CDF shows every percentile at once. For large streams, approximate algorithms such as t-digest provide accurate estimates at low memory cost.
+
+## Interview questions
+
+<Question q="Why can't you average percentiles?">A percentile depends on the whole distribution, so the mean of group percentiles generally differs from the percentile of the combined data.</Question>
+
+<Question q="Why report P95 latency instead of the mean?">The mean hides the slow tail that users notice. P95 directly states the experience of the slowest 5% boundary.</Question>

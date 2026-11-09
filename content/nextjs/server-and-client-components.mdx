@@ -1,0 +1,169 @@
+---
+title: "Server and Client Components"
+summary: "Where each component runs, what crosses the boundary, and how to compose the two without bloating your bundle."
+level: intermediate
+section: rendering
+order: 10
+tags: [server-components, client-components, use-client, rsc, hydration, serialization, composition]
+related: [nextjs/routing-and-layouts, nextjs/data-fetching-and-caching, nextjs/request-lifecycle-and-streaming]
+versions: "Next.js 16 with React 19.2 features."
+tested: "Built on Next.js 16.4.5 in a scratch app."
+verified: "2026-11-09"
+docs:
+  - label: "Next.js: Server and Client Components"
+    url: "https://nextjs.org/docs/app/getting-started/server-and-client-components"
+---
+
+## What it is
+
+Pages and layouts are **Server Components** by default. They run only on the server and send no component code to the browser. `"use client"` marks a boundary for **Client Components**, which can use state, effects and browser APIs.
+
+## Why it exists
+
+Much of a page only displays data. Rendering it on the server keeps secrets and heavy libraries out of the browser and reduces JavaScript. Interactive parts still run on the client.
+
+## How it works
+
+The server renders Server Components into an **RSC Payload**, a compact description of the tree, plus HTML for fast first paint. In the browser, the HTML appears first, the payload reconciles the tree, and then Client Components hydrate.
+
+<StepFlow
+  title="First load of a mixed page"
+  nodes={["server renders tree", "RSC Payload + HTML", "browser paints HTML", "payload reconciles", "client JS hydrates"]}
+  steps={[
+    { active: [0], note: "Server Components run and can read the database. Client Components are also pre-rendered to HTML." },
+    { active: [1], note: "Server output is serialized. Client Components appear as references to JavaScript chunks, with their serialized props." },
+    { active: [2], note: "The user sees content before any JavaScript has run, though it isn't interactive yet." },
+    { active: [3], note: "React uses the payload to reconcile the Server and Client Component trees." },
+    { active: [4], note: "Client Components attach their event handlers and become interactive." },
+  ]}
+/>
+
+`"use client"` places a module and its imports in the client bundle. Server Components passed as `children` or props aren't imported into that graph, so they stay server-only.
+
+## Syntax and key APIs
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+export function Counter({ start }: { start: number }) {
+  const [n, setN] = useState(start);
+  return <button onClick={() => setN(n + 1)}>{n}</button>;
+}
+```
+
+Props passed from Server to Client Components must be serializable by React.
+
+| Needs | Use |
+| --- | --- |
+| Database, secrets, large libraries | Server Component |
+| State, effects, event handlers | Client Component |
+| Browser APIs | Client Component |
+
+## Simple example
+
+```tsx
+// app/page.tsx
+import { Counter } from "./counter";
+
+export default async function Page() {
+  const start = await Promise.resolve(10);
+  return <Counter start={start} />;
+}
+```
+
+## Industry examples
+
+### Interleave server content inside a client shell
+
+```tsx
+// modal.tsx
+"use client";
+
+import { useState } from "react";
+
+export function Modal({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(true)}>Open</button>
+      {open && <div role="dialog">{children}</div>}
+    </>
+  );
+}
+```
+
+```tsx
+// page.tsx
+<Modal>
+  <ServerRenderedCart />
+</Modal>
+```
+
+### Provide context from a client wrapper
+
+Context isn't available in Server Components, so wrap it in a Client Component that accepts `children`.
+
+```tsx
+"use client";
+
+import { createContext } from "react";
+
+export const ThemeContext = createContext("light");
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  return <ThemeContext value="dark">{children}</ThemeContext>;
+}
+```
+
+### Guard server-only code
+
+```tsx
+import "server-only";
+
+export async function getSecretData() {
+  return process.env.API_SECRET;
+}
+```
+
+Only environment variables prefixed with `NEXT_PUBLIC_` are included in client bundles.
+
+## Patterns and best practices
+
+- Push `"use client"` as far down the tree as possible.
+- Fetch on the server and pass only the fields the client needs.
+- Wrap third-party client-only components in your own Client Component.
+- Use `server-only` for modules that must never ship to browsers.
+
+## Alternatives and trade-offs
+
+| Approach | Strength | Weakness |
+| --- | --- | --- |
+| Server Component | No client JS, direct data access | No interactivity |
+| Client Component | Full interactivity | Adds bundle size |
+| Island of client code in a server page | Good default | Needs boundary planning |
+
+## Common mistakes
+
+**Importing a Server Component into a Client Component.** It becomes client code. Pass it as `children` instead.
+
+**Passing a function as a prop from server to client.** Functions aren't serializable, except Server Actions.
+
+**Putting `"use client"` at the root layout.** It drags everything it imports into the bundle.
+
+**Sending entire database rows as props.** Everything sent to a Client Component is visible in the page's payload.
+
+## Interview questions
+
+<Question q="Do Client Components render on the server?">
+Yes, for the initial HTML. They then hydrate and also run in the browser.
+</Question>
+
+<Question q="What is the RSC Payload?">
+A compact serialized representation of the rendered Server Component tree, used to reconcile the UI and for navigation.
+</Question>
+
+<Question q="Can a Client Component render a Server Component?">
+Only when the Server Component is passed in from a server parent, such as through `children`.
+</Question>

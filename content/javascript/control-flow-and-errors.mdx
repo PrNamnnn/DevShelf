@@ -1,0 +1,160 @@
+---
+title: "Control Flow, Loops and Errors"
+summary: "Conditionals, the different for loops and when each applies, labelled exits, and handling errors with try and custom classes."
+level: fundamental
+section: fundamentals
+order: 20
+tags: [if, switch, for, for-of, for-in, while, try-catch, errors, basics]
+requires: [javascript/values-and-types]
+related: [javascript/array-methods, javascript/promises-and-cancellation]
+versions: "Error.cause is Baseline since 2021."
+tested: "Node.js 24.17.0"
+verified: "2026-11-09"
+docs:
+  - label: "MDN: Loops and iteration"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Loops_and_iteration"
+  - label: "MDN: Control flow and error handling"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Control_flow_and_error_handling"
+  - label: "MDN: Error cause"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/cause"
+---
+
+## What it is
+
+Control flow chooses which code runs. JavaScript has several loop forms and an exception mechanism based on `throw`, `try`, `catch` and `finally`.
+
+## Why it exists
+
+Each loop solves a different problem. Exceptions separate the path that handles failure from normal logic.
+
+## How it works
+
+| Loop | Iterates over | Use for |
+| --- | --- | --- |
+| `for (;;)` | A counter | Index control |
+| `for...of` | Values of an iterable | Arrays, Map, Set, strings |
+| `for...in` | Enumerable string keys, including inherited | Rarely, objects only |
+| `while` | A condition | Unknown repeat count |
+| `array.forEach` | Array elements | Side effects, no `break` |
+
+A thrown value travels up the call stack until a `catch` handles it. `finally` runs either way.
+
+Falsy values are `false`, `0`, `-0`, `0n`, `""`, `null`, `undefined` and `NaN`. Everything else is truthy, including `[]` and `{}`.
+
+## Syntax and key APIs
+
+```javascript
+for (const [index, value] of items.entries()) {}
+for (const [key, value] of Object.entries(record)) {}
+outer: for (const a of xs) { for (const b of ys) { break outer; } }
+
+try { risky(); } catch (error) { handle(error); } finally { cleanup(); }
+throw new Error("failed", { cause: original });
+```
+
+## Simple example
+
+```js
+import assert from "node:assert";
+
+const seen = [];
+for (const [i, letter] of ["a", "b"].entries()) {
+  seen.push(`${i}:${letter}`);
+}
+assert.deepEqual(seen, ["0:a", "1:b"]);
+
+assert.equal(Boolean([]), true);
+assert.equal(Boolean(""), false);
+```
+
+## Industry examples
+
+### Keep the original failure
+
+```js
+import assert from "node:assert";
+
+function parseConfig(text) {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error("Invalid configuration", { cause: error });
+  }
+}
+
+try {
+  parseConfig("{bad");
+} catch (error) {
+  assert.ok(error.cause instanceof SyntaxError);
+}
+```
+
+### Handle errors by type
+
+```js
+import assert from "node:assert";
+
+class ValidationError extends Error {
+  name = "ValidationError";
+}
+
+function describe(error) {
+  if (error instanceof ValidationError) return 422;
+  throw error;
+}
+
+assert.equal(describe(new ValidationError("x")), 422);
+assert.throws(() => describe(new TypeError("y")), TypeError);
+```
+
+### Exit nested loops
+
+```js
+import assert from "node:assert";
+
+let found = null;
+search: for (const row of [[1, 2], [3, 4]]) {
+  for (const cell of row) {
+    if (cell === 3) {
+      found = cell;
+      break search;
+    }
+  }
+}
+assert.equal(found, 3);
+```
+
+## Patterns and best practices
+
+- Use `for...of` for arrays.
+- Use `Object.entries` rather than `for...in`.
+- Throw `Error` objects, not strings, so you keep a stack trace.
+- Attach `cause` when wrapping an error.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Transform | `map`, `filter` | Can't exit early |
+| Early exit | `for...of`, `find`, `some` | Slightly more code |
+| Expected failure | Return a result object | Callers must check |
+
+## Common mistakes
+
+**`for...in` on an array.** It gives string indexes and inherited keys.
+
+**`break` in `forEach`.** It's a `SyntaxError`, and `return` only ends one callback.
+
+**Using a `switch` without `break`.** Cases fall through.
+
+**Catching everything and continuing.** Rethrow what you can't handle.
+
+## Interview questions
+
+<Question q="for...in versus for...of?">
+`for...in` walks enumerable property keys, including inherited ones. `for...of` walks the values of an iterable.
+</Question>
+
+<Question q="Does finally run after return?">
+Yes. `finally` runs before the function actually returns, and a `return` inside it overrides the earlier one.
+</Question>

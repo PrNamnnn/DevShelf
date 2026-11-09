@@ -1,0 +1,232 @@
+---
+title: "DOM Events, Delegation, Debounce and Throttle"
+summary: "How events travel through the page, how one listener can serve thousands of elements, and how to control noisy events."
+level: advanced
+section: browser
+order: 10
+tags: [dom, events, delegation, bubbling, capture, debounce, throttle, addeventlistener, scheduler]
+related: [javascript/event-loop, javascript/promises-and-cancellation]
+versions: "scheduler.yield has limited availability and isn't Baseline, so check for it first."
+tested: "Node.js 24.17.0 with jsdom for DOM behaviour. Real-browser scroll and passive behaviour wasn't run."
+verified: "2026-11-09"
+docs:
+  - label: "MDN: addEventListener"
+    url: "https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener"
+  - label: "MDN: Event bubbling"
+    url: "https://developer.mozilla.org/en-US/docs/Learn_web_development/Core/Scripting/Event_bubbling"
+  - label: "MDN: Scheduler.yield"
+    url: "https://developer.mozilla.org/en-US/docs/Web/API/Scheduler/yield"
+  - label: "MDN: Element.closest"
+    url: "https://developer.mozilla.org/en-US/docs/Web/API/Element/closest"
+---
+
+## What it is
+
+When a user interacts with an element, the browser dispatches an event that travels through the DOM tree. **Delegation** uses that travel to handle many elements from one ancestor. **Debounce** and **throttle** limit how often a handler runs.
+
+## Why it exists
+
+A table with 10,000 rows doesn't need 10,000 listeners. A search box shouldn't call an API on every keystroke, and a scroll handler shouldn't do layout work hundreds of times.
+
+## How it works
+
+An event moves in phases. Listeners on the target run during the target phase.
+
+<StepFlow
+  title="A click on a button inside a list"
+  nodes={["window", "document", "ul", "li", "button (target)"]}
+  steps={[
+    { active: [0, 1, 2, 3], note: "Capture phase: the event travels down from the root. Only listeners registered with capture: true run.", state: { phase: "capture" } },
+    { active: [4], note: "Target phase: listeners attached to the element that was clicked run.", state: { phase: "target", target: "button" } },
+    { active: [3], note: "Bubbling begins. The event moves up through each ancestor. Most listeners run here.", state: { phase: "bubble", currentTarget: "li" } },
+    { active: [2], note: "A delegated listener on the ul runs. event.target is still the button, while currentTarget is the ul.", state: { phase: "bubble", currentTarget: "ul", target: "button" } },
+    { active: [1, 0], note: "The event continues to the root unless a handler calls stopPropagation.", state: { phase: "bubble" } },
+  ]}
+/>
+
+## Syntax and key APIs
+
+```javascript
+element.addEventListener("click", handler, {
+  capture: false,
+  once: true,           // removed after the first call
+  passive: true,        // promises not to call preventDefault
+  signal,               // removed when the signal aborts
+});
+
+event.target;           // where the event started
+event.currentTarget;    // where this listener is attached
+event.preventDefault();
+event.stopPropagation();
+```
+
+| Option | Debounce | Throttle |
+| --- | --- | --- |
+| Runs | After input stops | At most once per interval |
+| Good for | Search, resize end, autosave | Scroll, drag, progress |
+
+## Simple example
+
+```js
+import assert from "node:assert";
+import { JSDOM } from "jsdom";
+
+const { window } = new JSDOM(`<ul id="list"><li><button data-id="7">Buy</button></li></ul>`);
+const { document, MouseEvent } = window;
+
+const order = [];
+const list = document.querySelector("#list");
+const button = document.querySelector("button");
+
+list.addEventListener("click", () => order.push("capture ul"), { capture: true });
+button.addEventListener("click", () => order.push("button"));
+list.addEventListener("click", () => order.push("bubble ul"));
+
+button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+assert.deepEqual(order, ["capture ul", "button", "bubble ul"]);
+```
+
+## Industry examples
+
+### Delegate from a stable parent
+
+`closest` handles clicks on icons inside the button and works for rows added later.
+
+```js
+import assert from "node:assert";
+import { JSDOM } from "jsdom";
+
+const { window } = new JSDOM(`<ul id="list"><li></li></ul>`);
+const { document, MouseEvent } = window;
+
+const clicked = [];
+const list = document.querySelector("#list");
+
+list.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-id]");
+  if (!button || !list.contains(button)) return;
+  clicked.push(button.dataset.id);
+});
+
+document.querySelector("li").innerHTML = `<button data-id="9"><span>icon</span></button>`;
+document.querySelector("span").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+assert.deepEqual(clicked, ["9"]);
+```
+
+### Debounce a search
+
+```js
+import assert from "node:assert";
+
+function debounce(fn, waitMs) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), waitMs);
+  };
+}
+
+const calls = [];
+const search = debounce((q) => calls.push(q), 10);
+search("a");
+search("ab");
+search("abc");
+
+await new Promise((r) => setTimeout(r, 30));
+assert.deepEqual(calls, ["abc"]);
+```
+
+### Throttle a frequent event
+
+This version runs on the leading edge and ignores calls inside the interval.
+
+```js
+import assert from "node:assert";
+
+function throttle(fn, intervalMs) {
+  let last = -Infinity;
+  return (...args) => {
+    const now = performance.now();
+    if (now - last < intervalMs) return;
+    last = now;
+    fn(...args);
+  };
+}
+
+let runs = 0;
+const onScroll = throttle(() => runs++, 1000);
+onScroll();
+onScroll();
+onScroll();
+
+assert.equal(runs, 1);
+```
+
+### Remove many listeners at once
+
+```javascript
+const controller = new AbortController();
+window.addEventListener("resize", onResize, { signal: controller.signal });
+document.addEventListener("keydown", onKey, { signal: controller.signal });
+
+// On teardown:
+controller.abort();
+```
+
+### Yield during long handlers
+
+`scheduler.yield` isn't available everywhere, so fall back to a task.
+
+```javascript
+const pause = () =>
+  globalThis.scheduler?.yield?.() ?? new Promise((resolve) => setTimeout(resolve));
+
+for (const row of rows) {
+  render(row);
+  await pause();
+}
+```
+
+## Patterns and best practices
+
+- Delegate on the nearest stable container, not on `document`.
+- Use `{ signal }` for cleanup.
+- Use `passive: true` on touch and wheel listeners that won't cancel scrolling. It's the default for those events on the window, document and body.
+- Tie visual updates to `requestAnimationFrame`.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Few static elements | Direct listeners | Simple, but must be rebound for new nodes |
+| Dynamic lists | Delegation | Needs target matching |
+| Visibility tracking | `IntersectionObserver` | Asynchronous by design |
+| Size tracking | `ResizeObserver` | Observer lifecycle |
+
+Not every event bubbles. For example, `focus` and `blur` don't, while `focusin` and `focusout` do.
+
+## Common mistakes
+
+**Calling `stopPropagation` routinely.** It silently breaks delegated handlers and analytics higher up.
+
+**Trusting `event.target` directly.** It may be a child of the element you care about. Use `closest`.
+
+**Removing a different function.** `removeEventListener` needs the same function reference.
+
+**Creating a new debounced function per render.** Each one has its own timer, so nothing gets debounced.
+
+## Interview questions
+
+<Question q="What is event delegation?">
+Placing one listener on an ancestor and using bubbling, along with `event.target`, to handle events from its descendants.
+</Question>
+
+<Question q="target versus currentTarget?">
+`target` is the element where the event started. `currentTarget` is the element whose listener is running.
+</Question>
+
+<Question q="Debounce or throttle for a search box?">
+Debounce, because you want the request after typing pauses. Throttle suits continuous events where steady updates matter.
+</Question>

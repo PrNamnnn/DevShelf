@@ -1,0 +1,121 @@
+---
+title: "Continuous Metrics, Ratios and Retention Experiments"
+summary: "Analyze revenue per user with Welch's test and the bootstrap, ratio metrics with the delta method, and a complete retention experiment."
+level: advanced
+section: experimentation
+order: 5
+tags: ["ARPU","bootstrap","delta method","retention experiment","winsorizing"]
+requires: ["statistics/analyzing-ab-tests","statistics/t-tests"]
+related: ["statistics/cuped-and-variance-reduction","statistics/cohort-and-retention-curves"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "SciPy: bootstrap"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.bootstrap.html"
+  - label: "SciPy: ttest_ind"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.ttest_ind.html"
+---
+
+## What it is
+
+Not every experiment metric is a simple conversion rate. Revenue per user is continuous and heavy-tailed, click-through per impression is a ratio of two random variables, and retention requires full observation windows.
+
+## Why it exists
+
+Applying a naive formula to these metrics gives wrong standard errors, and it can make tests look more or less certain than they are.
+
+## How it works
+
+**Continuous, heavy-tailed metrics.** Include every exposed user, with zero for non-purchasers, and use Welch's t-test at large n. Winsorizing at a high percentile often reduces variance, and it does change the estimand, so state this. Bootstrapping provides a distribution-free interval as a check.
+
+**Ratio metrics.** If users are randomized but the metric is clicks ÷ impressions, the denominator is random and impressions from a user are correlated. Use the **delta method** or bootstrap at user level.
+
+**Retention.** Only include users who've had the full window. A user exposed yesterday can't count as "not retained at day 30".
+
+## Intuition and formula
+
+For a ratio R = ΣYᵢ / ΣXᵢ across n users, the delta method approximates:
+
+<Formula>Var(R) ≈ Σ(Yᵢ − R·Xᵢ)² / (ΣXᵢ)²</Formula>
+
+## Worked example
+
+**Revenue.** A simulated test of 20,000 users per group has ARPU of ₹41.74 and ₹43.13. Welch's p = 0.070, and the 95% CI for the difference is −₹0.12 to +₹2.89. A bootstrap gives a similar interval of −₹0.11 to +₹2.88. Winsorizing at the 99th percentile gives p = 0.067, so the conclusion holds up: suggestive, not established.
+
+**Retention experiment.** A new streak feature was tested on 8,000 users per group, all observed for 30 days. Day-30 retention is 30% and 32%. z = 2.73, p = 0.0062, and the 95% CI is +0.57 to +3.43 points. Retained users are worth a lot, so even the low end may justify launching.
+
+## Python
+
+```python
+import numpy as np
+from scipy import stats
+from statsmodels.stats.proportion import proportions_ztest
+
+rng = np.random.default_rng(42)
+control = rng.lognormal(3, 1.2, 20_000)
+treatment = rng.lognormal(3.03, 1.2, 20_000)
+welch = stats.ttest_ind(treatment, control, equal_var=False)
+assert round(welch.pvalue, 3) == 0.070
+
+boot = stats.bootstrap(
+    (treatment, control),
+    lambda t, c, axis: t.mean(axis=axis) - c.mean(axis=axis),
+    n_resamples=999, method="percentile", random_state=1, vectorized=True,
+)
+assert boot.confidence_interval.low < 0 < boot.confidence_interval.high
+
+z, p = proportions_ztest([2_560, 2_400], [8_000, 8_000])
+assert round(p, 4) == 0.0062
+
+rng = np.random.default_rng(9)
+views = rng.poisson(5, 5_000) + 1
+clicks = rng.binomial(views, 0.1)
+ctr = clicks.sum() / views.sum()
+delta_se = np.sqrt(((clicks - ctr * views) ** 2).sum()) / views.sum()
+assert 0.001 < delta_se < 0.003
+```
+
+## SQL
+
+```sql
+WITH users(id, exposed_on, last_active) AS (
+  VALUES (1, DATE '2026-01-01', DATE '2026-02-15'),
+         (2, DATE '2026-01-02', DATE '2026-01-05'),
+         (3, DATE '2026-03-20', DATE '2026-03-28')
+), cutoff AS (SELECT DATE '2026-04-01' AS data_end)
+SELECT count(*) AS eligible,
+       count(*) FILTER (WHERE last_active >= exposed_on + 30) AS retained
+FROM users, cutoff
+WHERE exposed_on + 30 <= data_end;
+-- rows: [{"eligible":2,"retained":1}]
+```
+
+## Excel or Power BI
+
+Excel's `T.TEST` works directly on user-level revenue, including zeros. In Power BI, use a user-level table and a measure that divides total revenue by exposed users, so non-buyers aren't dropped.
+
+## In industry
+
+Revenue experiments usually report both raw and capped metrics. Long-term retention is slower to measure, so companies validate short-term proxy metrics against it.
+
+## Assumptions and limitations
+
+Winsorization alters what's estimated, and it can hide real effects among high spenders. Delta-method approximations need large samples. Bootstraps can be expensive for massive data, and they assume independent resampling units.
+
+## Common mistakes
+
+- Dropping non-converters from a revenue test.
+- Computing CTR per impression and treating impressions as independent.
+- Including users with incomplete retention windows.
+- Defining a retention window based on behaviour the treatment affects.
+
+## Alternatives
+
+CUPED cuts variance, quantile treatment effects show who benefits, and two-part models separate buying from spending.
+
+## Interview questions
+
+<Question q="Why can't you use a binomial formula on CTR when users are randomized?">Impressions from a user aren't independent, which understates variance. Use the delta method or a user-level bootstrap.</Question>
+
+<Question q="How do you treat non-buyers in ARPU?">Keep them as zero. Removing them conditions on an outcome and biases the comparison.</Question>

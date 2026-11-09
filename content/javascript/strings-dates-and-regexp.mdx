@@ -1,0 +1,146 @@
+---
+title: "Strings, Dates and Regular Expressions"
+summary: "Template literals, Unicode pitfalls, formatting with Intl, the traps in Date, and practical regular expressions."
+level: fundamental
+section: fundamentals
+order: 30
+tags: [strings, template-literals, unicode, intl, date, regexp, formatting]
+requires: [javascript/values-and-types]
+related: [javascript/array-methods]
+versions: "Temporal has partial browser support, so check availability before using it."
+tested: "Node.js 24.17.0"
+verified: "2026-11-09"
+docs:
+  - label: "MDN: String"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String"
+  - label: "MDN: Intl"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl"
+  - label: "MDN: Date"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date"
+  - label: "MDN: Regular expressions"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions"
+---
+
+## What it is
+
+Strings are immutable sequences of UTF-16 code units. `Date` represents a single moment. `RegExp` matches patterns in text. `Intl` formats values for a locale.
+
+## Why it exists
+
+Almost every interface displays formatted text and dates. Getting them right needs tools that understand Unicode and locales.
+
+## How it works
+
+`length` counts UTF-16 code units, so an emoji can have length 2. A `Date` stores milliseconds since the Unix epoch in UTC and only uses a time zone when displaying or parsing.
+
+| Method | Purpose |
+| --- | --- |
+| `includes`, `startsWith`, `endsWith` | Search |
+| `slice(a, b)` | Substring |
+| `split`, `join` | Convert to and from arrays |
+| `trim`, `padStart`, `replaceAll` | Clean and format |
+| `matchAll(regex)` | All matches with groups |
+| `normalize()` | Unicode normal form |
+
+## Syntax and key APIs
+
+```javascript
+`Total: ${price.toFixed(2)}`
+new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(n)
+new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone: "UTC" }).format(d)
+/(?<year>\d{4})-(?<month>\d{2})/.exec(text).groups
+```
+
+## Simple example
+
+```js
+import assert from "node:assert";
+
+assert.equal("Ada".padStart(5, "."), "..Ada");
+assert.equal("a-b-c".replaceAll("-", "/"), "a/b/c");
+assert.equal("😀".length, 2);
+assert.equal([..."😀"].length, 1);
+
+const match = /(?<y>\d{4})-(?<m>\d{2})/.exec("on 2026-11");
+assert.equal(match.groups.m, "11");
+```
+
+## Industry examples
+
+### Format for the user's locale
+
+```js
+import assert from "node:assert";
+
+const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+assert.equal(money.format(1234.5), "$1,234.50");
+
+const date = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone: "UTC" });
+assert.equal(date.format(new Date("2026-01-02T00:00:00Z")), "2 Jan 2026");
+
+const plural = new Intl.PluralRules("en");
+assert.equal(plural.select(1), "one");
+```
+
+### Extract all matches
+
+```js
+import assert from "node:assert";
+
+const tags = [..."a #one b #two".matchAll(/#(\w+)/g)].map((m) => m[1]);
+assert.deepEqual(tags, ["one", "two"]);
+```
+
+### Store and exchange UTC
+
+```js
+import assert from "node:assert";
+
+const moment = new Date(Date.UTC(2026, 0, 2));
+assert.equal(moment.toISOString(), "2026-01-02T00:00:00.000Z");
+assert.equal(moment.getUTCMonth(), 0);
+```
+
+### Sort with a locale
+
+```js
+import assert from "node:assert";
+
+const collator = new Intl.Collator("en", { numeric: true });
+assert.deepEqual(["a10", "a2"].toSorted(collator.compare), ["a2", "a10"]);
+```
+
+## Patterns and best practices
+
+- Send dates as ISO 8601 strings in UTC.
+- Use `Intl` instead of formatting numbers by hand.
+- Use named groups in regular expressions.
+- Iterate strings with `for...of` to respect code points.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Simple dates | `Date` and `Intl` | Awkward arithmetic |
+| Complex calendars | `Temporal` or a date library | Availability or bundle size |
+| Simple search | String methods | Less powerful than regex |
+
+## Common mistakes
+
+**Zero-based months.** `new Date(2026, 1, 1)` is February.
+
+**Sharing a `/g` regex across calls.** It keeps `lastIndex` state.
+
+**Parsing non-ISO date strings.** Results vary by engine.
+
+**Treating `length` as a character count.** Emoji and combining marks break it.
+
+## Interview questions
+
+<Question q="Why can an emoji have length 2?">
+JavaScript strings are UTF-16, and characters outside the basic plane use two code units.
+</Question>
+
+<Question q="How should dates cross an API?">
+As UTC ISO 8601 strings, converted to the user's zone only for display.
+</Question>

@@ -1,0 +1,115 @@
+---
+title: "Data Quality Dimensions, Leakage and Reproducible Pipelines"
+summary: "Measure accuracy, completeness, consistency, timeliness, validity and uniqueness, spot leakage and make cleaning reproducible."
+level: intermediate
+section: cleaning
+order: 3
+tags: ["data quality","data leakage","reproducibility","data integrity"]
+requires: ["statistics/inconsistent-data-and-validation"]
+related: ["statistics/feature-selection-and-pipelines","data-engineering/data-validation-and-observability","mlops/reproducibility-and-experiment-tracking"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "scikit-learn: Common pitfalls"
+    url: "https://scikit-learn.org/stable/common_pitfalls.html"
+  - label: "scikit-learn: Pipelines"
+    url: "https://scikit-learn.org/stable/modules/compose.html"
+---
+
+## What it is
+
+Data quality measures fitness for purpose. **Data leakage** occurs when a model or analysis uses information unavailable at the moment of prediction. A **reproducible pipeline** yields the same output from the same inputs and code.
+
+## Why it exists
+
+Decisions inherit the errors of their data. Leakage produces models that look excellent in testing and fail in production.
+
+## How it works
+
+| Dimension | Question | Example check |
+| --- | --- | --- |
+| Accuracy | Does it match reality? | Reconcile with finance |
+| Completeness | Is anything missing? | Null rate, row counts |
+| Consistency | Does it agree across systems? | Revenue in CRM vs warehouse |
+| Timeliness | Is it fresh? | Latest load time |
+| Validity | Does it meet its rules? | Range, enum, format |
+| Uniqueness | Are keys unique? | Duplicate key count |
+| Integrity | Do references resolve? | Orphaned foreign keys |
+
+Types of leakage:
+
+- **Target leakage:** a feature created after the outcome, like `refund_issued` when predicting a refund.
+- **Train-test contamination:** preprocessing fitted on all data.
+- **Temporal leakage:** future values in features.
+- **Group leakage:** one customer appearing in both training and test.
+
+## Worked example
+
+A churn model scores an AUC of 0.99. Its most important feature is `days_since_last_login`, measured at data-extract time, after cancellation stopped logins. Rebuilding every feature "as of" a date before the prediction window brings AUC to 0.78. It's a less exciting number and a true one.
+
+## Python
+
+```python
+import numpy as np
+from sklearn.feature_selection import SelectKBest, f_classif
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import cross_val_score
+from sklearn.pipeline import make_pipeline
+
+rng = np.random.default_rng(0)
+X = rng.normal(size=(100, 2_000))
+y = rng.integers(0, 2, 100)
+
+# Wrong: features chosen with knowledge of every label.
+leaked_X = SelectKBest(f_classif, k=20).fit_transform(X, y)
+leaked = cross_val_score(LogisticRegression(), leaked_X, y, cv=5).mean()
+
+# Right: selection is refit inside each training fold.
+pipe = make_pipeline(SelectKBest(f_classif, k=20), LogisticRegression())
+honest = cross_val_score(pipe, X, y, cv=5).mean()
+
+assert leaked > 0.75
+assert 0.3 < honest < 0.7
+```
+
+The labels here are random, so honest accuracy is about 50%. Leakage alone creates the apparent skill.
+
+## SQL
+
+```sql
+SELECT count(*) AS orphan_orders
+FROM (VALUES (1, 10), (2, 11), (3, 99)) AS o(order_id, customer_id)
+LEFT JOIN (VALUES (10), (11)) AS c(customer_id) USING (customer_id)
+WHERE c.customer_id IS NULL;
+-- rows: [{"orphan_orders":1}]
+```
+
+## Excel or Power BI
+
+Power Query's applied steps are a reproducible pipeline, as long as sources are parameterized. Reconcile totals against an independent source with a visible check cell or a card visual.
+
+## In industry
+
+Teams track quality as service-level objectives, with alerts and named owners. Point-in-time correct joins are the main way of avoiding temporal leakage.
+
+## Assumptions and limitations
+
+Quality is contextual. Data fit for trend reporting may be unfit for invoicing. Scores across dimensions don't combine into one meaningful number.
+
+## Common mistakes
+
+- Scaling or selecting features before splitting.
+- Using a snapshot taken after the outcome.
+- Random splitting customers with many rows.
+- Treating a dashboard refresh as evidence of correct data.
+
+## Alternatives
+
+Feature stores with point-in-time joins enforce correctness at scale. Holding out the most recent period gives a realistic final check.
+
+## Interview questions
+
+<Question q="An AUC of 0.99 appears on your first try. What do you check?">Target leakage first: feature timing, identifiers, post-outcome fields, and split contamination.</Question>
+
+<Question q="What is point-in-time correctness?">Each training row uses only the feature values that would have been known at its prediction time.</Question>

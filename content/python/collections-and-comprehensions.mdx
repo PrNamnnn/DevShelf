@@ -1,0 +1,171 @@
+---
+title: "Collections, Comprehensions and Looping Tools"
+summary: "Choosing between list, dict, set and tuple, and the looping tools that replace index juggling: enumerate, zip, sorted and collections."
+level: fundamental
+section: data-structures
+order: 30
+tags: [list, dict, set, tuple, comprehensions, enumerate, zip, sorted, collections, counter, defaultdict]
+related: ["python/variables-and-memory", "python/generators", "python/pandas-essentials"]
+versions: "zip(strict=True) needs Python 3.10+."
+tested: "CPython 3.14.6"
+verified: "2026-11-09"
+docs:
+  - label: "Python tutorial: Data structures"
+    url: "https://docs.python.org/3/tutorial/datastructures.html"
+  - label: "Python library: Built-in functions"
+    url: "https://docs.python.org/3/library/functions.html"
+  - label: "Python library: collections"
+    url: "https://docs.python.org/3/library/collections.html"
+  - label: "Python HOWTO: Sorting"
+    url: "https://docs.python.org/3/howto/sorting.html"
+---
+
+## What it is
+
+Python's four core containers are `list`, `tuple`, `dict` and `set`. Comprehensions build them declaratively, and tools such as `enumerate` and `zip` remove manual index handling.
+
+## Why it exists
+
+Picking the right container often decides both clarity and speed. Membership in a set is an average constant-time hash lookup, while a list has to be scanned.
+
+## How it works
+
+Lists and tuples are ordered sequences stored as arrays of references. Dictionaries and sets are hash tables: a key's hash chooses where it's stored, so keys must be hashable. Dictionaries preserve insertion order. Sets have no defined order.
+
+| Type | Ordered | Mutable | Duplicates | Lookup by |
+| --- | --- | --- | --- | --- |
+| `list` | Yes | Yes | Yes | Position |
+| `tuple` | Yes | No | Yes | Position |
+| `dict` | Insertion order | Yes | Unique keys | Key |
+| `set` | No | Yes | No | Membership |
+
+## Syntax and key APIs
+
+```py
+[x * 2 for x in xs if x > 0]        # list comprehension
+{k: v for k, v in pairs}            # dict comprehension
+{word.lower() for word in words}    # set comprehension
+enumerate(xs, start=1)              # (index, item) pairs
+zip(a, b, strict=True)              # parallel iteration
+sorted(xs, key=len, reverse=True)   # new sorted list
+```
+
+`sorted` is guaranteed to be stable, so items that compare equal keep their original order. That lets you sort by several keys in successive passes.
+
+## Simple example
+
+```python
+names = ["Ada", "Linus"]
+scores = [95, 88]
+
+lines = [f"{i}. {n}: {s}" for i, (n, s) in enumerate(zip(names, scores), start=1)]
+
+assert lines == ["1. Ada: 95", "2. Linus: 88"]
+```
+
+## Industry examples
+
+### Count and group without key checks
+
+```python
+from collections import Counter, defaultdict
+
+events = ["login", "buy", "login", "logout"]
+counts = Counter(events)
+assert counts.most_common(1) == [("login", 2)]
+
+by_user = defaultdict(list)
+for user, action in [("a", "x"), ("b", "y"), ("a", "z")]:
+    by_user[user].append(action)
+assert by_user["a"] == ["x", "z"]
+```
+
+### Catch misaligned data early
+
+`zip` silently stops at the shortest input. With `strict=True`, a length mismatch becomes an error.
+
+```python
+try:
+    list(zip([1, 2], ["a"], strict=True))
+except ValueError as error:
+    assert "shorter" in str(error) or "longer" in str(error)
+else:
+    raise AssertionError("expected ValueError")
+```
+
+### Keep a sliding window
+
+`deque` with `maxlen` discards the oldest item automatically and is efficient at both ends.
+
+```python
+from collections import deque
+
+recent = deque(maxlen=2)
+for value in [1, 2, 3]:
+    recent.append(value)
+assert list(recent) == [2, 3]
+```
+
+### Sort by several keys
+
+```python
+users = [("bo", 30), ("al", 30), ("cy", 25)]
+ordered = sorted(users, key=lambda u: (-u[1], u[0]))
+assert ordered == [("al", 30), ("bo", 30), ("cy", 25)]
+```
+
+## Patterns and best practices
+
+- Use `dict.get(key, default)` for optional lookups and `setdefault` or `defaultdict` when building groups.
+- Use a set for repeated membership tests.
+- Keep comprehensions to one idea. Switch to a loop when conditions pile up.
+- Unpack instead of indexing: `for name, score in rows`.
+
+## Alternatives and trade-offs
+
+| Need | Choose | Trade-off |
+| --- | --- | --- |
+| Queue | `collections.deque` | Slow access in the middle |
+| Record with named fields | `dataclass` or `NamedTuple` | More declaration |
+| Lazy pipeline | Generator expression | Single use |
+| Large numeric arrays | NumPy | External dependency |
+
+## Common mistakes
+
+**Mutating a list while looping over it.** Elements get skipped. Build a new list instead.
+
+```python
+nums = [1, 2, 3, 4]
+nums = [n for n in nums if n % 2]
+assert nums == [1, 3]
+```
+
+**Using `pop(0)` as a queue.** Every remaining element shifts. Use `deque.popleft`.
+
+**Expecting `defaultdict.get` to create a value.** Only `__getitem__` triggers the factory.
+
+```python
+from collections import defaultdict
+
+d = defaultdict(list)
+assert d.get("x") is None
+assert "x" not in d
+d["x"]
+assert "x" in d
+```
+
+**Using an unhashable key.** A list can't be a dictionary key, but a tuple of hashable values can.
+
+## Interview questions
+
+<Question q="Why must dictionary keys be hashable?">
+The hash determines where the entry is stored and found. A key whose hash changed after insertion could no longer be found.
+</Question>
+
+<Question q="What does enumerate return?">
+An iterator of `(index, item)` pairs. It's lazy and accepts a `start` argument.
+</Question>
+
+<Question q="List comprehension or generator expression?">
+Use a list when you need the whole result or several passes. Use a generator when one pass is enough and the data may be large.
+</Question>

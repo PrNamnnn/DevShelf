@@ -1,0 +1,103 @@
+---
+title: "Stationarity, ACF, PACF and Differencing"
+summary: "Detect non-stationarity with ADF and KPSS, read autocorrelation plots and transform a series before modelling."
+level: advanced
+section: time-series
+order: 2
+tags: ["stationarity","ACF","PACF","differencing","ADF"]
+requires: ["statistics/time-series-fundamentals"]
+related: ["statistics/arima-and-sarima"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "statsmodels: adfuller"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.tsa.stattools.adfuller.html"
+  - label: "statsmodels: kpss"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.tsa.stattools.kpss.html"
+  - label: "statsmodels: acf"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.tsa.stattools.acf.html"
+---
+
+## What it is
+
+A series is **stationary** when its statistical properties don't change over time. **Autocorrelation (ACF)** is the correlation of a series with its own past. **Partial autocorrelation (PACF)** removes the effect of shorter lags. **Differencing** replaces a value with its change from a previous one.
+
+## Why it exists
+
+Many forecasting models assume stationarity, and non-stationary series produce spurious correlations. Two unrelated upward trends can show r > 0.9.
+
+## How it works
+
+| Test | H₀ | Reject means |
+| --- | --- | --- |
+| Augmented Dickey-Fuller | Has a unit root (non-stationary) | Evidence of stationarity |
+| KPSS | Stationary | Evidence of non-stationarity |
+
+They have opposite nulls, so using both is informative.
+
+Reading patterns:
+
+| Process | ACF | PACF |
+| --- | --- | --- |
+| AR(p) | Tails off | Cuts off after p |
+| MA(q) | Cuts off after q | Tails off |
+
+First differencing removes a linear trend. Seasonal differencing at lag s removes a stable seasonal pattern. Over-differencing adds noise.
+
+## Intuition and formula
+
+<Formula>ρₖ = Cov(yₜ, yₜ₋ₖ) / Var(yₜ)</Formula>
+
+<Formula>∇yₜ = yₜ − yₜ₋₁</Formula>
+
+## Worked example
+
+For the monthly series with a trend, ADF's p is 0.987 and KPSS's p is at most 0.01, so both indicate non-stationarity. After first differencing, ADF's p is effectively 0. Seasonal differencing at lag 12 gives ADF p = 0.0015.
+
+## Python
+
+```python
+import warnings
+import numpy as np
+import pandas as pd
+from statsmodels.tsa.stattools import acf, adfuller, kpss
+
+rng = np.random.default_rng(11)
+n = 120
+y = pd.Series(200 + 1.5 * np.arange(n) + 25 * np.sin(2 * np.pi * np.arange(n) / 12) + rng.normal(0, 6, n))
+
+assert adfuller(y)[1] > 0.9
+assert adfuller(y.diff().dropna())[1] < 0.001
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    assert kpss(y, nlags="auto")[1] <= 0.01
+
+seasonal_lag = acf(y.diff().dropna(), nlags=12)[12]
+assert seasonal_lag > 0.4
+```
+
+## In industry
+
+Stationarity checks are part of classical forecasting workflows. Machine-learning forecasters still use lag features and differencing.
+
+## Assumptions and limitations
+
+Formal tests have limited power on short series, and structural breaks can masquerade as non-stationarity.
+
+## Common mistakes
+
+- Reversing the conclusions of ADF and KPSS.
+- Differencing repeatedly until a test passes.
+- Correlating trending series.
+- Forgetting to undo differencing when reporting forecasts.
+
+## Alternatives
+
+Log transforms stabilize variance, and detrending by regression suits deterministic trends. State-space models can handle non-stationarity directly.
+
+## Interview questions
+
+<Question q="What do the ADF and KPSS null hypotheses say?">ADF: the series has a unit root. KPSS: the series is stationary.</Question>
+
+<Question q="How do you identify an AR process from plots?">The PACF cuts off after lag p while the ACF decays gradually.</Question>

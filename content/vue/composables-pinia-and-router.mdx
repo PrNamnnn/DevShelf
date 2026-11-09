@@ -1,0 +1,197 @@
+---
+title: "Composables, Pinia and Vue Router"
+summary: "Reusing stateful logic with composables, centralizing state with Pinia, and protecting routes with navigation guards."
+level: advanced
+section: reuse
+order: 10
+tags: [composables, pinia, vue-router, navigation-guards, lazy-loading, storeToRefs, toValue]
+related: [vue/component-communication, vue/rendering-and-performance]
+versions: "Vue 3.3+ for toValue. Vue Router 5: calling next in guards logs a deprecation warning. Pinia 4."
+tested: "Composable and store logic run on Vue 3.5.45 and Pinia 4.1.0 in Node.js. Router code wasn't run."
+verified: "2026-11-09"
+docs:
+  - label: "Vue: Composables"
+    url: "https://vuejs.org/guide/reusability/composables.html"
+  - label: "Pinia: Core concepts"
+    url: "https://pinia.vuejs.org/core-concepts/"
+  - label: "Vue Router: Getting started"
+    url: "https://router.vuejs.org/guide/"
+  - label: "Vue Router: Navigation guards"
+    url: "https://router.vuejs.org/guide/advanced/navigation-guards.html"
+  - label: "Vue Router: Lazy loading"
+    url: "https://router.vuejs.org/guide/advanced/lazy-loading.html"
+---
+
+## What it is
+
+A **composable** is a function using the Composition API to encapsulate reusable stateful logic. **Pinia** is Vue's official store. **Vue Router** maps URLs to components.
+
+## Why it exists
+
+Applications need logic that spans components, state that outlives them, and navigation that respects permissions.
+
+## How it works
+
+A composable named `useX` typically returns an object of refs, so callers can destructure it without losing reactivity. Each call creates independent state unless state is declared outside the function.
+
+A Pinia store is a singleton per Pinia instance. In a setup store, `ref` becomes state, `computed` becomes getters and functions become actions.
+
+A navigation runs guards in order: global `beforeEach`, per-route `beforeEnter`, then `beforeResolve` once components have resolved, and finally `afterEach`.
+
+<StepFlow
+  title="Navigating to a protected page"
+  nodes={["router.push", "beforeEach", "beforeEnter", "load lazy component", "beforeResolve", "commit URL and render", "afterEach"]}
+  steps={[
+    { active: [0], note: "Navigation to /admin starts." },
+    { active: [1], note: "Global guards run in creation order. Returning a location redirects, and returning false cancels.", state: { authed: "true" } },
+    { active: [2], note: "Per-route guards run only when entering that route." },
+    { active: [3], note: "The dynamic import fetches this route's chunk the first time it's visited." },
+    { active: [4], note: "Runs after in-component guards and async components have resolved." },
+    { active: [5, 6], note: "The URL updates and the page renders. afterEach can't affect the navigation." },
+  ]}
+/>
+
+## Syntax and key APIs
+
+```javascript
+export const useCart = defineStore("cart", () => {
+  const items = ref([]);
+  const total = computed(() => items.value.length);
+  function add(item) { items.value.push(item); }
+  return { items, total, add };
+});
+
+const store = useCart();
+const { items } = storeToRefs(store);
+const { add } = store;
+```
+
+In a setup store you must return all state properties.
+
+## Simple example
+
+```js
+import assert from "node:assert";
+import { ref, toValue, watchEffect } from "vue";
+
+function useDouble(input) {
+  const result = ref(0);
+  watchEffect(() => {
+    result.value = toValue(input) * 2;
+  }, { flush: "sync" });
+  return { result };
+}
+
+const source = ref(2);
+const { result } = useDouble(source);
+assert.equal(result.value, 4);
+
+source.value = 5;
+assert.equal(result.value, 10);
+```
+
+## Industry examples
+
+### A store used outside a component
+
+```js
+import assert from "node:assert";
+import { computed, ref } from "vue";
+import { createPinia, defineStore, setActivePinia, storeToRefs } from "pinia";
+
+setActivePinia(createPinia());
+
+const useCart = defineStore("cart", () => {
+  const items = ref([]);
+  const count = computed(() => items.value.length);
+  function add(item) {
+    items.value.push(item);
+  }
+  return { items, count, add };
+});
+
+const cart = useCart();
+const { count } = storeToRefs(cart);
+
+cart.add("book");
+assert.equal(count.value, 1);
+assert.equal(useCart(), cart);
+```
+
+### Guard routes and split bundles
+
+Vue Router's docs advise using dynamic imports for all routes. Guards return a value. The older `next` callback is deprecated.
+
+```javascript
+const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    { path: "/admin", component: () => import("./Admin.vue"), meta: { auth: true } },
+  ],
+});
+
+router.beforeEach((to) => {
+  if (to.meta.auth && !isLoggedIn()) {
+    return { path: "/login", query: { redirect: to.fullPath } };
+  }
+});
+```
+
+### A cleanup-aware composable
+
+```vue
+<script setup>
+import { onMounted, onUnmounted, ref } from "vue";
+
+function useMouse() {
+  const x = ref(0);
+  const update = (event) => (x.value = event.pageX);
+  onMounted(() => window.addEventListener("mousemove", update));
+  onUnmounted(() => window.removeEventListener("mousemove", update));
+  return { x };
+}
+
+const { x } = useMouse();
+</script>
+```
+
+## Patterns and best practices
+
+- Accept refs, getters or plain values with `toValue`.
+- Call composables synchronously in `setup`.
+- Use `storeToRefs` for state and getters. Actions can be destructured directly.
+- Don't return route objects from stores.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Reusable logic | Composable | No shared state by default |
+| App-wide state with tooling | Pinia | Library and conventions |
+| Subtree state | Provide and inject | Scoped but less visible |
+
+The Vue docs no longer recommend mixins for new code.
+
+## Common mistakes
+
+**Destructuring a store directly.** `const { name } = store` loses reactivity.
+
+**Forgetting to return state from a setup store.** Pinia can't manage what isn't returned.
+
+**Calling a composable in an async callback.** Lifecycle hooks then have no component to attach to.
+
+**Using parent `beforeEnter` for child changes.** It doesn't fire between sibling child routes.
+
+## Interview questions
+
+<Question q="What is a composable?">
+A function, conventionally named `useX`, that encapsulates reusable stateful logic with the Composition API.
+</Question>
+
+<Question q="Why do you need storeToRefs?">
+The store is reactive, so plain destructuring copies values. `storeToRefs` creates refs for state and getters.
+</Question>
+
+<Question q="How do you redirect in a guard?">
+Return a route location from the guard. Return `false` to cancel.
+</Question>

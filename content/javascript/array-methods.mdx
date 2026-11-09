@@ -1,0 +1,163 @@
+---
+title: "Array Methods in Practice"
+summary: "map, filter, reduce, find, some, every, flat and sort, what each returns, and which ones change the original array."
+level: intermediate
+section: objects
+order: 10
+tags: [arrays, map, filter, reduce, find, some, every, flatMap, sort, immutability]
+requires: [javascript/functions-destructuring-and-spread]
+related: [javascript/objects-arrays-and-collections, javascript/iterators-and-generators]
+versions: "findLast is Baseline since 2022, and at() since 2022."
+tested: "Node.js 24.17.0"
+verified: "2026-11-09"
+docs:
+  - label: "MDN: Array"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array"
+  - label: "MDN: Array.prototype.reduce"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/reduce"
+  - label: "MDN: Array.prototype.flatMap"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/flatMap"
+---
+
+## What it is
+
+Array methods express common loops as named operations. Each takes a callback and describes what you want, not how to iterate.
+
+## Why it exists
+
+`orders.filter(isPaid).map(total)` states its intent directly, and non-mutating methods make shared data safer.
+
+## How it works
+
+The callback receives `(element, index, array)`. Some methods return a new array, while others change the original.
+
+<TableViz
+  title="filter, then map, then reduce"
+  code={["orders", "  .filter((o) => o.paid)", "  .map((o) => o.total)", "  .reduce((sum, t) => sum + t, 0)"]}
+  tables={[{ name: "orders", columns: ["id", "paid", "total"], rows: [[1, "true", 10], [2, "false", 99], [3, "true", 5]] }]}
+  outputColumns={["stage", "value"]}
+  steps={[
+    { line: 0, note: "The original array is never changed by these methods.", output: [] },
+    { line: 1, highlight: { orders: [0, 2] }, note: "filter returns a new array holding the rows that pass the test.", output: [["filter", "[order 1, order 3]"]] },
+    { line: 2, highlight: { orders: [0, 2] }, note: "map returns a new array of the same length with transformed values.", output: [["filter", "[order 1, order 3]"], ["map", "[10, 5]"]] },
+    { line: 3, note: "reduce folds the array into one value, starting from 0.", output: [["filter", "[order 1, order 3]"], ["map", "[10, 5]"], ["reduce", "15"]] },
+  ]}
+/>
+
+## Syntax and key APIs
+
+| Method | Returns | Mutates? |
+| --- | --- | --- |
+| `map`, `filter`, `flatMap`, `slice` | New array | No |
+| `find`, `findLast`, `at` | Element or `undefined` | No |
+| `some`, `every`, `includes` | Boolean | No |
+| `reduce` | Accumulated value | No |
+| `forEach` | `undefined` | No |
+| `sort`, `reverse`, `splice`, `push`, `pop` | Various | **Yes** |
+| `toSorted`, `toReversed`, `toSpliced`, `with` | New array | No |
+
+## Simple example
+
+```js
+import assert from "node:assert";
+
+const nums = [1, 2, 3, 4];
+
+assert.deepEqual(nums.map((n) => n * 2), [2, 4, 6, 8]);
+assert.deepEqual(nums.filter((n) => n % 2), [1, 3]);
+assert.equal(nums.find((n) => n > 2), 3);
+assert.equal(nums.at(-1), 4);
+assert.equal(nums.some((n) => n > 3), true);
+assert.equal(nums.every((n) => n > 3), false);
+assert.equal(nums.reduce((sum, n) => sum + n, 0), 10);
+```
+
+## Industry examples
+
+### Index records by ID
+
+```js
+import assert from "node:assert";
+
+const users = [{ id: 1, n: "a" }, { id: 2, n: "b" }];
+const byId = Object.fromEntries(users.map((u) => [u.id, u]));
+
+assert.equal(byId[2].n, "b");
+```
+
+### Expand one-to-many
+
+```js
+import assert from "node:assert";
+
+const posts = [{ tags: ["a", "b"] }, { tags: ["c"] }];
+assert.deepEqual(posts.flatMap((p) => p.tags), ["a", "b", "c"]);
+assert.deepEqual([1, [2, [3]]].flat(Infinity), [1, 2, 3]);
+```
+
+### Update one item immutably
+
+```js
+import assert from "node:assert";
+
+const todos = [{ id: 1, done: false }, { id: 2, done: false }];
+const next = todos.map((t) => (t.id === 2 ? { ...t, done: true } : t));
+
+assert.equal(next[1].done, true);
+assert.equal(todos[1].done, false);
+assert.equal(next[0], todos[0]);
+```
+
+### Sort by several keys
+
+```js
+import assert from "node:assert";
+
+const rows = [{ a: 1, b: "y" }, { a: 2, b: "x" }, { a: 1, b: "x" }];
+const sorted = rows.toSorted((p, q) => p.a - q.a || p.b.localeCompare(q.b));
+
+assert.deepEqual(sorted.map((r) => r.b), ["x", "y", "x"]);
+```
+
+## Patterns and best practices
+
+- Always pass an initial value to `reduce`.
+- Choose `some` or `find` so that the loop stops early.
+- Use `toSorted` for shared arrays.
+- Reach for a simple `for...of` when a chain gets hard to read.
+
+## Alternatives and trade-offs
+
+| Need | Option | Trade-off |
+| --- | --- | --- |
+| Readable transforms | Chained methods | Allocates intermediates |
+| Hot loops | `for` | More code |
+| Lazy pipelines | Generators | Less familiar |
+| Membership | `Set` | Extra structure |
+
+## Common mistakes
+
+**`["1", "2"].map(parseInt)`.** The index becomes the radix.
+
+```js
+import assert from "node:assert";
+
+assert.deepEqual(["1", "2", "3"].map(parseInt), [1, NaN, NaN]);
+assert.deepEqual(["1", "2", "3"].map(Number), [1, 2, 3]);
+```
+
+**Using `map` for side effects.** Use `forEach` or `for...of`.
+
+**`reduce` without an initial value on an empty array.** It throws `TypeError`.
+
+**Expecting `sort` to be numeric by default.** It compares strings.
+
+## Interview questions
+
+<Question q="map versus forEach?">
+`map` returns a new array of results. `forEach` returns `undefined` and is for side effects.
+</Question>
+
+<Question q="Which array methods mutate?">
+`push`, `pop`, `shift`, `unshift`, `splice`, `sort`, `reverse`, `fill` and `copyWithin`.
+</Question>

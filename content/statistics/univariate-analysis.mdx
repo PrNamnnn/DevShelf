@@ -1,0 +1,98 @@
+---
+title: "Univariate Analysis"
+summary: "Describe one variable at a time with frequencies, centers, spread, histograms, box plots and density plots."
+level: fundamental
+section: analysis-types
+order: 1
+tags: ["univariate","histogram","frequency table","density"]
+requires: ["statistics/outliers-and-z-scores"]
+related: ["statistics/shape-skewness-kurtosis","statistics/distribution-and-relationship-charts","excel/pivot-tables-and-charts"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "pandas: value_counts"
+    url: "https://pandas.pydata.org/docs/reference/api/pandas.Series.value_counts.html"
+  - label: "NumPy: histogram"
+    url: "https://numpy.org/doc/stable/reference/generated/numpy.histogram.html"
+---
+
+## What it is
+
+Univariate analysis examines a single variable without relating it to any other. It answers: what values occur, how often, where's the center, how wide is the spread, and what's unusual?
+
+## Why it exists
+
+Every later analysis depends on knowing each column. A correlation is meaningless if half the values are a placeholder like 999, and a test choice depends on the shape of the distribution.
+
+## How it works
+
+The method depends on variable type.
+
+| Variable | Tables | Summaries | Charts |
+| --- | --- | --- | --- |
+| Categorical | Frequency and percent | Mode, number of categories | Sorted bar chart |
+| Numeric | Binned frequency | Mean, median, SD, IQR, skewness | Histogram, box plot, density |
+
+Histograms depend on bin width. Too few bins hide structure, and too many show noise. A density plot smooths the histogram but can suggest values where none exist, such as below zero. A box plot is compact and good for comparison but hides multiple peaks.
+
+## Worked example
+
+A `session_minutes` column has mean 12.4, median 6.1 and maximum 720. A histogram shows a long right tail, and a sharp spike at exactly 30 minutes reveals a session timeout in the tracking system, not user behaviour. The spike is the most useful finding, and it's visible only because someone looked at the distribution.
+
+## Python
+
+```python
+import numpy as np
+import pandas as pd
+
+plans = pd.Series(["basic", "pro", "basic", "basic", "team", "pro"])
+shares = plans.value_counts(normalize=True).round(2)
+assert shares["basic"] == 0.5
+
+rng = np.random.default_rng(1)
+minutes = rng.lognormal(mean=1.8, sigma=0.8, size=5_000)
+counts, edges = np.histogram(minutes, bins="fd")
+assert counts.sum() == 5_000
+assert np.mean(minutes) > np.median(minutes)
+```
+
+## SQL
+
+```sql
+SELECT plan, count(*) AS users,
+       round(100.0 * count(*) / sum(count(*)) OVER (), 1) AS pct
+FROM (VALUES ('basic'), ('pro'), ('basic'), ('basic')) AS t(plan)
+GROUP BY plan
+ORDER BY users DESC;
+-- rows: [{"plan":"basic","users":3,"pct":"75.0"},{"plan":"pro","users":1,"pct":"25.0"}]
+```
+
+## Excel or Power BI
+
+A Pivot Table with one field in Rows and the same field in Values gives a frequency table, and grouping numeric rows creates bins. Excel's Histogram and Box and Whisker charts are under Insert Statistic Chart. In Power BI, group a numeric column into bins and plot the count.
+
+## In industry
+
+Profiling every important column is the first step of most projects and of automated data-quality monitoring. Distribution shifts between time periods are also how many pipeline bugs get discovered.
+
+## Assumptions and limitations
+
+Univariate views can't show relationships. A variable may look well-behaved overall while being strange for one segment. Binning choices affect what you see.
+
+## Common mistakes
+
+- Looking only at `describe()` without a chart.
+- Using a pie chart for a variable with many categories.
+- Ignoring placeholder values such as 0, −1 or 999.
+- Comparing histograms that use different bin widths.
+
+## Alternatives
+
+An empirical CDF shows every percentile without binning. Automated profiling libraries produce quick overviews, which are useful as a start but don't replace thinking about what each column means.
+
+## Interview questions
+
+<Question q="What do you look for when first profiling a numeric column?">Missing values, placeholder values, valid range, shape, spikes at specific numbers, and extreme values.</Question>
+
+<Question q="Why can two histograms of the same data look different?">Bin width and starting point change the apparent shape, so try more than one setting before concluding anything.</Question>

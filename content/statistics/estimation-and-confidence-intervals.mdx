@@ -1,0 +1,102 @@
+---
+title: "Estimation and Confidence Intervals"
+summary: "Point and interval estimates, standard error, margin of error, and what a 95% confidence interval actually claims."
+level: intermediate
+section: inference
+order: 1
+tags: ["confidence interval","standard error","margin of error","estimation"]
+requires: ["statistics/sampling-distributions-clt"]
+related: ["statistics/hypothesis-testing-logic","statistics/storytelling-and-uncertainty","statistics/analyzing-ab-tests"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "statsmodels: proportion_confint"
+    url: "https://www.statsmodels.org/stable/generated/statsmodels.stats.proportion.proportion_confint.html"
+  - label: "SciPy: t"
+    url: "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.t.html"
+---
+
+## What it is
+
+A **point estimate** is one value used to estimate a parameter, such as a sample mean. An **interval estimate** gives a plausible range. A **confidence interval** comes from a procedure that, over many repeated samples, captures the true parameter at a stated rate.
+
+## Why it exists
+
+"Conversion is 12%" hides whether that came from 50 users or 50,000. An interval carries the uncertainty with the number, and it communicates both size and precision, which a p-value can't do.
+
+## How it works
+
+Most intervals have the same form: estimate ± critical value × standard error. The half-width is the **margin of error**. Greater confidence needs a wider interval, and a larger n gives a narrower one.
+
+A 95% CI doesn't mean there's a 95% probability that this particular interval contains the true value, in the frequentist framework. The parameter is fixed and the interval is random. The 95% describes the long-run success rate of the procedure. A Bayesian credible interval is the construct that makes the direct probability statement, given a prior.
+
+## Intuition and formula
+
+<Formula>x̄ ± t* · s / √n</Formula>
+
+<Formula>p̂ ± z* · √(p̂(1 − p̂) / n)</Formula>
+
+The Wald interval above is simple, but it behaves poorly when p is near 0 or 1 or n is small. The Wilson interval is the safer default.
+
+To plan a survey, solve for n: n = z²p(1 − p)/E². A ±3 point margin with p = 0.5 needs about 1,068 responses.
+
+## Worked example
+
+40 support tickets have a mean resolution time of 53.7 minutes and s = 6.21. The standard error is 0.982, and t* with 39 df is 2.023. The 95% CI runs from 51.7 to 55.7 minutes.
+
+For conversion, 120 of 1,000 visitors gives p̂ = 12%. The Wilson 95% interval is 10.1% to 14.2%.
+
+## Python
+
+```python
+import numpy as np
+from scipy import stats
+from statsmodels.stats.proportion import proportion_confint
+
+x = np.array([52, 48, 61, 55, 47, 59, 50, 63, 44, 58] * 4, dtype=float)
+se = x.std(ddof=1) / np.sqrt(len(x))
+low, high = stats.t.interval(0.95, len(x) - 1, loc=x.mean(), scale=se)
+assert (round(low, 1), round(high, 1)) == (51.7, 55.7)
+
+wl, wh = proportion_confint(120, 1_000, method="wilson")
+assert (round(wl, 3), round(wh, 3)) == (0.101, 0.142)
+```
+
+## SQL
+
+```sql
+SELECT round(avg(x) - 1.96 * stddev_samp(x) / sqrt(count(*)::numeric), 2) AS low,
+       round(avg(x) + 1.96 * stddev_samp(x) / sqrt(count(*)::numeric), 2) AS high
+FROM unnest(ARRAY[52, 48, 61, 55, 47, 59, 50, 63, 44, 58]::numeric[]) AS x;
+-- rows: [{"low":"49.69","high":"57.71"}]
+```
+
+## Excel or Power BI
+
+`CONFIDENCE.T(alpha, sd, n)` returns the margin of error. Add it to and subtract it from `AVERAGE`. Power BI line charts can display error bars, and a measure can compute the bounds.
+
+## In industry
+
+Experiment read-outs give an interval for the lift because it answers "could this be harmful?" and "is it big enough to matter?". Survey results quote margins of error.
+
+## Assumptions and limitations
+
+Intervals assume a representative sample and only express sampling error. They say nothing about bias or a flawed metric definition. A t-interval for skewed data with small n can have poor coverage.
+
+## Common mistakes
+
+- Saying "95% chance the true value is in this interval" without noting a Bayesian frame.
+- Using overlapping intervals as a formal test of a difference. Non-overlap implies a difference, but overlap doesn't prove there is none.
+- Using a Wald interval at 0 successes.
+- Ignoring clustering when computing the standard error.
+
+## Alternatives
+
+Bootstrap percentile intervals work for medians and ratios. Bayesian credible intervals give direct probability statements. The Clopper-Pearson interval is exact and conservative for proportions.
+
+## Interview questions
+
+<Question q="What does a 95% confidence interval mean?">If the sampling and calculation were repeated many times, about 95% of the intervals built this way would contain the true parameter.</Question>
+
+<Question q="How do you halve a margin of error?">Collect about four times the sample, because the standard error scales with 1/√n.</Question>

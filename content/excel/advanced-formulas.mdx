@@ -1,0 +1,81 @@
+---
+title: "Advanced Formulas: LET, LAMBDA and Array Patterns"
+summary: "Name intermediate results, build reusable functions and solve multi-condition problems with arrays."
+level: advanced
+section: analysis
+order: 3
+tags: ["LET","LAMBDA","array formulas","SUMPRODUCT","BYROW"]
+requires: ["excel/dynamic-arrays"]
+related: ["excel/performance-and-common-mistakes","python/recursion-and-functional-tools"]
+versions: "LET needs Microsoft 365 or Excel 2021+. LAMBDA and its helpers need Microsoft 365 or Excel 2024"
+tested: "LET, LAMBDA and helpers aren't available in Excel build 20527 on this machine, so they were checked against Microsoft documentation and not executed. SUMPRODUCT was evaluated"
+verified: "2026-11-09"
+docs:
+  - label: "Excel: LET function"
+    url: "https://support.microsoft.com/en-us/office/let-function-34842dd8-b92b-4d3f-b325-b8b8f9908999"
+  - label: "Excel: LAMBDA function"
+    url: "https://support.microsoft.com/en-us/office/lambda-function-bd212d27-1cd1-4321-a34a-ccbf254b8b67"
+  - label: "Excel: SUMPRODUCT function"
+    url: "https://support.microsoft.com/en-us/office/sumproduct-function-16753e75-9f68-4874-94ac-4d2145a2fd2e"
+---
+
+## What it is
+
+`LET` assigns names to values within a formula. `LAMBDA` creates custom reusable functions without VBA. Array patterns process entire ranges in one calculation.
+
+## Why it exists
+
+Long formulas repeat sub-expressions, are hard to read and recalculate unnecessarily. `LET` computes a repeated expression once.
+
+## How it works
+
+`LET` takes name-value pairs, up to 126, followed by a final calculation. `LAMBDA` takes parameter names and then a body. It returns `#CALC!` unless called, either directly or via a name defined in the Name Manager. Helpers such as `BYROW`, `BYCOL`, `MAP`, `REDUCE` and `SCAN` apply a `LAMBDA` over arrays.
+
+## Syntax and key APIs
+
+```text
+=LET(total,SUM(C2:C6),n,COUNT(C2:C6),total/n)     7.6
+=LAMBDA(a,b,a*b)(3,4)                              12
+=SUM(BYROW(C2:D3,LAMBDA(r,MAX(r))))
+=SUMPRODUCT((A2:A6="North")*C2:C6*D2:D6)
+```
+
+Define a reusable function in Name Manager, with the name `MARGIN`:
+
+```text
+=LAMBDA(revenue,cost,IF(revenue=0,0,(revenue-cost)/revenue))
+```
+
+Then call `=MARGIN(F2,G2)`.
+
+## Simple example
+
+The `SUMPRODUCT` above computes North revenue row by row without a helper column: 10 × 20 + 3 × 150 = 650.
+
+## Industry examples
+
+Modelling teams share `LAMBDA`-based business functions so that a commission or margin rule is defined once. `LET` makes long reporting formulas reviewable.
+
+## Patterns and best practices
+
+- Use descriptive names in `LET`.
+- Document named `LAMBDA`s with the Name Manager's comment field.
+- Prefer built-in functions when one exists.
+- Test edge cases, like empty input and zero denominators.
+
+## Alternatives and trade-offs
+
+VBA handles automation and side effects. Office Scripts suit Excel on the web. Very complex logic is usually clearer in Python or a database.
+
+## Common mistakes
+
+- Variable names that conflict with cell references, like `A1`.
+- Calling a `LAMBDA` without arguments.
+- Assuming all recipients have the required Excel version.
+- Very long nested formulas with no tests.
+
+## Interview questions
+
+<Question q="What does LET improve?">Readability, and performance by calculating a repeated expression once.</Question>
+
+<Question q="How do you reuse a LAMBDA across a workbook?">Define it with a name in the Name Manager.</Question>

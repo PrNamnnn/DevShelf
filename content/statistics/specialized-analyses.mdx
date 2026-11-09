@@ -1,0 +1,106 @@
+---
+title: "Survival, Geospatial, Text and Anomaly Analysis"
+summary: "When to use time-to-event, location, text, trend and anomaly methods, and what each can and can't tell you."
+level: intermediate
+section: analysis-types
+order: 8
+tags: ["survival analysis","Kaplan-Meier","geospatial","text analysis","anomaly detection"]
+requires: ["statistics/exploratory-data-analysis"]
+related: ["statistics/cohort-and-retention-curves","statistics/outliers-and-z-scores","statistics/datetime-text-and-interactions"]
+versions: "Python 3.14, NumPy 2.5, pandas 3.1, SciPy 1.18, statsmodels 0.15, scikit-learn 1.9"
+tested: "Python examples executed with the listed versions"
+verified: "2026-11-09"
+docs:
+  - label: "statsmodels: Survival"
+    url: "https://www.statsmodels.org/stable/duration.html"
+  - label: "scikit-learn: Outlier detection"
+    url: "https://scikit-learn.org/stable/modules/outlier_detection.html"
+---
+
+## What it is
+
+These methods handle data with special structure.
+
+| Analysis | Question | Common tools |
+| --- | --- | --- |
+| Survival | How long until an event? | Kaplan-Meier, Cox regression |
+| Trend | What's the direction over time? | Moving averages, decomposition |
+| Comparative | How do A and B differ? | Benchmarks, indexed series |
+| Geospatial | Does location matter? | Choropleth maps, spatial clustering |
+| Text | What are people saying? | Keyword counts, topics, classifiers |
+| Anomaly | What's abnormal? | Control limits, Isolation Forest |
+
+## Why it exists
+
+Naive methods fail on this kind of data. Averaging time-to-churn only for those who've churned ignores everyone still subscribed. Mapped totals often reveal only where people live.
+
+## How it works
+
+Survival analysis handles **censoring**: a customer still active at the end of the data has an unknown churn time, but we know it exceeds their tenure so far. The Kaplan-Meier estimator multiplies conditional survival probabilities at each event time.
+
+Geospatial analysis should normalize by population or customers. Text analysis turns words into numeric features or embeddings. Anomaly detection compares each value to an expected range, ideally accounting for seasonality.
+
+## Intuition and formula
+
+<Formula>Ŝ(t) = Π (1 − dᵢ / nᵢ) for all event times tᵢ ≤ t</Formula>
+
+Here dᵢ is the number of events at tᵢ, and nᵢ is the number still at risk just before it.
+
+## Worked example
+
+Eight customers have tenures of 2, 3, 3+, 5, 6+, 8, 8 and 9+ months, where a plus marks those still active. At month 2, one of eight churns: 0.875. At month 3, one of seven churns: 0.75. At month 5, one of five: 0.60. At month 8, two of three: 0.20. A naive average of churners' tenure ignores the three who stayed.
+
+## Python
+
+```python
+import numpy as np
+from statsmodels.duration.survfunc import SurvfuncRight
+
+time = np.array([2, 3, 3, 5, 6, 8, 8, 9])
+event = np.array([1, 1, 0, 1, 0, 1, 1, 0])
+
+km = SurvfuncRight(time, event)
+assert [round(v, 3) for v in km.surv_prob] == [0.875, 0.75, 0.6, 0.2]
+```
+
+## SQL
+
+```sql
+SELECT severity, count(*) AS tickets
+FROM (
+  SELECT CASE WHEN lower(body) LIKE '%refund%' THEN 'refund' ELSE 'other' END AS severity
+  FROM (VALUES ('Need a REFUND now'), ('App crashed'), ('refund not received')) AS t(body)
+) AS tagged
+GROUP BY severity
+ORDER BY severity;
+-- rows: [{"severity":"other","tickets":1},{"severity":"refund","tickets":2}]
+```
+
+## Excel or Power BI
+
+Excel's map chart suits simple regional views, and `FORECAST.ETS` provides seasonal expected values. Power BI has map visuals, and anomaly detection can be turned on for line charts.
+
+## In industry
+
+Subscription companies model time-to-churn, logistics firms cluster deliveries spatially, support teams tag tickets by topic, and infrastructure teams alert on anomalies in metrics.
+
+## Assumptions and limitations
+
+Kaplan-Meier assumes censoring is unrelated to the event's risk. Maps can mislead because large low-population areas dominate visually. Keyword methods miss negation and sarcasm. Anomaly systems trade missed incidents against false alerts.
+
+## Common mistakes
+
+- Dropping censored customers.
+- Plotting raw totals on a map.
+- Alerting on static thresholds for a seasonal metric.
+- Reading topic-model labels as settled fact.
+
+## Alternatives
+
+Cox proportional hazards models add covariates, and discrete-time logistic models are a simple substitute. Large language models can classify text accurately with careful evaluation.
+
+## Interview questions
+
+<Question q="What is censoring?">The event hadn't happened by the end of observation, so we only know a lower bound on the time to the event.</Question>
+
+<Question q="Why shouldn't you map raw sales totals?">The map mostly reflects population. Use a rate per customer or per capita.</Question>

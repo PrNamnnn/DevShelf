@@ -1,0 +1,189 @@
+---
+title: "Authentication: Sessions, JWTs and Passwords"
+summary: "Storing passwords safely, choosing between server sessions and tokens, and the JWT mistakes that lead to real breaches."
+level: advanced
+section: security
+order: 20
+tags: [authentication, sessions, jwt, passwords, scrypt, cookies, csrf, authorization]
+related: [express/validation-and-security, express/middleware-and-error-handling]
+versions: "express-session 1.19. OWASP guidance checked on 2026-11-09."
+tested: "scrypt and JWT examples run on Node.js 24.17.0 with jose. Session configuration wasn't run."
+verified: "2026-11-09"
+docs:
+  - label: "OWASP: Password storage cheat sheet"
+    url: "https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html"
+  - label: "OWASP: JSON Web Token cheat sheet"
+    url: "https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_Cheat_Sheet.html"
+  - label: "Express: session middleware"
+    url: "https://expressjs.com/en/resources/middleware/session.html"
+  - label: "Node.js: crypto"
+    url: "https://nodejs.org/api/crypto.html"
+---
+
+## What it is
+
+Authentication proves who a user is. Authorization decides what they may do. A **session** stores state on the server and gives the client an opaque ID. A **JWT** is a signed token carrying its claims.
+
+## Why it exists
+
+HTTP is stateless, so each request needs to prove identity. Mistakes here expose every account, so it's worth using proven patterns.
+
+## How it works
+
+<StepFlow
+  title="Session versus token on one request"
+  nodes={["login", "credential issued", "browser stores it", "next request", "server verifies", "user loaded"]}
+  steps={[
+    { active: [0], note: "The server compares the password against a slow, salted hash." },
+    { active: [1], note: "Session: a random ID, with data held in a server store. JWT: claims signed by the server.", state: { session: "random id", jwt: "signed claims" } },
+    { active: [2], note: "An httpOnly cookie keeps the credential away from page scripts." },
+    { active: [3], note: "The browser attaches the cookie automatically, so CSRF has to be considered." },
+    { active: [4], note: "Session: look up the ID, and delete it to revoke immediately. JWT: verify the signature and claims with no lookup, but revoking takes extra work.", state: { revocable: "session yes, JWT no" } },
+    { active: [5], note: "Authorization is checked for the specific resource." },
+  ]}
+/>
+
+| Password algorithm | OWASP minimum |
+| --- | --- |
+| Argon2id, preferred | m=19 MiB, t=2, p=1 |
+| scrypt | N=2^17, r=8, p=1 |
+| bcrypt, legacy | Work factor 10, 72-byte limit |
+| PBKDF2, for FIPS | 600,000 iterations, SHA-256 |
+
+Fast hashes such as SHA-256 aren't suitable for passwords.
+
+## Syntax and key APIs
+
+```javascript
+app.use(session({
+  name: "sessionId",
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  store: redisStore,
+  cookie: { httpOnly: true, secure: true, sameSite: "lax", maxAge: 3600000 },
+}));
+```
+
+The default `MemoryStore` isn't for production. It leaks memory and doesn't scale past one process.
+
+## Simple example
+
+```js
+import assert from "node:assert";
+import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
+
+const derive = promisify(scrypt);
+const options = { N: 2 ** 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 };
+
+async function hashPassword(password) {
+  const salt = randomBytes(16);
+  const key = await derive(password, salt, 32, options);
+  return `${salt.toString("hex")}:${key.toString("hex")}`;
+}
+
+async function verifyPassword(password, stored) {
+  const [saltHex, keyHex] = stored.split(":");
+  const expected = Buffer.from(keyHex, "hex");
+  const actual = await derive(password, Buffer.from(saltHex, "hex"), 32, options);
+  return timingSafeEqual(actual, expected);
+}
+
+const stored = await hashPassword("correct horse");
+assert.equal(await verifyPassword("correct horse", stored), true);
+assert.equal(await verifyPassword("wrong", stored), false);
+```
+
+## Industry examples
+
+### Verify JWTs strictly
+
+Pin the algorithm and check issuer, audience and expiry. Never take key material from the token.
+
+```js
+import assert from "node:assert";
+import { SignJWT, jwtVerify } from "jose";
+
+const secret = new TextEncoder().encode("a-demo-secret-that-is-long-enough-32b");
+const rules = { algorithms: ["HS256"], issuer: "api", audience: "web" };
+
+const token = await new SignJWT({ role: "user" })
+  .setProtectedHeader({ alg: "HS256" })
+  .setSubject("42")
+  .setIssuer("api")
+  .setAudience("web")
+  .setExpirationTime("15m")
+  .sign(secret);
+
+const { payload } = await jwtVerify(token, secret, rules);
+assert.equal(payload.sub, "42");
+
+await assert.rejects(jwtVerify(token, secret, { ...rules, audience: "mobile" }));
+
+const expired = await new SignJWT({})
+  .setProtectedHeader({ alg: "HS256" })
+  .setIssuer("api")
+  .setAudience("web")
+  .setExpirationTime(Math.floor(Date.now() / 1000) - 60)
+  .sign(secret);
+
+await assert.rejects(jwtVerify(expired, secret, rules), { code: "ERR_JWT_EXPIRED" });
+```
+
+### Enforce ownership
+
+Checking the login isn't enough. Scope the lookup to the user.
+
+```javascript
+app.get("/orders/:id", requireAuth, async (req, res) => {
+  const order = await db.orders.findOne({ id: req.params.id, userId: req.user.id });
+  if (!order) throw new HttpError(404, "Not found");
+  res.json(order);
+});
+```
+
+## Patterns and best practices
+
+- Prefer server sessions for first-party web apps.
+- Keep access tokens short-lived.
+- Regenerate the session ID at login.
+- Return the same response for "no such user" and "bad password".
+- Use a secret with at least 32 bytes of entropy for sessions.
+
+## Alternatives and trade-offs
+
+| Option | Strength | Weakness |
+| --- | --- | --- |
+| Server session | Immediate revocation | Needs a shared store |
+| JWT | Stateless verification across services | Hard to revoke, larger |
+| OAuth or OIDC provider | Delegates login security | Integration complexity |
+| Passkeys | Phishing-resistant | Recovery flows to design |
+
+OWASP notes that JWTs used for sessions need an invalidation solution, and a deny list undermines their statelessness.
+
+## Common mistakes
+
+**Accepting `alg: none` or mixing algorithms.** Always pin expected algorithms during verification.
+
+**Putting secrets in a JWT payload.** Signed tokens aren't confidential.
+
+**Trusting `jku`, `x5u` or `jwk` from a token's header.** An attacker controls these.
+
+**Using a password-like HMAC secret.** It needs at least 160 bits of entropy.
+
+**Using `csurf`.** It's archived. Use a maintained CSRF defense and `SameSite` cookies.
+
+## Interview questions
+
+<Question q="Session or JWT?">
+Sessions are simpler and revocable, and fit browser applications. JWTs suit stateless verification across services, with short lifetimes.
+</Question>
+
+<Question q="Why not store passwords with SHA-256?">
+It's fast, which makes offline guessing cheap. Password hashes must be deliberately slow, memory-hard and salted.
+</Question>
+
+<Question q="What is the difference between authentication and authorization?">
+Authentication establishes identity. Authorization decides what that identity may access.
+</Question>
